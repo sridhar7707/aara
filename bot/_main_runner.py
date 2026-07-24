@@ -83,7 +83,7 @@ def _check_ml_versions() -> None:
         logger.debug(f"ML version check skipped: {_ve}")
 
 
-def end_of_day_summary() -> None:
+def end_of_day_summary(client: AlpacaClient | None = None) -> None:
     today_str = date.today().isoformat()
     _eod_sentinel     = Path(f"data/.eod_sent_{today_str}")
     _started_sentinel = Path(f"data/.trading_started_{today_str}")
@@ -100,17 +100,18 @@ def end_of_day_summary() -> None:
 
     import zoneinfo
     con    = init_db()
-    client = AlpacaClient()
+    if client is None:
+        client = AlpacaClient()
     today  = today_str
 
     trades_count = con.execute(
         "SELECT COUNT(*) FROM trades WHERE timestamp LIKE ?", (today + "%",)
     ).fetchone()[0]
-    daily_start, day_trade_dates, weekly_start, _, __, ___ = _load_risk_state(con)
-    day_trade_count = day_trade_dates.count(today)
+    rs = _load_risk_state(con)
+    day_trade_count = rs.day_trade_dates.count(today)
     portfolio_value, available_cash = client.get_account_summary()
     positions = client.get_positions()
-    day_return = ((portfolio_value - daily_start) / daily_start) if daily_start else 0.0
+    day_return = ((portfolio_value - rs.daily_start) / rs.daily_start) if rs.daily_start else 0.0
 
     vs_spy = 0.0
     try:
@@ -215,7 +216,7 @@ def end_of_day_summary() -> None:
             week_sells  = [r for r in week_rows if r[0].startswith("SELL")]
             week_wins   = [r for r in week_sells if r[1] > 0]
             week_wr     = len(week_wins) / len(week_sells) if week_sells else 0.0
-            week_return = ((portfolio_value - weekly_start) / weekly_start) if weekly_start else 0.0
+            week_return = ((portfolio_value - rs.weekly_start) / rs.weekly_start) if rs.weekly_start else 0.0
             pv_week     = [r[2] for r in week_rows if r[2] > 0]
             week_dd     = 0.0
             if pv_week:

@@ -155,8 +155,14 @@ ENTRY_REGIMES         = set(os.getenv("ENTRY_REGIMES", "TRENDING_UP,HIGH_VOLATIL
 MIN_VOLUME_RATIO      = float(os.getenv("MIN_VOLUME_RATIO", 0.3))
 
 # --- PDT rule ---
-PDT_MAX_DAY_TRADES = 3
-PDT_WINDOW_DAYS = 5
+PDT_MAX_DAY_TRADES = int(os.getenv("PDT_MAX_DAY_TRADES", 3))
+PDT_WINDOW_DAYS    = int(os.getenv("PDT_WINDOW_DAYS",    5))
+
+# --- Entry/exit business-logic constants ---
+GAP_DOWN_FLOOR_PCT    = float(os.getenv("GAP_DOWN_FLOOR_PCT",    0.10))  # hard-floor loss for gap-down exit
+ATR_TP_MULTIPLIER     = float(os.getenv("ATR_TP_MULTIPLIER",     4.0))   # ATR multiple for take-profit target
+TRAILING_STOP_ARM_PCT = float(os.getenv("TRAILING_STOP_ARM_PCT", 0.03))  # HWM must exceed entry × (1 + this)
+CASH_USE_FRACTION     = float(os.getenv("CASH_USE_FRACTION",     0.95))  # max fraction of cash used per buy
 
 # --- Paths ---
 MODEL_SAVE_PATH = "models/saved/ppo_trading_bot"

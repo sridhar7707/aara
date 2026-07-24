@@ -174,13 +174,6 @@ def test_daily_loss_warning_outside_zone(risk):
     assert risk.check_daily_loss_warning(current) is False
 
 
-# --- approve_sell ---
-
-def test_approve_sell_always_returns_true(risk):
-    # Sells must never be blocked — exits must always be possible.
-    assert risk.approve_sell("AAPL", -0.10, 9_000) is True
-    assert risk.approve_sell("AAPL",  0.05, 10_500) is True
-
 
 # --- update_portfolio_high ---
 

@@ -1,6 +1,7 @@
 """Shared data cache, DB sync, price fetch, and time utilities."""
 from __future__ import annotations
 
+import copy
 import datetime
 import os
 import shutil
@@ -205,7 +206,7 @@ def _refresh_cache() -> dict:
     if now - _last_hf_sync >= _HF_SYNC_TTL:
         _sync_db()
         _last_hf_sync = now
-    result = dict(_EMPTY_CACHE)
+    result = copy.deepcopy(_EMPTY_CACHE)
     if not os.path.exists(DB_PATH):
         return result
     try:

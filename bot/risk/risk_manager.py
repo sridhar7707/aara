@@ -1,6 +1,7 @@
 from __future__ import annotations
-from datetime import date, timedelta
 from collections import deque
+from datetime import date, timedelta
+from typing import Callable
 from loguru import logger
 from config import (
     MAX_POSITION_PCT, STOP_LOSS_PCT,
@@ -13,14 +14,9 @@ from config import (
 )
 
 
-def _live(config_val: float, key: str) -> float:
-    """Return the live setting from user_settings DB, falling back to config_val."""
-    try:
-        from database.user_settings import get_setting
-        return float(get_setting(key, default=str(config_val)))
-    except Exception as _e:
-        logger.warning(f"_live({key!r}): invalid DB value — {_e}; using config default {config_val}")
-        return config_val
+def _db_settings_fn(key: str, default: str) -> str:
+    from database.user_settings import get_setting
+    return str(get_setting(key, default=default))
 
 
 def _business_days_between(d1: date, d2: date) -> int:
@@ -45,7 +41,9 @@ class RiskManager:
                  weekly_start_value: float | None = None,
                  daily_warning_sent: bool = False,
                  weekly_halt_alerted: bool = False,
-                 portfolio_high: float | None = None):
+                 portfolio_high: float | None = None,
+                 settings_fn: Callable[[str, str], str] | None = None):
+        self._settings_fn: Callable[[str, str], str] = settings_fn or _db_settings_fn
         self.day_trade_log: deque[date] = deque()
         if day_trade_dates:
             for ds in day_trade_dates:
@@ -85,6 +83,14 @@ class RiskManager:
             f"current=${portfolio_value:.2f}, "
             f"day_trades_used={len(self.day_trade_log)}/{PDT_MAX_DAY_TRADES}"
         )
+
+    def _live(self, config_val: float, key: str) -> float:
+        """Return the live setting from user_settings DB, falling back to config_val."""
+        try:
+            return float(self._settings_fn(key, str(config_val)))
+        except Exception as _e:
+            logger.warning(f"_live({key!r}): invalid DB value — {_e}; using config default {config_val}")
+            return config_val
 
     # ── Daily loss gate ────────────────────────────────────────────────────────
     def check_daily_loss(self, current_value: float) -> bool:
@@ -126,7 +132,7 @@ class RiskManager:
         if self.portfolio_high is None or self.portfolio_high == 0.0:
             return True
         dd = (self.portfolio_high - current_value) / self.portfolio_high
-        if dd >= _live(PORTFOLIO_DRAWDOWN_LIMIT_PCT, "max_drawdown_pct"):
+        if dd >= self._live(PORTFOLIO_DRAWDOWN_LIMIT_PCT, "max_drawdown_pct"):
             logger.warning(
                 f"Portfolio drawdown limit: {dd:.1%} below all-time peak ${self.portfolio_high:.2f} "
                 f"— blocking new buys until recovery."
@@ -161,7 +167,7 @@ class RiskManager:
                 )
                 return True
         elif pnl_pct is not None:
-            live_stop = _live(STOP_LOSS_PCT, "stop_loss_pct")
+            live_stop = self._live(STOP_LOSS_PCT, "stop_loss_pct")
             if pnl_pct <= -live_stop:
                 # Flat-percentage fallback (no ATR available)
                 logger.warning(
@@ -257,7 +263,7 @@ class RiskManager:
         if not self.check_portfolio_drawdown(current_value):
             return False
         sizing_base = managed_capital if managed_capital is not None else portfolio_value
-        max_notional = sizing_base * _live(MAX_POSITION_PCT, "max_position_pct")
+        max_notional = sizing_base * self._live(MAX_POSITION_PCT, "max_position_pct")
         if notional > max_notional:
             src = "managed_capital" if managed_capital is not None else "portfolio_value"
             logger.warning(
@@ -272,6 +278,3 @@ class RiskManager:
             return False
         return True
 
-    def approve_sell(self, symbol: str, pnl_pct: float, current_value: float) -> bool:
-        # Sells are never blocked — exits must always be possible regardless of loss limits.
-        return True

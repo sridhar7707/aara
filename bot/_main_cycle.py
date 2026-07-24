@@ -5,17 +5,22 @@ import json
 import math
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 
 import pandas as pd
 import yfinance as yf
 from loguru import logger
 
 import bot.monitor.telegram_bot as tg
+from bot.execution.alpaca_client import AlpacaClient
+from bot.risk.risk_manager import RiskManager
 from bot.strategy.ensemble import WEIGHTS, BUY_FRACTION
 from bot.strategy.features import compute_features
 from config import (
     ATR_MAX_STOP_PCT, ATR_MIN_STOP_PCT, ATR_STOP_MULTIPLIER,
+    CASH_USE_FRACTION,
     ENTRY_REGIMES, KELLY_FRACTION_MAX,
     MAX_POSITION_DRIFT_PCT, MAX_POSITION_PCT,
     MAX_RISK_PER_TRADE_PCT, MAX_SECTOR_EXPOSURE_PCT,
@@ -29,6 +34,7 @@ from bot.capital.pool import CapitalPool, update_on_buy as _pool_buy
 from bot.decision.daily_actions import record as _rec_action
 from bot._main_market import _log_buy_skip
 from bot._main_positions import (
+    BarData,
     _TP_FLOOR, _atr_tp_pct,
     _handle_exits, _is_wash_sale_risk,
     _kelly_fraction, _passes_correlation_gate,
@@ -36,7 +42,7 @@ from bot._main_positions import (
 )
 
 
-def _fetch_symbol(symbol: str, client, yf_batch: dict) -> tuple[str, pd.DataFrame, pd.DataFrame]:
+def _fetch_symbol(symbol: str, client: AlpacaClient, yf_batch: dict) -> tuple[str, pd.DataFrame, pd.DataFrame]:
     """Return (symbol, bars_5m, bars_daily).
 
     bars_5m  — intraday 5-min bars; empty when not enough today yet (< 60 bars) or
@@ -141,19 +147,66 @@ def compute_tradeable_capital(con: sqlite3.Connection, portfolio_value: float) -
     return tradeable
 
 
+@dataclass
+class EntryContext:
+    """All per-symbol signal and market data needed by _handle_entry."""
+    positions: dict
+    buy_order_syms: set
+    earnings_map: dict
+    bars_map: dict
+    sig_bars: pd.DataFrame
+    latest: Any
+    current_price: float
+    current_atr: float
+    regime_name: str
+    portfolio_value: float
+    available_cash: float
+    xgb_prob: float
+    lstm_prob: float
+    macro_score: float
+    macro_cap: float
+    macro_halt: bool
+    spy_5bar_return: float | None
+    vs_spy_today: float
+    sentiments: dict
+    ensemble_size: float
+    xgb: Any
+    stop_fired_today: set
+    volume_ratio: float
+    tradeable_capital: float
+    pool: CapitalPool | None = None
+
+
 def _handle_entry(
-    con: sqlite3.Connection, client, risk, symbol: str, positions: dict,
-    buy_order_syms: set, earnings_map: dict, bars_map: dict,
-    sig_bars: pd.DataFrame, latest, current_price: float, current_atr: float,
-    regime_name: str, portfolio_value: float, available_cash: float,
-    xgb_prob: float, lstm_prob: float, sentiment: float, macro_score: float,
-    macro_cap: float, macro_halt: bool, spy_5bar_return: float | None,
-    vs_spy_today: float, sentiments: dict, action: int, action_str: str,
-    ensemble_size: float, pdt_exempt: bool, xgb, stop_fired_today: set,
-    volume_ratio: float, tradeable_capital: float,
-    pool: CapitalPool | None = None,
+    con: sqlite3.Connection, client: AlpacaClient, risk: RiskManager,
+    symbol: str, ctx: EntryContext,
 ) -> float:
     """Process entry gates and buy execution. Returns updated available_cash."""
+    positions         = ctx.positions
+    buy_order_syms    = ctx.buy_order_syms
+    earnings_map      = ctx.earnings_map
+    bars_map          = ctx.bars_map
+    sig_bars          = ctx.sig_bars
+    latest            = ctx.latest
+    current_price     = ctx.current_price
+    current_atr       = ctx.current_atr
+    regime_name       = ctx.regime_name
+    portfolio_value   = ctx.portfolio_value
+    available_cash    = ctx.available_cash
+    xgb_prob          = ctx.xgb_prob
+    lstm_prob         = ctx.lstm_prob
+    macro_score       = ctx.macro_score
+    macro_cap         = ctx.macro_cap
+    macro_halt        = ctx.macro_halt
+    spy_5bar_return   = ctx.spy_5bar_return
+    vs_spy_today      = ctx.vs_spy_today
+    sentiments        = ctx.sentiments
+    ensemble_size     = ctx.ensemble_size
+    xgb               = ctx.xgb
+    stop_fired_today  = ctx.stop_fired_today
+    volume_ratio      = ctx.volume_ratio
+    tradeable_capital = ctx.tradeable_capital
+    pool              = ctx.pool
     # Gate 0 — VIX emergency halt: no new positions when VIX >= 40
     if macro_halt:
         _log_buy_skip(symbol, "VIX emergency halt")
@@ -211,7 +264,7 @@ def _handle_entry(
     # Gate 7.9 — MACD confirmation (daily bars only — intraday MACD oscillates too fast)
     # Disabled by default (MACD_CONFIRMATION_MIN=-inf). Set to 0.0 to require positive crossover.
     if not math.isinf(MACD_CONFIRMATION_MIN):
-        _, _daily_bars = bars_map.get(symbol, (pd.DataFrame(), pd.DataFrame()))
+        _daily_bars = bars_map.get(symbol, BarData(pd.DataFrame(), pd.DataFrame())).bars_daily
         if not _daily_bars.empty:
             _macd_diff = float(_daily_bars.iloc[-1].get("macd_diff", 0.0))
             if _macd_diff <= MACD_CONFIRMATION_MIN:
@@ -288,7 +341,7 @@ def _handle_entry(
 
     # Gate 8e — Cash reserve: always keep MIN_CASH_RESERVE_PCT uninvested
     _min_reserve = portfolio_value * MIN_CASH_RESERVE_PCT
-    if notional > available_cash * 0.95:
+    if notional > available_cash * CASH_USE_FRACTION:
         logger.warning(
             f"BUY {symbol} skipped — need ${notional:.2f}, "
             f"running cash ${available_cash:.2f}"
@@ -383,7 +436,7 @@ def _handle_entry(
     return available_cash
 
 
-def prefetch_bars(active_symbols: list[str], client) -> dict[str, tuple]:
+def prefetch_bars(active_symbols: list[str], client: AlpacaClient) -> dict[str, BarData]:
     """Batch-fetch daily bars (yfinance) + 5-min bars (Alpaca) for all symbols.
 
     Returns bars_map: {symbol: (bars_5m_df, bars_daily_df)}.
@@ -430,7 +483,7 @@ def prefetch_bars(active_symbols: list[str], client) -> dict[str, tuple]:
         futures = [pool.submit(_fetch_symbol, sym, client, _yf_batch) for sym in active_symbols]
         fetched = [f.result() for f in futures]
 
-    bars_map = {sym: (b5, bd) for sym, b5, bd in fetched}
+    bars_map = {sym: BarData(bars_5m=b5, bars_daily=bd) for sym, b5, bd in fetched}
     _n_5m = sum(1 for _, b5, _ in fetched if not b5.empty)
     if _n_5m < len(active_symbols) * 0.5:
         _tg.send(

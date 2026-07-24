@@ -3,13 +3,18 @@ from __future__ import annotations
 
 import math
 import sqlite3
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from typing import NamedTuple
 
+import pandas as pd
 from loguru import logger
 
+from bot.execution.alpaca_client import AlpacaClient
 from bot.risk.risk_manager import RiskManager, _business_days_between
 import bot.monitor.telegram_bot as tg
 from config import (
+    ATR_TP_MULTIPLIER, GAP_DOWN_FLOOR_PCT, TRAILING_STOP_ARM_PCT,
     KELLY_LOOKBACK_TRADES, KELLY_FRACTION_MAX, CORRELATION_THRESHOLD,
     MAX_HOLD_DAYS, PDT_MAX_DAY_TRADES, PDT_WINDOW_DAYS,
     MAX_POSITION_DRIFT_PCT, MAX_POSITION_PCT,
@@ -18,6 +23,19 @@ from bot._main_db import log_trade, _save_risk_state
 from bot.decision.daily_actions import record as _rec_action
 from bot.capital.pool import CapitalPool, update_on_sell as _pool_sell
 from bot.strategy.ensemble import BUY_FRACTION
+
+
+class BarData(NamedTuple):
+    bars_5m: pd.DataFrame
+    bars_daily: pd.DataFrame
+
+
+@dataclass
+class PositionState:
+    entry_price: float
+    high_water_mark: float
+    atr_at_entry: float | None
+    opened_at: str | None
 
 
 def _opened_today(con: sqlite3.Connection, symbol: str) -> bool:
@@ -29,13 +47,14 @@ def _opened_today(con: sqlite3.Connection, symbol: str) -> bool:
     return row is not None
 
 
-def _load_position_state(con: sqlite3.Connection, symbol: str) -> dict | None:
+def _load_position_state(con: sqlite3.Connection, symbol: str) -> PositionState | None:
     row = con.execute(
         "SELECT entry_price, high_water_mark, atr_at_entry, opened_at FROM position_state WHERE symbol=?",
         (symbol,),
     ).fetchone()
-    return ({"entry_price": row[0], "high_water_mark": row[1],
-              "atr_at_entry": row[2], "opened_at": row[3]} if row else None)
+    if row is None:
+        return None
+    return PositionState(entry_price=row[0], high_water_mark=row[1], atr_at_entry=row[2], opened_at=row[3])
 
 
 def _upsert_position_state(con: sqlite3.Connection, symbol: str, entry_price: float,
@@ -80,15 +99,16 @@ def _kelly_fraction(con: sqlite3.Connection, symbol: str, default: float = BUY_F
     return half_k
 
 
-def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict) -> bool:
+def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, BarData]) -> bool:
     """Block buy if any held position has > CORRELATION_THRESHOLD daily-return correlation.
-    bars_map values are (bars_5m, bars_daily) tuples; daily bars are used for correlation
-    since they have consistent history regardless of time-of-day.
+    Daily bars from BarData are used for correlation (consistent history regardless of time-of-day).
     """
-    def _resolve(e):
-        if isinstance(e, tuple):
-            return e[1] if not e[1].empty else (e[0] if not e[0].empty else None)
-        return e if e is not None and not e.empty else None
+    def _resolve(bd: BarData | None) -> pd.DataFrame | None:
+        if bd is None:
+            return None
+        if not bd.bars_daily.empty:
+            return bd.bars_daily
+        return bd.bars_5m if not bd.bars_5m.empty else None
 
     entry = bars_map.get(symbol)
     bars_sym = _resolve(entry)
@@ -115,12 +135,12 @@ def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict) -> bo
     return True
 
 
-def _check_time_exit(pos_state: dict | None, pnl_pct: float) -> bool:
+def _check_time_exit(pos_state: PositionState | None, pnl_pct: float) -> bool:
     """Return True if position has been held too long with insufficient gain."""
-    if not pos_state or not pos_state.get("opened_at"):
+    if not pos_state or not pos_state.opened_at:
         return False
     try:
-        opened  = datetime.fromisoformat(pos_state["opened_at"]).replace(tzinfo=timezone.utc)
+        opened  = datetime.fromisoformat(pos_state.opened_at).replace(tzinfo=timezone.utc)
         days    = (datetime.now(timezone.utc) - opened).days
         if days >= MAX_HOLD_DAYS and pnl_pct < 0.01:
             logger.info(
@@ -231,7 +251,7 @@ def _reconcile_positions(con: sqlite3.Connection, alpaca_positions: dict,
             _upsert_position_state(con, sym, entry, entry, 0.0)
 
 
-def _trim_position(con: sqlite3.Connection, client, symbol: str, trim_qty: float,
+def _trim_position(con: sqlite3.Connection, client: AlpacaClient, symbol: str, trim_qty: float,
                    current_price: float, regime_name: str, portfolio_value: float,
                    pnl_pct: float, entry_price: float,
                    pool: CapitalPool | None = None) -> bool:
@@ -259,7 +279,7 @@ def _trim_position(con: sqlite3.Connection, client, symbol: str, trim_qty: float
     return False
 
 
-def _signal_sell(con: sqlite3.Connection, client, symbol: str, pos_qty: float,
+def _signal_sell(con: sqlite3.Connection, client: AlpacaClient, symbol: str, pos_qty: float,
                  current_price: float, regime_name: str, portfolio_value: float,
                  is_from_stop: bool = False, reason: str = "stop-loss",
                  pnl_pct: float = 0.0, entry_price: float = 0.0,
@@ -323,11 +343,11 @@ _TP_CEIL  = 0.25
 
 
 def _atr_tp_pct(atr: float, price: float) -> float:
-    return max(_TP_FLOOR, min(_TP_CEIL, (4.0 * atr) / price))
+    return max(_TP_FLOOR, min(_TP_CEIL, (ATR_TP_MULTIPLIER * atr) / price))
 
 
 def _handle_exits(
-    con: sqlite3.Connection, client, risk, symbol: str, positions: dict,
+    con: sqlite3.Connection, client: AlpacaClient, risk: RiskManager, symbol: str, positions: dict,
     sell_order_syms: set, current_price: float, current_atr: float,
     regime_name: str, portfolio_value: float, action: int, pdt_exempt: bool,
     stop_fired_today: set, pool: CapitalPool | None = None,
@@ -346,15 +366,15 @@ def _handle_exits(
     pnl_pct     = float(positions[symbol].unrealized_plpc or 0)
 
     holding_days = 0
-    if pos_state and pos_state.get("opened_at"):
+    if pos_state and pos_state.opened_at:
         try:
-            opened_dt = datetime.fromisoformat(pos_state["opened_at"]).replace(tzinfo=timezone.utc)
+            opened_dt = datetime.fromisoformat(pos_state.opened_at).replace(tzinfo=timezone.utc)
             holding_days = (datetime.now(timezone.utc) - opened_dt).days
         except (ValueError, TypeError):
             pass
 
     # ⓪ Gap-down hard floor — bypass limit/ATR logic, market-sell immediately
-    if pnl_pct < -0.10:
+    if pnl_pct < -GAP_DOWN_FLOOR_PCT:
         logger.warning(f"Gap-down floor: {symbol} pnl={pnl_pct:.1%} — immediate market sell")
         sell_result = client.sell_market(symbol, pos_qty)
         if sell_result:
@@ -373,8 +393,8 @@ def _handle_exits(
         return True
 
     if pos_state:
-        new_hwm = max(pos_state["high_water_mark"], current_price)
-        if new_hwm > pos_state["high_water_mark"]:
+        new_hwm = max(pos_state.high_water_mark, current_price)
+        if new_hwm > pos_state.high_water_mark:
             _upsert_position_state(con, symbol, entry_price, new_hwm, current_atr)
         hwm = new_hwm
     else:
@@ -411,7 +431,7 @@ def _handle_exits(
         return True
 
     # ③ Trailing stop (armed after 3% gain)
-    if hwm > entry_price * 1.03 and risk.check_trailing_stop(
+    if hwm > entry_price * (1 + TRAILING_STOP_ARM_PCT) and risk.check_trailing_stop(
             symbol, current_price, hwm, current_atr):
         success = _signal_sell(
             con, client, symbol, pos_qty, current_price,

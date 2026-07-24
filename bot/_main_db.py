@@ -5,6 +5,7 @@ import contextlib
 import json
 import sqlite3
 import time
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
 from loguru import logger
@@ -18,6 +19,16 @@ from config import TRADE_DB_PATH
 from database.query_metrics import _init_schema as _init_qm_schema
 
 _MACRO_DB_TTL = 4 * 3600
+
+
+@dataclass
+class RiskSnapshot:
+    daily_start: float | None
+    day_trade_dates: list[str] = field(default_factory=list)
+    weekly_start: float | None = None
+    daily_warning_sent: bool = False
+    weekly_halt_alerted: bool = False
+    portfolio_high: float | None = None
 
 
 def _enable_wal_mode(db_path: str) -> None:
@@ -404,8 +415,8 @@ def _week_key() -> str:
     return date.today().strftime("%G-W%V")
 
 
-def _load_risk_state(con: sqlite3.Connection) -> tuple[float | None, list[str], float | None, bool, bool, float | None]:
-    """Returns (daily_start, day_trade_dates, weekly_start, daily_warning_sent, weekly_halt_alerted, portfolio_high)."""
+def _load_risk_state(con: sqlite3.Connection) -> RiskSnapshot:
+    """Load persisted risk state into a typed snapshot."""
     today = date.today().isoformat()
     wk    = _week_key()
     rows  = {r[0]: r[1] for r in con.execute("SELECT key, value FROM risk_state")}
@@ -439,7 +450,14 @@ def _load_risk_state(con: sqlite3.Connection) -> tuple[float | None, list[str], 
     except (KeyError, ValueError, TypeError):
         pass
 
-    return daily_start, day_trade_dates, weekly_start, daily_warning_sent, weekly_halt_alerted, portfolio_high
+    return RiskSnapshot(
+        daily_start=daily_start,
+        day_trade_dates=day_trade_dates,
+        weekly_start=weekly_start,
+        daily_warning_sent=daily_warning_sent,
+        weekly_halt_alerted=weekly_halt_alerted,
+        portfolio_high=portfolio_high,
+    )
 
 
 def _save_risk_state(con: sqlite3.Connection, risk: RiskManager) -> None:

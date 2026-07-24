@@ -4,6 +4,7 @@ import pandas as pd
 from datetime import datetime, timezone, timedelta, date
 import pytest
 from bot.main import (
+    BarData, PositionState,
     _opened_today, _maybe_record_day_trade, log_trade, init_db,
     _kelly_fraction, _passes_correlation_gate, _check_time_exit,
     _reconcile_positions, _load_risk_state, _save_risk_state,
@@ -303,8 +304,12 @@ def test_kelly_fraction_minimum_floor(db):
 
 # --- _passes_correlation_gate ---
 
-def _make_bars(closes):
+def _make_bars(closes) -> pd.DataFrame:
     return pd.DataFrame({"close": closes})
+
+
+def _bd(closes) -> BarData:
+    return BarData(bars_5m=pd.DataFrame(), bars_daily=_make_bars(closes))
 
 
 def test_passes_correlation_gate_no_bars_for_symbol():
@@ -313,24 +318,23 @@ def test_passes_correlation_gate_no_bars_for_symbol():
 
 
 def test_passes_correlation_gate_empty_positions():
-    bars = {"AAPL": _make_bars([1, 2, 3, 4, 5])}
+    bars = {"AAPL": _bd([1, 2, 3, 4, 5])}
     assert _passes_correlation_gate("AAPL", {}, bars) is True
 
 
 def test_passes_correlation_gate_held_symbol_skipped():
     # AAPL is both the candidate AND a held position — skip self-comparison
-    bars = {"AAPL": _make_bars(list(range(30)))}
+    bars = {"AAPL": _bd(list(range(30)))}
     assert _passes_correlation_gate("AAPL", {"AAPL": None}, bars) is True
 
 
 def test_passes_correlation_gate_blocks_high_correlation():
-    import numpy as np
     from config import CORRELATION_THRESHOLD
     # Perfectly correlated bars (same series)
     prices = list(range(1, 31))
     bars = {
-        "AAPL": _make_bars(prices),
-        "MSFT": _make_bars(prices),
+        "AAPL": _bd(prices),
+        "MSFT": _bd(prices),
     }
     result = _passes_correlation_gate("AAPL", {"MSFT": None}, bars)
     # Correlation = 1.0 > CORRELATION_THRESHOLD → blocked
@@ -338,11 +342,10 @@ def test_passes_correlation_gate_blocks_high_correlation():
 
 
 def test_passes_correlation_gate_allows_uncorrelated():
-    import numpy as np
     # Uncorrelated: alternating vs constant rise
     bars = {
-        "AAPL": _make_bars([10 if i % 2 == 0 else 20 for i in range(30)]),
-        "TSLA": _make_bars(list(range(10, 40))),
+        "AAPL": _bd([10 if i % 2 == 0 else 20 for i in range(30)]),
+        "TSLA": _bd(list(range(10, 40))),
     }
     result = _passes_correlation_gate("AAPL", {"TSLA": None}, bars)
     # These returns should be near-zero correlated (constant rise vs alternating)
@@ -353,8 +356,8 @@ def test_passes_correlation_gate_allows_uncorrelated():
 def test_passes_correlation_gate_insufficient_common_bars():
     # Only 5 common timestamps — gate requires ≥ 20
     bars = {
-        "AAPL": _make_bars(list(range(5))),
-        "MSFT": _make_bars(list(range(5))),
+        "AAPL": _bd(list(range(5))),
+        "MSFT": _bd(list(range(5))),
     }
     # < 20 observations → gate skips this pair → passes
     assert _passes_correlation_gate("AAPL", {"MSFT": None}, bars) is True
@@ -380,37 +383,34 @@ def test_check_time_exit_no_pos_state():
     assert _check_time_exit(None, 0.0) is False
 
 
+def _ps(opened_at=None) -> PositionState:
+    return PositionState(entry_price=100.0, high_water_mark=100.0, atr_at_entry=None, opened_at=opened_at)
+
+
 def test_check_time_exit_missing_opened_at():
-    assert _check_time_exit({}, -0.05) is False
-    assert _check_time_exit({"opened_at": None}, -0.05) is False
+    assert _check_time_exit(_ps(opened_at=None), -0.05) is False
 
 
 def test_check_time_exit_recent_position_not_exited():
     from config import MAX_HOLD_DAYS
     opened = (datetime.now(timezone.utc) - timedelta(days=MAX_HOLD_DAYS - 1)).isoformat()
-    pos = {"opened_at": opened}
-    assert _check_time_exit(pos, -0.05) is False
+    assert _check_time_exit(_ps(opened), -0.05) is False
 
 
 def test_check_time_exit_old_position_negative_pnl_exits():
     from config import MAX_HOLD_DAYS
     opened = (datetime.now(timezone.utc) - timedelta(days=MAX_HOLD_DAYS + 1)).isoformat()
-    pos = {"opened_at": opened}
-    # pnl_pct < 0.01 → should exit
-    assert _check_time_exit(pos, -0.01) is True
+    assert _check_time_exit(_ps(opened), -0.01) is True
 
 
 def test_check_time_exit_old_position_good_pnl_stays():
     from config import MAX_HOLD_DAYS
     opened = (datetime.now(timezone.utc) - timedelta(days=MAX_HOLD_DAYS + 1)).isoformat()
-    pos = {"opened_at": opened}
-    # pnl_pct >= 0.01 → still profitable, keep holding
-    assert _check_time_exit(pos, 0.05) is False
+    assert _check_time_exit(_ps(opened), 0.05) is False
 
 
 def test_check_time_exit_invalid_date_string():
-    pos = {"opened_at": "not-a-date"}
-    assert _check_time_exit(pos, -0.05) is False
+    assert _check_time_exit(_ps("not-a-date"), -0.05) is False
 
 
 # --- _reconcile_positions ---
@@ -490,29 +490,27 @@ def test_reconcile_falls_back_to_entry_price_on_client_error(db):
 # --- _load_risk_state / _save_risk_state ---
 
 def test_load_risk_state_returns_nones_when_empty(db):
-    daily_start, day_trades, weekly_start, warn_sent, halt_alerted, ph = _load_risk_state(db)
-    assert daily_start is None
-    assert day_trades == []
-    assert weekly_start is None
-    assert warn_sent is False
-    assert halt_alerted is False
-    assert ph is None
+    rs = _load_risk_state(db)
+    assert rs.daily_start is None
+    assert rs.day_trade_dates == []
+    assert rs.weekly_start is None
+    assert rs.daily_warning_sent is False
+    assert rs.weekly_halt_alerted is False
+    assert rs.portfolio_high is None
 
 
 def test_save_and_load_portfolio_high(db):
     risk = RiskManager(portfolio_high=15_000.0)
     risk.reset_daily(10_000.0)
     _save_risk_state(db, risk)
-    _, _, _, _, _, ph = _load_risk_state(db)
-    assert ph == pytest.approx(15_000.0, abs=0.01)
+    assert _load_risk_state(db).portfolio_high == pytest.approx(15_000.0, abs=0.01)
 
 
 def test_save_and_load_daily_start(db):
     risk = RiskManager()
     risk.reset_daily(12_345.0)
     _save_risk_state(db, risk)
-    daily_start, _, _, _, _, _ = _load_risk_state(db)
-    assert daily_start == pytest.approx(12_345.0, abs=0.01)
+    assert _load_risk_state(db).daily_start == pytest.approx(12_345.0, abs=0.01)
 
 
 def test_save_and_load_day_trade_log(db):
@@ -521,8 +519,7 @@ def test_save_and_load_day_trade_log(db):
     risk.record_day_trade()
     risk.record_day_trade()
     _save_risk_state(db, risk)
-    _, day_trades, _, _, _, _ = _load_risk_state(db)
-    assert len(day_trades) == 2
+    assert len(_load_risk_state(db).day_trade_dates) == 2
 
 
 # --- _is_wash_sale_risk (IRS IRC §1091) ---

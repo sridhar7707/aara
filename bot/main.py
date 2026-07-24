@@ -44,6 +44,7 @@ import bot.monitor.telegram_bot as tg
 # Sub-module imports (helpers extracted to keep this file under 500 lines)
 from bot._main_signals import record_signal, update_signal_outcomes
 from bot._main_db import (
+    RiskSnapshot,
     _anchor_daily_start, _enable_wal_mode,
     _get_macro_from_db, _load_risk_state, _log_recommendation, _log_signal, _record_snapshot,
     _save_risk_state, _week_key, log_trade,
@@ -64,6 +65,7 @@ def _apply_sim_capital(portfolio_value: float, available_cash: float) -> tuple[f
                 True)
     return portfolio_value, available_cash, False
 from bot._main_positions import (
+    BarData, PositionState,
     _check_time_exit, _delete_position_state, _is_wash_sale_risk,
     _kelly_fraction, _load_position_state, _maybe_record_day_trade,
     _opened_today, _passes_correlation_gate, _reconcile_positions,
@@ -76,6 +78,7 @@ from bot._main_market import (
     _compute_sentiments, _log_cycle_summary, _maybe_push_db,
 )
 from bot._main_cycle import (
+    EntryContext,
     _fetch_symbol, _handle_exits, _handle_entry, compute_tradeable_capital, prefetch_bars,
 )
 from bot.capital.pool import load_active_pool as _load_pool
@@ -128,22 +131,22 @@ def run(
     active_symbols, _universe_payload = _load_today_universe()
     _import_screener_picks(con, _universe_payload)
 
-    daily_start, day_trade_dates, weekly_start, daily_warning_sent, weekly_halt_alerted, portfolio_high = _load_risk_state(con)
+    rs: RiskSnapshot = _load_risk_state(con)
 
     # Anchor daily_start to the account's value at yesterday's close (not current
     # live price), so Day P&L means "today's gain" rather than gain-since-inception.
-    if daily_start is None:
-        daily_start, _src = _anchor_daily_start(con)
-        if daily_start is not None:
-            logger.info(f"Daily start anchored to {_src}: ${daily_start:.2f}")
+    if rs.daily_start is None:
+        rs.daily_start, _src = _anchor_daily_start(con)
+        if rs.daily_start is not None:
+            logger.info(f"Daily start anchored to {_src}: ${rs.daily_start:.2f}")
 
     risk = RiskManager(
-        daily_start_value=daily_start,
-        day_trade_dates=day_trade_dates,
-        weekly_start_value=weekly_start,
-        daily_warning_sent=daily_warning_sent,
-        weekly_halt_alerted=weekly_halt_alerted,
-        portfolio_high=portfolio_high,
+        daily_start_value=rs.daily_start,
+        day_trade_dates=rs.day_trade_dates,
+        weekly_start_value=rs.weekly_start,
+        daily_warning_sent=rs.daily_warning_sent,
+        weekly_halt_alerted=rs.weekly_halt_alerted,
+        portfolio_high=rs.portfolio_high,
     )
 
     regime_clf = _regime_clf if _regime_clf is not None else RegimeClassifier()
@@ -422,14 +425,24 @@ def run(
 
             _cash_before = available_cash
             available_cash = _handle_entry(
-                con, client, risk, symbol, positions, buy_order_syms,
-                earnings_map, bars_map, sig_bars, latest, current_price,
-                current_atr, regime_name, portfolio_value, available_cash,
-                xgb_prob, lstm_prob, sentiment, macro_score, macro_cap,
-                macro_halt, spy_5bar_return, vs_spy_today, sentiments,
-                action, action_str, ensemble_size, pdt_exempt, xgb,
-                _stop_fired_today, volume_ratio, _remaining_tradeable,
-                pool=_capital_pool,
+                con, client, risk, symbol,
+                EntryContext(
+                    positions=positions, buy_order_syms=buy_order_syms,
+                    earnings_map=earnings_map, bars_map=bars_map,
+                    sig_bars=sig_bars, latest=latest,
+                    current_price=current_price, current_atr=current_atr,
+                    regime_name=regime_name, portfolio_value=portfolio_value,
+                    available_cash=available_cash,
+                    xgb_prob=xgb_prob, lstm_prob=lstm_prob,
+                    macro_score=macro_score, macro_cap=macro_cap,
+                    macro_halt=macro_halt, spy_5bar_return=spy_5bar_return,
+                    vs_spy_today=vs_spy_today, sentiments=sentiments,
+                    ensemble_size=ensemble_size, xgb=xgb,
+                    stop_fired_today=_stop_fired_today,
+                    volume_ratio=volume_ratio,
+                    tradeable_capital=_remaining_tradeable,
+                    pool=_capital_pool,
+                ),
             )
             _deployed = _cash_before - available_cash
             if _deployed > 0.0:
@@ -450,9 +463,9 @@ def run(
 
     # Resolve pending signals against latest prices (target/stop hit checks)
     try:
-        _live_prices = {sym: float(bars_map[sym][0].iloc[-1]["close"])
+        _live_prices = {sym: float(bars_map[sym].bars_5m.iloc[-1]["close"])
                         for sym in active_symbols
-                        if sym in bars_map and not bars_map[sym][0].empty}
+                        if sym in bars_map and not bars_map[sym].bars_5m.empty}
         update_signal_outcomes(con, _live_prices)
     except Exception as _se:
         logger.debug(f"update_signal_outcomes: {_se}")

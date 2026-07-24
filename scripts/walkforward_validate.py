@@ -33,7 +33,14 @@ from loguru import logger
 from sklearn.metrics import roc_auc_score
 from xgboost import XGBClassifier
 
-from bot.strategy.features import FEATURE_COLS_V3, FEATURE_COLS_V4, compute_features
+from bot.strategy.features import FEATURE_COLS_V4, compute_features
+
+FEATURE_COLS_V3 = [
+    "rsi", "mfi", "volume_ratio", "obv_chg_pct", "vol_ratio_trend",
+    "bb_width", "atr_pct", "bb_position", "returns", "hl_ratio",
+    "vwap_dev", "macd_diff_pct", "ema_spread", "ret_5d", "ret_21d",
+    "high_52w_pct", "gap_overnight", "rsi_divergence", "macd_cross_up",
+]
 from bot.strategy.xgb_predictor import FORWARD_PERIODS, MIN_MOVE_PCT
 from config import TRAINING_SYMBOLS
 

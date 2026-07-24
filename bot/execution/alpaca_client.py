@@ -4,7 +4,7 @@ from typing import Any, Callable, TypeVar
 import alpaca_trade_api as tradeapi
 import pandas as pd
 from loguru import logger
-from config import ALPACA_KEY, ALPACA_SECRET, ALPACA_BASE_URL, MAX_POSITION_PCT
+from config import ALPACA_KEY, ALPACA_SECRET, ALPACA_BASE_URL
 from bot.core.api_guard import call_with_retry
 
 _T = TypeVar("_T")
@@ -187,8 +187,8 @@ class AlpacaClient:
         try:
             order = self.api.get_order(order_id)
             filled_qty = float(getattr(order, "filled_qty", 0) or 0)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"Could not read order {order_id} before cancel: {e}")
         try:
             self.api.cancel_order(order_id)
             logger.warning(

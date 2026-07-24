@@ -61,7 +61,7 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE capital_pools ADD COLUMN profit_withdrawn REAL NOT NULL DEFAULT 0.0"
         )
-    except Exception:
+    except sqlite3.OperationalError:
         pass  # column already exists
 
 

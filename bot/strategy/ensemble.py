@@ -1,6 +1,7 @@
 from __future__ import annotations
 import math
 from loguru import logger
+from config import XGB_MIN_CONFIDENCE
 
 # Regime is intentionally excluded from the score weights —
 # it acts as a hard entry gate in main.py (ENTRY_REGIMES). Including it here
@@ -99,18 +100,18 @@ def ensemble_signal(
         )
 
     if score > STRONG_BUY_THRESHOLD:
-        if xgb_prob < 0.50:
+        if xgb_prob < XGB_MIN_CONFIDENCE:
             logger.debug(
                 f"Ensemble: STRONG_BUY suppressed — XGB below threshold "
-                f"(xgb={xgb_prob:.3f})"
+                f"(xgb={xgb_prob:.3f} < {XGB_MIN_CONFIDENCE})"
             )
             return "HOLD", 0.00
         return "STRONG_BUY",  STRONG_BUY_FRACTION
     elif score > BUY_THRESHOLD:
-        if xgb_prob < 0.50:
+        if xgb_prob < XGB_MIN_CONFIDENCE:
             logger.debug(
                 f"Ensemble: BUY suppressed — XGB below threshold "
-                f"(xgb={xgb_prob:.3f})"
+                f"(xgb={xgb_prob:.3f} < {XGB_MIN_CONFIDENCE})"
             )
             return "HOLD", 0.00
         return "BUY",         BUY_FRACTION

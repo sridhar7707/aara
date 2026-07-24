@@ -154,28 +154,6 @@ def compute_features(df: pd.DataFrame, spy_close: pd.Series | None = None) -> pd
     return df
 
 
-FEATURE_COLS_V3 = [
-    "rsi",
-    "mfi",
-    "volume_ratio",
-    "obv_chg_pct",
-    "vol_ratio_trend",
-    "bb_width",
-    "atr_pct",
-    "bb_position",
-    "returns",
-    "hl_ratio",
-    "vwap_dev",
-    "macd_diff_pct",
-    "ema_spread",
-    "ret_5d",
-    "ret_21d",
-    "high_52w_pct",
-    "gap_overnight",
-    "rsi_divergence",
-    "macd_cross_up",
-]
-
 FEATURE_COLS_V4 = [
     "rsi",
     "mfi",
