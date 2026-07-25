@@ -149,6 +149,30 @@ def _init_v2_tables(con: sqlite3.Connection) -> None:
                 "price_at_decision REAL, quantity_changed REAL, reasoning TEXT,"
                 "ai_confidence INTEGER, portfolio_value_at_time REAL,"
                 "triggered_by TEXT DEFAULT 'ai', created_at TEXT DEFAULT (datetime('now')))")
+    # Decision Intelligence Phase 1 — BUY-candidate lifecycle capture, added on top
+    # of the original trades-mirror schema above. See docs/PHASE_PLAN_decision_intelligence.md
+    # (local, not in git) for the full rationale; kept brief here since that's not
+    # source-controlled and this comment is what survives in the repo.
+    for _dl_col in (
+        "signal_log_id INTEGER DEFAULT NULL",         # FK -> signal_log.id (model evidence by reference)
+        "trade_id INTEGER DEFAULT NULL",               # FK -> trades.id (NULL until/unless executed)
+        "gate_reason TEXT DEFAULT NULL",               # which entry gate blocked it, if any
+        "decision_source TEXT DEFAULT NULL",           # AI_SIGNAL / HUMAN_INITIATED / SYSTEM_REBALANCE
+        "decision_reason TEXT DEFAULT NULL",           # short structured reason
+        "risk_factors TEXT DEFAULT NULL",
+        "expected_holding_period INTEGER DEFAULT NULL",
+        "thesis TEXT DEFAULT NULL",                    # optional longer-form narrative
+        "lesson_learned TEXT DEFAULT NULL",            # nullable — filled only once outcome analysis exists
+        "decision_status TEXT DEFAULT NULL",           # CREATED/WAITING_APPROVAL/APPROVED/USER_REJECTED/SYSTEM_BLOCKED/EXPIRED
+        "execution_status TEXT DEFAULT NULL",          # NOT_EXECUTED/EXECUTED
+        "outcome_status TEXT DEFAULT 'UNKNOWN'",       # WIN/LOSS/NEUTRAL/UNKNOWN — never set at creation time
+        "executed_at TEXT DEFAULT NULL",
+        "outcome_known_at TEXT DEFAULT NULL",
+    ):
+        try:
+            con.execute(f"ALTER TABLE decision_log ADD COLUMN {_dl_col}")
+        except sqlite3.OperationalError:
+            pass
     con.execute("CREATE TABLE IF NOT EXISTS daily_changes ("
                 "change_id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL,"
                 "change_date TEXT NOT NULL, confidence_yesterday INTEGER,"
