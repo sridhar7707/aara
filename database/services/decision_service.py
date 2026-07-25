@@ -129,6 +129,21 @@ def mark_executed(con: sqlite3.Connection, decision_id: int, trade_id: int,
     _logger.debug(f"Decision [{decision_id}] EXECUTED -> trade_id={trade_id}")
 
 
+def find_open_decision_id(con: sqlite3.Connection, symbol: str) -> int | None:
+    """Find the decision behind a position that's about to close, at exit time.
+    A symbol can only have one open, uncompleted decision at once (the entry
+    gates already block re-buying a symbol that's already held), so the most
+    recent EXECUTED-but-not-yet-completed row is unambiguous. Returns None for
+    positions opened before this wiring existed — callers must skip gracefully,
+    not error, since most currently-open positions predate Commit 4."""
+    row = con.execute(
+        "SELECT decision_id FROM decision_log WHERE symbol=? AND execution_status='EXECUTED' "
+        "AND outcome_known_at IS NULL ORDER BY decision_id DESC LIMIT 1",
+        (symbol,),
+    ).fetchone()
+    return row[0] if row else None
+
+
 def complete_decision(con: sqlite3.Connection, decision_id: int, realized_pnl_pct: float) -> None:
     """Called when the linked trade's position closes (a SELL fires). Records
     only factual, immediately-known outcome data — no lessons, no vs-SPY yet.

@@ -82,6 +82,7 @@ from bot._main_cycle import (
     EntryContext,
     _fetch_symbol, _handle_exits, _handle_entry, compute_tradeable_capital, prefetch_bars,
 )
+from bot._main_decisions import create_buy_decision as _create_buy_decision
 from bot.capital.pool import load_active_pool as _load_pool
 from bot._main_runner import (
     _do_clean_db, _do_reset_daily_start, end_of_day_summary, run_loop,
@@ -375,8 +376,8 @@ def run(
 
             # Log every evaluated signal so the dashboard can show live model
             # output even on cycles where no trade fires.
-            _log_signal(con, symbol, xgb_prob, lstm_prob, sentiment,
-                        macro_score, regime_name, action_str)
+            _signal_log_id = _log_signal(con, symbol, xgb_prob, lstm_prob, sentiment,
+                                         macro_score, regime_name, action_str)
 
             # Record per-symbol recommendation for every cycle so Rec History widget
             # shows what the bot was thinking even when no trade fires.
@@ -424,6 +425,15 @@ def run(
             if action != 1 or _sanity_blocked:
                 continue
 
+            # Decision Intelligence Phase 1 — every symbol reaching this point is a
+            # genuine AI BUY recommendation, whether or not it survives the gates
+            # below. Created here (not after gates) so a rejected/blocked candidate
+            # is captured too, not just executed trades.
+            _decision_id = _create_buy_decision(
+                con, symbol, current_price, portfolio_value, _signal_log_id,
+                xgb_prob, lstm_prob, sentiment, macro_score, regime_name,
+            )
+
             _cash_before = available_cash
             available_cash = _handle_entry(
                 con, client, risk, symbol,
@@ -443,6 +453,7 @@ def run(
                     volume_ratio=volume_ratio,
                     tradeable_capital=_remaining_tradeable,
                     pool=_capital_pool,
+                    decision_id=_decision_id,
                 ),
             )
             _deployed = _cash_before - available_cash

@@ -91,9 +91,14 @@ def _import_screener_picks(con, payload: dict) -> None:
         logger.warning(f"screener_log import failed (non-fatal): {exc}")
 
 
-def _log_buy_skip(symbol: str, reason: str) -> None:
-    """Log a standardized reason why a candidate buy was skipped."""
+def _log_buy_skip(symbol: str, reason: str, con=None, decision_id: int | None = None) -> None:
+    """Log a standardized reason why a candidate buy was skipped, and persist
+    it as a SYSTEM_BLOCKED decision when con/decision_id are given (Decision
+    Intelligence Phase 1) — previously this reason vanished into the log only."""
     logger.info(f"BUY {symbol} skipped — {reason}")
+    if con is not None and decision_id is not None:
+        from database.services.decision_service import reject_decision
+        reject_decision(con, decision_id, rejected_by="system", reason=reason)
 
 
 def _is_market_hours(alpaca_api=None) -> bool:

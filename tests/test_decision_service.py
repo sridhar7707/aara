@@ -3,7 +3,7 @@ import pytest
 from bot._main_db import init_db
 from database.services.decision_service import (
     create_decision, reject_decision, approve_decision, mark_waiting_approval,
-    mark_executed, complete_decision, evaluate_decision,
+    mark_executed, complete_decision, evaluate_decision, find_open_decision_id,
 )
 
 
@@ -112,6 +112,38 @@ def test_complete_decision_neutral(db):
     complete_decision(db, did, realized_pnl_pct=0.0)
     status = db.execute("SELECT outcome_status FROM decision_log WHERE decision_id=?", (did,)).fetchone()[0]
     assert status == "NEUTRAL"
+
+
+def test_find_open_decision_id_returns_none_when_no_decision(db):
+    assert find_open_decision_id(db, "AAPL") is None
+
+
+def test_find_open_decision_id_finds_executed_uncompleted(db):
+    did = _new_decision(db, symbol="AAPL")
+    mark_executed(db, did, trade_id=1)
+    assert find_open_decision_id(db, "AAPL") == did
+
+
+def test_find_open_decision_id_ignores_completed(db):
+    did = _new_decision(db, symbol="AAPL")
+    mark_executed(db, did, trade_id=1)
+    complete_decision(db, did, realized_pnl_pct=0.05)
+    assert find_open_decision_id(db, "AAPL") is None
+
+
+def test_find_open_decision_id_ignores_rejected(db):
+    did = _new_decision(db, symbol="AAPL")
+    reject_decision(db, did, rejected_by="system", reason="wash-sale guard active")
+    assert find_open_decision_id(db, "AAPL") is None
+
+
+def test_find_open_decision_id_picks_most_recent(db):
+    d1 = _new_decision(db, symbol="AAPL")
+    mark_executed(db, d1, trade_id=1)
+    complete_decision(db, d1, realized_pnl_pct=0.05)
+    d2 = _new_decision(db, symbol="AAPL")
+    mark_executed(db, d2, trade_id=2)
+    assert find_open_decision_id(db, "AAPL") == d2
 
 
 def test_evaluate_decision_without_trade_returns_error(db):

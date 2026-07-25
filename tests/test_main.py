@@ -10,7 +10,8 @@ from bot.main import (
     _reconcile_positions, _load_risk_state, _save_risk_state,
     _upsert_position_state, _delete_position_state, _is_wash_sale_risk,
     _record_snapshot, _anchor_daily_start, _apply_sim_capital, _log_signal,
-    _fetch_positions_for_reconcile,
+    _fetch_positions_for_reconcile, _handle_entry, EntryContext,
+    _create_buy_decision, _signal_sell,
 )
 from bot.risk.risk_manager import RiskManager
 
@@ -70,6 +71,20 @@ def db():
             xgb_prob REAL, lstm_prob REAL, sentiment_score REAL,
             macro_score REAL, ensemble_score REAL,
             ensemble_action TEXT, regime TEXT
+        )
+    """)
+    con.execute("""
+        CREATE TABLE decision_log (
+            decision_id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL,
+            decision_date TEXT NOT NULL, decision_type TEXT NOT NULL,
+            price_at_decision REAL, quantity_changed REAL, reasoning TEXT,
+            ai_confidence INTEGER, portfolio_value_at_time REAL,
+            triggered_by TEXT DEFAULT 'ai', created_at TEXT DEFAULT (datetime('now')),
+            signal_log_id INTEGER, trade_id INTEGER, gate_reason TEXT,
+            decision_source TEXT, decision_reason TEXT, risk_factors TEXT,
+            expected_holding_period INTEGER, thesis TEXT, lesson_learned TEXT,
+            decision_status TEXT, execution_status TEXT, outcome_status TEXT,
+            executed_at TEXT, outcome_known_at TEXT
         )
     """)
     con.commit()
@@ -342,6 +357,20 @@ def test_passes_correlation_gate_blocks_high_correlation():
     assert result is False
 
 
+def test_passes_correlation_gate_blocks_and_persists_decision(db):
+    from database.services.decision_service import create_decision
+    did = create_decision(db, "AAPL", 150.0, 10000.0)
+    prices = list(range(1, 31))
+    bars = {"AAPL": _bd(prices), "MSFT": _bd(prices)}
+    result = _passes_correlation_gate("AAPL", {"MSFT": None}, bars, db, did)
+    assert result is False
+    row = db.execute(
+        "SELECT decision_status, gate_reason FROM decision_log WHERE decision_id=?", (did,),
+    ).fetchone()
+    assert row[0] == "SYSTEM_BLOCKED"
+    assert "correlation" in row[1]
+
+
 def test_passes_correlation_gate_allows_uncorrelated():
     # Uncorrelated: alternating vs constant rise
     bars = {
@@ -422,6 +451,22 @@ def test_reconcile_removes_stale_db_entries(db):
     _reconcile_positions(db, alpaca_positions={})
     rows = db.execute("SELECT symbol FROM position_state").fetchall()
     assert ("AAPL",) not in rows
+
+
+def test_reconcile_completes_linked_decision(db):
+    from database.services.decision_service import create_decision, mark_executed
+    did = create_decision(db, "AAPL", 100.0, 10000.0)
+    trade_id = log_trade(db, "AAPL", "BUY", 5.0, 100.0, 500.0, "TRENDING_UP", 10000.0, 0.0)
+    mark_executed(db, did, trade_id=trade_id)
+    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0)
+
+    _reconcile_positions(db, alpaca_positions={})
+
+    row = db.execute(
+        "SELECT outcome_status, outcome_known_at FROM decision_log WHERE decision_id=?", (did,),
+    ).fetchone()
+    assert row[0] in ("WIN", "LOSS", "NEUTRAL")
+    assert row[1] is not None
 
 
 def test_reconcile_seeds_missing_alpaca_positions(db):
@@ -949,3 +994,97 @@ def test_record_snapshot_upserts_same_timestamp(db, monkeypatch):
     assert n == 1
     val = db.execute("SELECT portfolio_value FROM portfolio_snapshots").fetchone()[0]
     assert val == 10_050.0  # second write overwrote the first
+
+
+# --- Decision Intelligence Phase 1 wiring ---
+
+def test_create_buy_decision_creates_row(db):
+    did = _create_buy_decision(db, "AAPL", 150.0, 10000.0, None, 0.70, 0.65, 0.30, 0.55, "TRENDING_UP")
+    row = db.execute(
+        "SELECT symbol, decision_type, decision_status, execution_status, ai_confidence "
+        "FROM decision_log WHERE decision_id=?", (did,),
+    ).fetchone()
+    assert row[0] == "AAPL"
+    assert row[1] == "BUY"
+    assert row[2] == "CREATED"
+    assert row[3] == "NOT_EXECUTED"
+    assert 0 <= row[4] <= 100
+
+
+def _minimal_entry_ctx(**overrides) -> EntryContext:
+    defaults = dict(
+        positions={}, buy_order_syms=set(), earnings_map={}, bars_map={},
+        sig_bars=pd.DataFrame(), latest={}, current_price=100.0, current_atr=1.0,
+        regime_name="TRENDING_UP", portfolio_value=10000.0, available_cash=5000.0,
+        xgb_prob=0.7, lstm_prob=0.6, macro_score=0.5, macro_cap=1.0,
+        macro_halt=False, spy_5bar_return=None, vs_spy_today=0.0, sentiments={},
+        ensemble_size=0.12, xgb=None, stop_fired_today=set(), volume_ratio=1.0,
+        tradeable_capital=5000.0,
+    )
+    defaults.update(overrides)
+    return EntryContext(**defaults)
+
+
+def test_handle_entry_vix_halt_blocks_and_persists_decision(db):
+    from database.services.decision_service import create_decision
+    did = create_decision(db, "AAPL", 100.0, 10000.0)
+    ctx = _minimal_entry_ctx(macro_halt=True, decision_id=did)
+    result = _handle_entry(db, client=None, risk=None, symbol="AAPL", ctx=ctx)
+    assert result == ctx.available_cash  # unchanged — gate rejected before any cash use
+    row = db.execute(
+        "SELECT decision_status, execution_status, gate_reason FROM decision_log WHERE decision_id=?",
+        (did,),
+    ).fetchone()
+    assert row[0] == "SYSTEM_BLOCKED"
+    assert row[1] == "NOT_EXECUTED"
+    assert row[2] == "VIX emergency halt"
+
+
+def test_handle_entry_wrong_regime_blocks_and_persists_decision(db):
+    from database.services.decision_service import create_decision
+    did = create_decision(db, "AAPL", 100.0, 10000.0)
+    ctx = _minimal_entry_ctx(regime_name="TRENDING_DOWN", decision_id=did)
+    _handle_entry(db, client=None, risk=None, symbol="AAPL", ctx=ctx)
+    row = db.execute(
+        "SELECT decision_status, gate_reason FROM decision_log WHERE decision_id=?", (did,),
+    ).fetchone()
+    assert row[0] == "SYSTEM_BLOCKED"
+    assert "regime=" in row[1]
+
+
+def test_signal_sell_completes_linked_decision(db):
+    from database.services.decision_service import create_decision, mark_executed
+
+    class _FakeClient:
+        def sell(self, symbol, qty, limit_price):
+            return {"order_id": "abc123"}
+
+        def wait_for_fill(self, order_id, timeout_secs=12):
+            return 5.0
+
+    did = create_decision(db, "AAPL", 100.0, 10000.0)
+    trade_id = log_trade(db, "AAPL", "BUY", 5.0, 100.0, 500.0, "TRENDING_UP", 10000.0, 0.0)
+    mark_executed(db, did, trade_id=trade_id)
+
+    success = _signal_sell(db, _FakeClient(), "AAPL", 5.0, 110.0, "TRENDING_UP", 10000.0,
+                            reason="take-profit", pnl_pct=0.10, entry_price=100.0)
+    assert success is True
+    row = db.execute(
+        "SELECT outcome_status, outcome_known_at FROM decision_log WHERE decision_id=?", (did,),
+    ).fetchone()
+    assert row[0] == "WIN"
+    assert row[1] is not None
+
+
+def test_signal_sell_no_linked_decision_does_not_error(db):
+    """Positions opened before Commit 4 have no decision_log row — must not crash."""
+    class _FakeClient:
+        def sell(self, symbol, qty, limit_price):
+            return {"order_id": "xyz"}
+
+        def wait_for_fill(self, order_id, timeout_secs=12):
+            return 3.0
+
+    success = _signal_sell(db, _FakeClient(), "MSFT", 3.0, 210.0, "TRENDING_UP", 10000.0,
+                            reason="signal", pnl_pct=0.05, entry_price=200.0)
+    assert success is True  # no exception despite no decision_log row existing for MSFT

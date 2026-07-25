@@ -21,6 +21,7 @@ from config import (
 )
 from bot._main_db import log_trade, _save_risk_state
 from database.trade_journal import close_entry as _journal_close
+from database.services.decision_service import find_open_decision_id, complete_decision
 from bot.decision.daily_actions import record as _rec_action
 from bot.capital.pool import CapitalPool, update_on_sell as _pool_sell
 from bot.strategy.ensemble import BUY_FRACTION
@@ -76,10 +77,8 @@ def _delete_position_state(con: sqlite3.Connection, symbol: str) -> None:
 
 
 def _kelly_fraction(con: sqlite3.Connection, symbol: str, default: float = BUY_FRACTION) -> float:
-    """
-    Half-Kelly position fraction estimated from recent closed trades for this symbol.
-    Returns `default` when fewer than 10 observations exist (not enough data).
-    """
+    """Half-Kelly position fraction from recent closed trades; returns `default`
+    when fewer than 10 observations exist (not enough data)."""
     rows = con.execute(
         "SELECT pnl_pct FROM trades WHERE symbol=? AND action LIKE 'SELL%' "
         "ORDER BY timestamp DESC LIMIT ?",
@@ -100,10 +99,10 @@ def _kelly_fraction(con: sqlite3.Connection, symbol: str, default: float = BUY_F
     return half_k
 
 
-def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, BarData]) -> bool:
-    """Block buy if any held position has > CORRELATION_THRESHOLD daily-return correlation.
-    Daily bars from BarData are used for correlation (consistent history regardless of time-of-day).
-    """
+def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, BarData],
+                              con: sqlite3.Connection | None = None,
+                              decision_id: int | None = None) -> bool:
+    """Block buy if any held position has > CORRELATION_THRESHOLD daily-return correlation."""
     def _resolve(bd: BarData | None) -> pd.DataFrame | None:
         if bd is None:
             return None
@@ -129,9 +128,11 @@ def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, B
             continue
         corr = float(ret_sym.loc[common].corr(ret_held.loc[common]))
         if not math.isnan(corr) and corr > CORRELATION_THRESHOLD:
-            logger.info(
-                f"Correlation gate: {symbol} blocked — {corr:.2f} correlation with held {held}"
-            )
+            _reason = f"{corr:.2f} correlation with held {held}"
+            logger.info(f"Correlation gate: {symbol} blocked — {_reason}")
+            if con is not None and decision_id is not None:
+                from database.services.decision_service import reject_decision
+                reject_decision(con, decision_id, rejected_by="system", reason=_reason)
             return False
     return True
 
@@ -144,9 +145,7 @@ def _check_time_exit(pos_state: PositionState | None, pnl_pct: float) -> bool:
         opened  = datetime.fromisoformat(pos_state.opened_at).replace(tzinfo=timezone.utc)
         days    = (datetime.now(timezone.utc) - opened).days
         if days >= MAX_HOLD_DAYS and pnl_pct < 0.01:
-            logger.info(
-                f"Time exit: position held {days}d, pnl={pnl_pct:.2%} — freeing capital"
-            )
+            logger.info(f"Time exit: position held {days}d, pnl={pnl_pct:.2%} — freeing capital")
             return True
     except (ValueError, TypeError):
         pass
@@ -156,9 +155,7 @@ def _check_time_exit(pos_state: PositionState | None, pnl_pct: float) -> bool:
 def _is_wash_sale_risk(con: sqlite3.Connection, symbol: str) -> bool:
     """IRS wash-sale rule: if the same security was sold at a loss within the past 30 days,
     re-buying it disallows that loss deduction (IRC §1091). Block the buy to avoid the trap.
-    We use realized_pnl < 0 as the loss indicator; falls back to pnl_pct < 0 if realised_pnl
-    is zero (e.g., entry_price not recorded on older rows).
-    """
+    Uses realized_pnl < 0 as the loss indicator, falling back to pnl_pct < 0 if zero."""
     # Calendar-day cutoff (IRC §1091 is measured in calendar days, not to the second).
     # Using a date — not a precise datetime — means a loss sale from exactly 30 days
     # ago counts for the whole of that day, and the boundary is deterministic
@@ -199,14 +196,19 @@ def _maybe_record_day_trade(con: sqlite3.Connection, risk: RiskManager, symbol: 
         _save_risk_state(con, risk)
 
 
+def _complete_linked_decision(con: sqlite3.Connection, symbol: str, pnl_pct: float) -> None:
+    """Complete the decision behind a closing position, if one exists — a safe
+    no-op for positions opened before this wiring existed."""
+    decision_id = find_open_decision_id(con, symbol)
+    if decision_id is not None:
+        complete_decision(con, decision_id, realized_pnl_pct=pnl_pct)
+
+
 def _reconcile_positions(con: sqlite3.Connection, alpaca_positions: dict,
                           portfolio_value: float = 0.0, client=None) -> None:
-    """Sync position_state table with Alpaca's live positions at startup.
-    Removes stale DB entries for positions closed externally;
-    seeds DB entries for positions opened manually/outside the bot.
-    Logs a SELL_RECONCILE trade for any stale DB position so the dashboard
-    position walk sees a matching close and no longer shows it as open.
-    """
+    """Sync position_state with Alpaca's live positions at startup. Removes
+    stale DB entries (logging a SELL_RECONCILE trade so the dashboard sees a
+    matching close) and seeds entries for positions opened outside the bot."""
     db_syms = {r[0] for r in con.execute("SELECT symbol FROM position_state").fetchall()}
     for sym in db_syms - set(alpaca_positions.keys()):
         logger.warning(f"Reconcile: {sym} in DB but not Alpaca — closing open trades record")
@@ -240,6 +242,7 @@ def _reconcile_positions(con: sqlite3.Connection, alpaca_positions: dict,
                                 notional, "reconcile", portfolio_value, pnl_pct,
                                 entry_price=entry_price, holding_days=holding_days)
             _journal_close(con, sym, _rec_id, "reconcile", pnl_pct, holding_days)
+            _complete_linked_decision(con, sym, pnl_pct)
             logger.warning(
                 f"Reconcile: logged SELL_RECONCILE for {sym} "
                 f"({net_shares:.4f} shares @ ${sell_price:.2f}, entry=${entry_price:.2f}, "
@@ -258,8 +261,7 @@ def _trim_position(con: sqlite3.Connection, client: AlpacaClient, symbol: str, t
                    pnl_pct: float, entry_price: float,
                    pool: CapitalPool | None = None) -> bool:
     """Partial sell to reduce an oversized position back to MAX_POSITION_PCT.
-    Unlike _signal_sell, does NOT delete position_state — the position still exists.
-    """
+    Unlike _signal_sell, does NOT delete position_state — the position still exists."""
     result = client.sell(symbol, qty=trim_qty, limit_price=current_price)
     if result:
         client.wait_for_fill(result["order_id"], timeout_secs=12)
@@ -327,6 +329,7 @@ def _signal_sell(con: sqlite3.Connection, client: AlpacaClient, symbol: str, pos
                                        entry_price=entry_price, order_id=order_id,
                                        holding_days=holding_days)
         _journal_close(con, symbol, _sell_trade_id, reason, pnl_pct, holding_days)
+        _complete_linked_decision(con, symbol, pnl_pct)
         if pool:
             cost_basis = entry_price * pos_qty if entry_price > 0 else pos_qty * current_price
             _pool_sell(con, pool.id, cost_basis, pos_qty * current_price, symbol=symbol)
@@ -391,6 +394,7 @@ def _handle_exits(
                                order_id=sell_result.get("order_id"),
                                holding_days=holding_days)
             _journal_close(con, symbol, _gd_id, "gap-down", pnl_pct, holding_days)
+            _complete_linked_decision(con, symbol, pnl_pct)
             if pool:
                 cost_basis = entry_price * pos_qty if entry_price > 0 else pos_qty * current_price
                 _pool_sell(con, pool.id, cost_basis, pos_qty * current_price, symbol=symbol)
