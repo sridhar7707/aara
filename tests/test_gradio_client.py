@@ -379,6 +379,39 @@ def test_confidence_calibration_shows_strong_evidence_above_threshold(phase2_db)
     assert "70-80%" in html
 
 
+def test_attribution_shows_alpha_vs_spy(phase2_db, monkeypatch):
+    import sqlite3
+    import pandas as pd
+    import dashboard.components.attribution as attribution_mod
+    from dashboard.components.attribution import render_attribution_by_symbol
+
+    # TEST closed with +10% return, 5-day hold ending 2026-01-10 -> entry 2026-01-05.
+    con = sqlite3.connect(phase2_db)
+    con.execute(
+        "INSERT INTO trades (timestamp,symbol,action,shares,price,notional,regime,"
+        "portfolio_value,pnl_pct,xgb_prob,lstm_prob,sentiment_score,macro_score,"
+        "ensemble_score,holding_days) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        ("2026-01-10T12:00:00+00:00", "TESTX", "SELL", 1.0, 110.0, 110.0, "TRENDING_UP",
+         10_000.0, 0.10, 0.8, 0.8, 0.6, 0.4, 0.75, 5),
+    )
+    con.commit()
+    con.close()
+    ddata._CACHE.clear()
+    ddata._CACHE_TS = 0.0
+
+    # SPY rose 5% over the same window (400 -> 420) -> expected alpha = 10% - 5% = +5.0%.
+    spy_hist = pd.DataFrame(
+        {"Close": [400.0, 420.0]},
+        index=pd.to_datetime(["2026-01-05", "2026-01-10"]),
+    )
+    monkeypatch.setattr(attribution_mod, "_get_sym_hist", lambda symbol: spy_hist)
+
+    html = render_attribution_by_symbol()
+    assert "TESTX" in html
+    assert "+5.0%" in html
+    assert "vs SPY" in html
+
+
 # ── Live-server tests (skipped when :7860 is not running) ─────────────────────
 
 def _server_up() -> bool:

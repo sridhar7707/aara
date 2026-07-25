@@ -1,12 +1,14 @@
 """Portfolio Attribution — answers which holdings, trades, sectors, and models drove P&L."""
 from __future__ import annotations
 
+import datetime
 from collections import defaultdict
 
 from loguru import logger
 
 from bot.core.error_logger import safe_render, timed
 from config import SECTOR_MAP
+from dashboard.charts import _get_sym_hist
 from dashboard.data import safe_query
 from dashboard.design_system import (
     BORDER, GAIN, LOSS, NEURAL, SURFACE, TEXT1, TEXT2, TEXT3,
@@ -30,15 +32,54 @@ def _pnl_str(val: float) -> str:
 
 
 def _query_closed_trades() -> list[tuple]:
-    """Return (symbol, realized_pnl, pnl_pct, xgb_prob, lstm_prob, sentiment_score, macro_score, ensemble_score, timestamp) for all SELL rows."""
+    """Return (symbol, realized_pnl, pnl_pct, xgb_prob, lstm_prob, sentiment_score, macro_score, ensemble_score, timestamp, holding_days) for all SELL rows."""
     return safe_query(
         "SELECT symbol, realized_pnl, pnl_pct, xgb_prob, lstm_prob, "
-        "sentiment_score, macro_score, ensemble_score, timestamp "
+        "sentiment_score, macro_score, ensemble_score, timestamp, holding_days "
         "FROM trades WHERE action LIKE 'SELL%' "
         "AND realized_pnl IS NOT NULL AND pnl_pct IS NOT NULL "
         "ORDER BY timestamp DESC",
         default=[],
     ) or []
+
+
+def _spy_close_at_or_before(spy_hist, cutoff) -> float | None:
+    """Nearest SPY close on or before `cutoff` (a date). None if no data reaches that far back."""
+    if spy_hist is None or spy_hist.empty or "Close" not in spy_hist.columns:
+        return None
+    try:
+        dates = [d.date() if hasattr(d, "date") else d for d in spy_hist.index]
+    except Exception as exc:
+        _logger.debug(f"_spy_close_at_or_before: date parse: {exc}")
+        return None
+    closes = list(spy_hist["Close"])
+    for i in range(len(dates) - 1, -1, -1):
+        if dates[i] <= cutoff:
+            return float(closes[i])
+    return None
+
+
+def _trade_alpha(row: tuple, spy_hist) -> float | None:
+    """Excess return of one closed trade vs SPY over the same holding window.
+
+    Uses the trade's own `holding_days` (already recorded per SELL) to derive the
+    entry date from the exit timestamp — no need to FIFO-match against BUY rows.
+    """
+    pct, ts, holding_days = float(row[2] or 0), row[8], row[9]
+    if not ts or holding_days is None:
+        return None
+    try:
+        exit_date = datetime.datetime.fromisoformat(str(ts).replace("Z", "+00:00")).date()
+    except Exception as exc:
+        _logger.debug(f"_trade_alpha: timestamp parse: {exc}")
+        return None
+    entry_date = exit_date - datetime.timedelta(days=int(holding_days))
+    entry_px = _spy_close_at_or_before(spy_hist, entry_date)
+    exit_px  = _spy_close_at_or_before(spy_hist, exit_date)
+    if not entry_px or not exit_px or entry_px <= 0:
+        return None
+    spy_return = (exit_px - entry_px) / entry_px
+    return pct - spy_return
 
 
 # ── By Symbol ─────────────────────────────────────────────────────────────────
@@ -50,14 +91,21 @@ def render_attribution_by_symbol() -> str:
     if not rows:
         return _card(_empty_state("📊", "No closed trades yet", "Attribution builds as trades close."))
 
+    spy_hist = _get_sym_hist("SPY")
+
     agg: dict[str, dict] = {}
-    for sym, pnl, pct, *_ in rows:
+    for row in rows:
+        sym, pnl, pct = row[0], row[1], row[2]
         if sym not in agg:
-            agg[sym] = {"pnl": 0.0, "trades": 0, "wins": 0}
+            agg[sym] = {"pnl": 0.0, "trades": 0, "wins": 0, "alpha_sum": 0.0, "alpha_n": 0}
         agg[sym]["pnl"] += float(pnl or 0)
         agg[sym]["trades"] += 1
         if (pct or 0) > 0:
             agg[sym]["wins"] += 1
+        alpha = _trade_alpha(row, spy_hist)
+        if alpha is not None:
+            agg[sym]["alpha_sum"] += alpha
+            agg[sym]["alpha_n"] += 1
 
     ranked = sorted(agg.items(), key=lambda kv: kv[1]["pnl"], reverse=True)
     total_pnl = sum(v["pnl"] for v in agg.values())
@@ -73,6 +121,11 @@ def render_attribution_by_symbol() -> str:
             f'<div style="background:{BORDER};border-radius:2px;height:4px;width:60px;overflow:hidden;">'
             f'<div style="background:{bar_color};height:100%;width:{bar_pct:.0f}%;border-radius:2px;"></div></div>'
         )
+        if v["alpha_n"] > 0:
+            avg_alpha = v["alpha_sum"] / v["alpha_n"] * 100
+            alpha_html = f'<span style="color:{_pnl_color(avg_alpha)};">{avg_alpha:+.1f}%</span>'
+        else:
+            alpha_html = f'<span style="color:{TEXT3};">&mdash;</span>'
         tbody += (
             f"<tr>"
             f"<td {td} style='{_CELL}'>{i+1}</td>"
@@ -81,6 +134,7 @@ def render_attribution_by_symbol() -> str:
             f"<td {td} style='{_CELL}'>{bar}</td>"
             f"<td {td} style='{_CELL}'>{win_rate:.0f}%</td>"
             f"<td {td} style='{_CELL}'>{v['trades']}</td>"
+            f"<td {td} style='{_CELL}'>{alpha_html}</td>"
             f"</tr>"
         )
 
@@ -89,12 +143,12 @@ def render_attribution_by_symbol() -> str:
         f'<tr style="background:{SURFACE};">'
         f'<td colspan="2" {TD0} style="{_CELL}font-weight:{WEIGHT_BOLD};color:{TEXT1};">Total</td>'
         f'<td {TD0} style="{_NUM}color:{total_color};">{_pnl_str(total_pnl)}</td>'
-        f'<td colspan="3" {TD0}></td></tr>'
+        f'<td colspan="4" {TD0}></td></tr>'
     )
     table = _wrap(
         f'<table class="nt-tbl"><thead><tr>'
         f'<th {TH}>#</th><th {TH}>Symbol</th><th {TH}>P&amp;L</th>'
-        f'<th {TH}>Contribution</th><th {TH}>Win Rate</th><th {TH}>Trades</th>'
+        f'<th {TH}>Contribution</th><th {TH}>Win Rate</th><th {TH}>Trades</th><th {TH}>vs SPY</th>'
         f'</tr></thead><tbody>{tbody}{footer}</tbody></table>'
     )
     return f'<div class="nt nt-wrap">{_section("🏆", "By Holding", f"{len(ranked)} symbols · {_pnl_str(total_pnl)} net")}{table}</div>'
@@ -109,13 +163,20 @@ def render_attribution_by_sector() -> str:
     if not rows:
         return _card(_empty_state("🏭", "No closed trades yet", "Sector attribution builds as trades close."))
 
-    sectors: dict[str, dict] = defaultdict(lambda: {"pnl": 0.0, "trades": 0, "wins": 0})
-    for sym, pnl, pct, *_ in rows:
+    spy_hist = _get_sym_hist("SPY")
+
+    sectors: dict[str, dict] = defaultdict(lambda: {"pnl": 0.0, "trades": 0, "wins": 0, "alpha_sum": 0.0, "alpha_n": 0})
+    for row in rows:
+        sym, pnl, pct = row[0], row[1], row[2]
         sector = SECTOR_MAP.get(sym, "Other")
         sectors[sector]["pnl"] += float(pnl or 0)
         sectors[sector]["trades"] += 1
         if (pct or 0) > 0:
             sectors[sector]["wins"] += 1
+        alpha = _trade_alpha(row, spy_hist)
+        if alpha is not None:
+            sectors[sector]["alpha_sum"] += alpha
+            sectors[sector]["alpha_n"] += 1
 
     ranked = sorted(sectors.items(), key=lambda kv: kv[1]["pnl"], reverse=True)
     total_pnl = sum(v["pnl"] for v in sectors.values())
@@ -132,6 +193,11 @@ def render_attribution_by_sector() -> str:
             f'<div style="background:{bar_color};height:100%;width:{bar_pct:.0f}%;border-radius:2px;"></div></div>'
         )
         share = v["pnl"] / total_pnl * 100 if total_pnl else 0
+        if v["alpha_n"] > 0:
+            avg_alpha = v["alpha_sum"] / v["alpha_n"] * 100
+            alpha_html = f'<span style="color:{_pnl_color(avg_alpha)};">{avg_alpha:+.1f}%</span>'
+        else:
+            alpha_html = f'<span style="color:{TEXT3};">&mdash;</span>'
         tbody += (
             f"<tr>"
             f"<td {td} style='{_CELL}font-weight:{WEIGHT_BOLD};color:{TEXT1};'>{sector.replace('_', ' ')}</td>"
@@ -139,13 +205,14 @@ def render_attribution_by_sector() -> str:
             f"<td {td} style='{_CELL}'>{bar}</td>"
             f"<td {td} style='{_CELL}color:{TEXT3};'>{share:+.0f}%</td>"
             f"<td {td} style='{_CELL}'>{v['trades']}</td>"
+            f"<td {td} style='{_CELL}'>{alpha_html}</td>"
             f"</tr>"
         )
 
     table = _wrap(
         f'<table class="nt-tbl"><thead><tr>'
         f'<th {TH}>Sector</th><th {TH}>P&amp;L</th>'
-        f'<th {TH}>Contribution</th><th {TH}>Share</th><th {TH}>Trades</th>'
+        f'<th {TH}>Contribution</th><th {TH}>Share</th><th {TH}>Trades</th><th {TH}>vs SPY</th>'
         f'</tr></thead><tbody>{tbody}</tbody></table>'
     )
     return f'<div class="nt nt-wrap">{_section("🏭", "By Sector", f"{len(ranked)} sectors")}{table}</div>'
@@ -319,7 +386,7 @@ def render_attribution_by_trade() -> str:
         html = ""
         n = len(trades)
         for i, r in enumerate(trades):
-            sym, pnl, pct, *_, ts = r
+            sym, pnl, pct, *_, ts, _holding_days = r
             td = TD if (i < n - 1 or last_border) else TD0
             color = _pnl_color(float(pnl or 0))
             date = str(ts)[:10] if ts else "—"
