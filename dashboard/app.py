@@ -131,17 +131,29 @@ import traceback as _tb_init
 def _safe_fig(fn):
     try:
         return fn()
-    except Exception:
+    except Exception as exc:
         import plotly.graph_objects as _go
         logger.error(f"[startup] chart render failed: {fn.__name__}\n{_tb_init.format_exc()}")
-        return _go.Figure()
+        fig = _go.Figure()
+        fig.add_annotation(text=f"Chart error: {exc}", xref="paper", yref="paper",
+                           x=0.5, y=0.5, showarrow=False, font=dict(color="#ff5252"))
+        return fig
 
-def _safe_html(fn, fallback=""):
+def _safe_html(fn, fallback=None):
     try:
         return fn()
-    except Exception:
+    except Exception as exc:
         logger.error(f"[startup] HTML render failed: {fn.__name__}\n{_tb_init.format_exc()}")
-        return fallback
+        if fallback is not None:
+            return fallback
+        return (
+            f'<div style="background:#171a21;border:1px solid #ff5252;'
+            f'border-left:3px solid #ff5252;border-radius:8px;padding:16px 20px;margin:8px 0;">'
+            f'<div style="font-size:15px;font-weight:700;color:#ff5252;margin-bottom:6px;">'
+            f'&#9888; {fn.__name__} unavailable</div>'
+            f'<div style="font-size:11px;color:#b0b7c3;line-height:1.7;">'
+            f'{type(exc).__name__}: {str(exc)[:120]}<br>Full details in logs/errors.log</div></div>'
+        )
 
 logger.info("[startup] pre-rendering all components...")
 _executor = _cf.ThreadPoolExecutor(max_workers=13)
@@ -167,9 +179,15 @@ _chart_futs = {
 def _wait(key, timeout):
     try:
         return _chart_futs[key].result(timeout=timeout)
-    except Exception:
+    except Exception as exc:
         logger.warning(f"[startup] {key} timed out or failed after {timeout}s")
-        return _go.Figure() if key not in ("news", "market_mood") else ""
+        if key in ("news", "market_mood"):
+            return (f'<div style="color:#ff5252;font-size:12px;padding:8px;">'
+                    f'&#9888; {key} unavailable: timed out after {timeout}s</div>')
+        fig = _go.Figure()
+        fig.add_annotation(text=f"Timed out after {timeout}s: {exc}", xref="paper", yref="paper",
+                           x=0.5, y=0.5, showarrow=False, font=dict(color="#ff5252"))
+        return fig
 
 import plotly.graph_objects as _go
 _ci = {
@@ -309,9 +327,10 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
         with gr.TabItem("📊 Performance"):
             scorecard_out = registry.mount("scorecard_out", gr.HTML(value=""))
             metrics_out   = registry.mount("metrics_out",   gr.HTML(value=_ci["metrics"]))
-            with gr.Row():
-                attribution_symbol_out = registry.mount("attribution_symbol_out", gr.HTML(value=render_attribution_by_symbol))
-                attribution_sector_out = registry.mount("attribution_sector_out", gr.HTML(value=render_attribution_by_sector))
+            # Full width, stacked — both tables grew a "vs SPY" column and no longer
+            # fit two-up without truncating dollar amounts with an ellipsis.
+            attribution_symbol_out = registry.mount("attribution_symbol_out", gr.HTML(value=render_attribution_by_symbol))
+            attribution_sector_out = registry.mount("attribution_sector_out", gr.HTML(value=render_attribution_by_sector))
             with gr.Row():
                 attribution_model_out = registry.mount("attribution_model_out", gr.HTML(value=render_attribution_by_model))
                 attribution_trade_out = registry.mount("attribution_trade_out", gr.HTML(value=render_attribution_by_trade))

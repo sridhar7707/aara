@@ -85,8 +85,8 @@ def render_executive_summary() -> str:
         if health and health.last_execution_time:
             et = health.last_execution_time.astimezone(ZoneInfo("America/New_York"))
             last_cycle = et.strftime("%I:%M %p ET")
-    except Exception:
-        pass
+    except Exception as exc:
+        _logger.debug(f"render_executive_summary: last_cycle: {exc}")
 
     line1 = (
         f'<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;">'

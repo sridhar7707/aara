@@ -82,7 +82,11 @@ def render_positions() -> str:
 
         td  = TD if i < n - 1 else TD0
         reason = r.reason
-        pnl_d_str = f'{r.pnl_dollar:+,.2f}' if r.pnl_dollar != 0 else '0.00'
+        # Rounded to whole dollars so "+5.7% ($+344)" fits the column without the
+        # shared .nt-wrap td { max-width:200px; ellipsis } rule silently clipping
+        # it to "($+344.0..." — full cents precision still available on hover.
+        pnl_d_str      = f'{r.pnl_dollar:+,.0f}' if r.pnl_dollar != 0 else '0'
+        pnl_d_str_full = f'{r.pnl_dollar:+,.2f}'
         days_str  = f'{r.days_held}d' if r.days_held > 0 else '—'
         days_c    = TEXT2 if r.days_held <= 7 else (NEURAL if r.days_held <= 14 else LOSS)
         stop_str  = f'${r.stop_price:.2f}' if r.stop_price else '—'
@@ -98,8 +102,8 @@ def render_positions() -> str:
             f'<td {td}>{conf_html}</td>'
             f'<td {td}><span style="font-weight:{WEIGHT_BOLD};color:{r.pnl_color};">'
             f'{r.pnl_pct:+.1f}%</span>'
-            f'<span style="font-size:{FONT_LABEL};color:{r.pnl_color};margin-left:4px;">'
-            f'(${pnl_d_str})</span></td>'
+            f'<span style="font-size:{FONT_LABEL};color:{r.pnl_color};margin-left:4px;" '
+            f'title="${pnl_d_str_full}">(${pnl_d_str})</span></td>'
             f'<td {td}><span style="font-size:{FONT_LABEL};color:{days_c};">'
             f'{days_str}</span></td>'
             f'<td {td}><span style="font-size:{FONT_LABEL};color:{stop_c};">'

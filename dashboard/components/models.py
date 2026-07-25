@@ -39,7 +39,8 @@ def render_paper_trading_scorecard() -> str:
             f'</div>'
         )
 
-    daily = (df.dropna(subset=["portfolio_value"])
+    # Exclude SELL_RECONCILE — see charts.py render_equity_chart for why.
+    daily = (df[df["action"] != "SELL_RECONCILE"].dropna(subset=["portfolio_value"])
                .groupby("date")["portfolio_value"].last()
                .reset_index().sort_values("date"))
     daily.columns = ["date", "value"]
@@ -229,7 +230,8 @@ def render_institutional_metrics() -> str:
         msg = f'<div style="color:{TEXT2};text-align:center;padding:28px;font-size:{FONT_LABEL};">No trade history yet.</div>'
         return f'<div class="nt nt-wrap">{_section("📐","Performance Deep Dive")}{_wrap(msg)}</div>'
 
-    daily = (df.dropna(subset=["portfolio_value"])
+    # Exclude SELL_RECONCILE — see render_paper_trading_scorecard for why.
+    daily = (df[df["action"] != "SELL_RECONCILE"].dropna(subset=["portfolio_value"])
                .groupby("date")["portfolio_value"].last()
                .reset_index()
                .sort_values("date"))

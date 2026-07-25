@@ -329,8 +329,8 @@ def render_ai_committee() -> str:
                         "lstm": float(lb.get("lstm_prob",       0.0) or 0.0),
                         "sent": float(lb.get("sentiment_score", 0.0) or 0.0),
                     }
-    except Exception:
-        pass
+    except Exception as exc:
+        _logger.debug(f"render_ai_panel: raw score rebuild: {exc}")
 
     for i, vm in enumerate(vms):
         border_b = f'border-bottom:1px solid {BORDER};' if i < len(vms) - 1 else ''

@@ -95,7 +95,6 @@ def render_recommendation_history() -> str:
 
     n         = len(recs)
     n_changes = sum(1 for r in recs if r[4] and r[4] != r[2])
-    note      = f"{n} signals · {n_changes} changes" if n_changes else f"{n} signals"
 
     def _sort_key(row):
         symbol, pred_date, rec = row[0], row[1], str(row[2] or "")
@@ -107,7 +106,11 @@ def render_recommendation_history() -> str:
             return (1, -conf)   # pending buys second
         return (2, -conf)       # holds / other last
 
-    sorted_recs = sorted(recs, key=_sort_key)
+    # Cap what renders (200 unbounded rows -> ~10,000px scroll).
+    _SHOWN = 25
+    sorted_recs = sorted(recs, key=_sort_key)[:_SHOWN]
+    shown_note  = f"{len(sorted_recs)} of {n} signals" if n > _SHOWN else f"{n} signals"
+    note        = f"{shown_note} · {n_changes} changes" if n_changes else shown_note
 
     rows = ""
     for i, row in enumerate(sorted_recs):
@@ -115,7 +118,7 @@ def render_recommendation_history() -> str:
          price_at_rec, regime, sl_score,
          xgb_prob, lstm_prob, feature_drivers) = row
 
-        is_last  = (i == n - 1)
+        is_last  = (i == len(sorted_recs) - 1)
         td       = TD0 if is_last else TD
         rec      = str(rec or "—")
         conf     = float(conf or sl_score or 0)

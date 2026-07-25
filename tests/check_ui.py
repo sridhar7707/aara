@@ -1,9 +1,16 @@
 """
 Playwright visual UI check for TradeGenius dashboard.
 
-Starts the Gradio server, opens every tab, asserts every key section is visible,
-and takes a full-page screenshot. Run this manually any time you want to verify
-the look & feel and data is showing correctly.
+Starts the real dashboard (dashboard/app.py — the FastAPI-wrapped Gradio app
+that's actually deployed to HuggingFace Spaces), opens every tab, asserts
+every key section is visible, and takes a full-page screenshot. Run this
+manually any time you want to verify the look & feel and data is showing
+correctly.
+
+Requires a real gradio>=5.0 install (needs Python>=3.10 — see
+docs/DEPENDENCIES.md; local dev on Python 3.9 cannot run this). Run it with
+whichever interpreter has the real requirements.txt/requirements_space.txt
+installed:
 
 Usage:
     python tests/check_ui.py                # headless
@@ -22,6 +29,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Windows consoles often default to cp1252, which can't encode the checkmark/
+# cross glyphs this script prints — reconfigure before any output happens.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8")
+
 BASE_DIR  = Path(__file__).parent.parent
 DASH_URL  = "http://localhost:7860"
 SNAP_ROOT = Path(__file__).parent / "snapshots" / "playwright"
@@ -39,21 +52,22 @@ def _warn(msg: str) -> None: print(f"  {_YELLOW}~{_RESET} {msg}")
 def _head(msg: str) -> None: print(f"\n{_BOLD}{msg}{_RESET}")
 
 
-# ── Per-tab check specs ───────────────────────────────────────────────────────
-# (display_name, tab_button_text, assertions, wait_secs)
+# Per-tab check specs: (display_name, tab_button_text, assertions, wait_secs)
 # Assertions: (description, selector)
-#   selector starts with "not:" → content must be ABSENT
+#   selector starts with "not:" -> content must be ABSENT
 #   "not:text=unavailable" is the universal crash detector (safe_render error card)
+#
+# Matches the current 8-tab dashboard/app.py structure (Brief/Portfolio/Analytics/
+# Capital/Trades/Performance/Journal/Settings). Update whenever a tab's section
+# titles change.
 TAB_SPECS: list[tuple[str, str, list[tuple[str, str]], float]] = [
     (
         "Brief",
         "Brief",
         [
-            # Universal crash detector — safe_render error cards contain "unavailable"
             ("No component crash cards",         "not:text=unavailable"),
-            # Immediately-rendered sections (value=callable in app.py)
-            ("Executive summary rendered",       ".nt-wrap"),
-            ("Decision bar rendered",            "text=AI"),
+            ("Portfolio value shown ($)",        "text=$"),
+            ("Decision bar rendered",            "text=Today"),
             ("Morning brief rendered",           "text=Morning"),
             ("Positions snapshot rendered",      "text=Position"),
         ],
@@ -64,15 +78,27 @@ TAB_SPECS: list[tuple[str, str, list[tuple[str, str]], float]] = [
         "Portfolio",
         [
             ("No component crash cards",         "not:text=unavailable"),
-            ("Portfolio value shown ($)",        "text=$"),
             ("Weekly summary rendered",          "text=Week"),
-            ("Daily headline rendered",          "text=Portfolio"),
+            ("Portfolio Health hero rendered",   "text=Portfolio Health"),
+            ("Today stat shown in hero",         "text=Today"),
             ("Equity chart rendered",            "#equity-chart"),
             ("Open positions rendered",          "text=Position"),
             ("Trade log rendered",               "text=Trade"),
-            ("Watchlist rendered",               "text=Watch"),
         ],
         4.0,
+    ),
+    (
+        "Analytics",
+        "Analytics",
+        [
+            ("No component crash cards",         "not:text=unavailable"),
+            ("Decision Center rendered",         "text=Decision Center"),
+            ("Watchlist rendered",               "text=Watch"),
+            ("Market mood rendered",             "text=Market Mood"),
+            ("Risk panel rendered",              "text=Risk"),
+            ("News rendered",                    "text=News"),
+        ],
+        5.0,
     ),
     (
         "Capital",
@@ -81,7 +107,7 @@ TAB_SPECS: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("No component crash cards",         "not:text=unavailable"),
             ("Capital overview rendered",        "text=Initial Deposit"),
             ("Managed Capital Pool shown",       "text=Managed Capital Pool"),
-            ("Tradeable cash row shown",         "text=Tradeable"),
+            ("Tradeable cash row shown",          "text=Tradeable"),
             ("Reserve row shown",                "text=Reserve"),
             ("Invested row shown",               "text=Invested"),
             ("Profit breakdown rendered",        "text=Realized"),
@@ -108,10 +134,21 @@ TAB_SPECS: list[tuple[str, str, list[tuple[str, str]], float]] = [
         [
             ("No component crash cards",         "not:text=unavailable"),
             ("Institutional metrics rendered",   "text=Win Rate"),
-            ("Attribution by symbol shown",      "text=Attribution"),
+            ("Attribution by holding shown",     "text=By Holding"),
+            ("vs SPY column shown",              "text=vs SPY"),
+            ("Confidence Calibration rendered",  "text=Confidence Calibration"),
             ("Investor view rendered",           "text=Investor"),
         ],
         4.0,
+    ),
+    (
+        "Journal",
+        "Journal",
+        [
+            ("No component crash cards",         "not:text=unavailable"),
+            ("Trade Journal rendered",           "text=Trade Journal"),
+        ],
+        3.0,
     ),
     (
         "Settings",
@@ -129,21 +166,21 @@ TAB_SPECS: list[tuple[str, str, list[tuple[str, str]], float]] = [
 ]
 
 
-# ── Server management ─────────────────────────────────────────────────────────
+# -- Server management ---------------------------------------------------------
 
 def _server_alive() -> bool:
     try:
         import urllib.request
-        urllib.request.urlopen(f"{DASH_URL}/info", timeout=2)
+        urllib.request.urlopen(f"{DASH_URL}/config", timeout=2)
         return True
     except Exception:
         return False
 
 
 def start_server() -> subprocess.Popen:
-    print("Starting dashboard server …")
+    print("Starting dashboard server (dashboard/app.py) ...")
     return subprocess.Popen(
-        [sys.executable, "scripts/dashboard.py"],
+        [sys.executable, "dashboard/app.py"],
         cwd=str(BASE_DIR),
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -151,7 +188,7 @@ def start_server() -> subprocess.Popen:
 
 
 def wait_for_server(timeout: int = 120) -> bool:
-    print(f"Waiting for server on {DASH_URL} (up to {timeout}s) …", end="", flush=True)
+    print(f"Waiting for server on {DASH_URL} (up to {timeout}s) ...", end="", flush=True)
     deadline = time.time() + timeout
     while time.time() < deadline:
         if _server_alive():
@@ -163,7 +200,7 @@ def wait_for_server(timeout: int = 120) -> bool:
     return False
 
 
-# ── Assertion runner ──────────────────────────────────────────────────────────
+# -- Assertion runner -----------------------------------------------------------
 
 def _check(page, description: str, selector: str) -> tuple[bool, str]:
     if selector.startswith("not:"):
@@ -183,14 +220,15 @@ def _check(page, description: str, selector: str) -> tuple[bool, str]:
 
 def run_all_tabs(page, snap_dir: Path) -> list[dict]:
     results = []
-    page.goto(DASH_URL, wait_until="networkidle", timeout=60_000)
-    time.sleep(2)
+    # Not "networkidle" — Gradio keeps a live SSE/WebSocket connection open for
+    # timer ticks, so the network never goes idle and this would always time out.
+    page.goto(DASH_URL, wait_until="load", timeout=60_000)
+    time.sleep(3)
 
     for tab_name, btn_text, assertions, wait_secs in TAB_SPECS:
         _head(f"[{tab_name}]")
         checks: list[tuple[bool, str, str]] = []
 
-        # Click the tab
         clicked = False
         for selector in [f'[role="tab"]:has-text("{btn_text}")',
                          f'button:has-text("{btn_text}")',
@@ -218,7 +256,7 @@ def run_all_tabs(page, snap_dir: Path) -> list[dict]:
         snap_path = snap_dir / f"{tab_name.lower()}.png"
         try:
             page.screenshot(path=str(snap_path), full_page=True)
-            _ok(f"Screenshot → {snap_path.relative_to(BASE_DIR)}")
+            _ok(f"Screenshot -> {snap_path.relative_to(BASE_DIR)}")
         except Exception as exc:
             _warn(f"Screenshot failed: {exc}")
             snap_path = None
@@ -233,7 +271,7 @@ def run_all_tabs(page, snap_dir: Path) -> list[dict]:
     return results
 
 
-# ── Report ────────────────────────────────────────────────────────────────────
+# -- Report -----------------------------------------------------------------
 
 def print_report(results: list[dict], snap_dir: Path) -> int:
     _head("=" * 60)
@@ -258,14 +296,14 @@ def print_report(results: list[dict], snap_dir: Path) -> int:
     return 0
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# -- Entry point --------------------------------------------------------------
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="TradeGenius Playwright UI check")
     parser.add_argument("--headed",    action="store_true",
                         help="Show browser window (default: headless)")
     parser.add_argument("--no-server", action="store_true",
-                        help="Skip server startup — assume :7860 is already running")
+                        help="Skip server startup -- assume :7860 is already running")
     parser.add_argument("--timeout",   type=int, default=120,
                         help="Server startup timeout in seconds (default 120)")
     args = parser.parse_args()
@@ -278,7 +316,7 @@ def main() -> None:
         print(f"Using existing server on {DASH_URL}")
     else:
         if _server_alive():
-            print(f"Server already running on {DASH_URL} — skipping startup")
+            print(f"Server already running on {DASH_URL} -- skipping startup")
         else:
             proc = start_server()
             if not wait_for_server(timeout=args.timeout):

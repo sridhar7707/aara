@@ -95,7 +95,13 @@ def render_equity_chart(period: str = "All Time") -> Any:
             if _snap_daily is not None:
                 daily = _snap_daily
             else:
-                daily = df.groupby("date")["portfolio_value"].last().reset_index()
+                # SELL_RECONCILE rows record whatever portfolio_value the broker
+                # returned at the moment of a (possibly transient/erroneous)
+                # empty-positions read — excluded everywhere else pnl-relevant
+                # trades are aggregated; must be excluded here too or a single
+                # bad reconcile event shows as a fake one-day crash-and-recover.
+                _chart_df = df[df["action"] != "SELL_RECONCILE"] if "action" in df.columns else df
+                daily = _chart_df.groupby("date")["portfolio_value"].last().reset_index()
                 daily.columns = ["date", "value"]
                 daily["date"] = pd.to_datetime(daily["date"])
 

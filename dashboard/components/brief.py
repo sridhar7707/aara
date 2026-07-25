@@ -45,8 +45,8 @@ def _spy_pct_today() -> float:
             )
         else:
             _spy_cache["pct"] = 0.0
-    except Exception:
-        pass
+    except Exception as exc:
+        _logger.debug(f"_spy_pct: yfinance fallback: {exc}")
     _spy_cache["ts"] = now
     return _spy_cache["pct"]
 
@@ -122,8 +122,8 @@ def _opportunity_and_risk() -> tuple[str, str]:
             for sym, sc in rows:
                 if sym in open_pos:
                     scores[sym] = float(sc or 0.0)
-    except Exception:
-        pass
+    except Exception as exc:
+        _logger.debug(f"_best_worst_symbols: signal_log query: {exc}")
 
     if scores:
         best_sym = max(scores, key=lambda s: scores[s])
@@ -149,8 +149,8 @@ def _action_items() -> list[str]:
             elif rec == "TRIM":
                 pct = sa.get("trim_amount_pct", 25)
                 items.append(f"Trim {sym} {pct}%")
-        except Exception:
-            pass
+        except Exception as exc:
+            _logger.debug(f"_action_items: {sym}: {exc}")
     return items[:5]
 
 
@@ -414,8 +414,8 @@ def render_scheduler_status() -> str:
         try:
             nxt = health.last_execution_time + datetime.timedelta(minutes=_CRON_INTERVAL_MINS)
             next_cycle = _et_label(nxt.isoformat())
-        except Exception:
-            pass
+        except Exception as exc:
+            _logger.debug(f"render_scheduler_status: next_cycle: {exc}")
 
     trades_today = session.trades_today if session else 0
     avg_ms       = int(health.avg_execution_time_ms) if health else 0

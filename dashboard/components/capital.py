@@ -6,14 +6,13 @@ from loguru import logger
 import plotly.graph_objects as go
 
 from dashboard.design_system import (
-    BG, SURFACE, SURFACE2, BORDER, TEXT1, TEXT2, TEXT3,
-    GAIN, LOSS, NEURAL, PRIMARY,
-    FONT_HERO, FONT_SECTION, FONT_VALUE, FONT_LABEL, WEIGHT_BOLD,
-    PLOTLY_LAYOUT, _section,
+    SURFACE, SURFACE2, BORDER, TEXT1, TEXT2, TEXT3,
+    GAIN, LOSS, NEURAL, PRIMARY, FONT_HERO, FONT_SECTION, FONT_VALUE, FONT_LABEL,
+    WEIGHT_BOLD, PLOTLY_LAYOUT, _section,
 )
 from dashboard.data import get_data, safe_query
 from database.user_settings import get_setting, save_setting
-from bot.core.error_logger import safe_render, timed
+from bot.core.error_logger import safe_render, timed, log_exception
 from bot.core.recommendation_portfolio import _portfolio_val
 
 _logger = logger
@@ -25,8 +24,8 @@ def _initial_deposit() -> float:
     if custom:
         try:
             return float(custom)
-        except Exception:
-            pass
+        except Exception as exc:
+            _logger.debug(f"_initial_deposit: custom setting: {exc}")
     # Try portfolio snapshots, then trades (earliest recorded value)
     for sql in (
         "SELECT portfolio_value FROM portfolio_snapshots WHERE portfolio_value > 0 ORDER BY timestamp ASC LIMIT 1",
@@ -36,15 +35,15 @@ def _initial_deposit() -> float:
             row = safe_query(sql, default=[])
             if row:
                 return float(row[0][0])
-        except Exception:
-            pass
+        except Exception as exc:
+            _logger.debug(f"_initial_deposit: {sql[:40]}...: {exc}")
     # Last resort: use the live Alpaca account value from the dashboard cache
     try:
         pv_str = get_data().get("portfolio", "")
         if pv_str:
             return float(pv_str.replace("$", "").replace(",", ""))
-    except Exception:
-        pass
+    except Exception as exc:
+        _logger.debug(f"_initial_deposit: live cache fallback: {exc}")
     return _DEFAULT_DEPOSIT
 
 
@@ -73,14 +72,12 @@ def _capital_stats() -> dict:
     realized = 0.0
     try:
         rows = safe_query(
-            "SELECT SUM(pnl_pct * notional / 100.0) FROM trades "
-            "WHERE action LIKE 'SELL%' AND pnl_pct IS NOT NULL AND notional IS NOT NULL",
-            default=[],
-        )
+            "SELECT SUM(pnl_pct * notional / 100.0) FROM trades WHERE action LIKE 'SELL%' "
+            "AND pnl_pct IS NOT NULL AND notional IS NOT NULL", default=[])
         if rows and rows[0][0] is not None:
             realized = float(rows[0][0])
-    except Exception:
-        pass
+    except Exception as exc:
+        _logger.debug(f"_capital_stats: realized query: {exc}")
     unrealized = ai_profit - realized
     best_sym, best_pnl = "&mdash;", 0.0
     worst_sym, worst_pnl = "&mdash;", 0.0
@@ -92,8 +89,8 @@ def _capital_stats() -> dict:
         rows = safe_query(_base + "ASC LIMIT 1", default=[])
         if rows:
             worst_sym, worst_pnl = rows[0][0], float(rows[0][1] or 0)
-    except Exception:
-        pass
+    except Exception as exc:
+        _logger.debug(f"_capital_stats: best/worst query: {exc}")
     return {
         "pv": pv, "initial": initial, "ai_profit": ai_profit,
         "realized": realized, "unrealized": unrealized,
@@ -103,8 +100,9 @@ def _capital_stats() -> dict:
 
 
 def _pnl_colored(val: float) -> tuple[str, str]:
+    """Format a signed dollar amount with an explicit +/- sign (color alone isn't reliable)."""
     color = GAIN if val >= 0 else LOSS
-    return f'{"+" if val >= 0 else ""}${abs(val):,.2f}', color
+    return f'{"+" if val >= 0 else "-"}${abs(val):,.2f}', color
 
 
 @timed(_logger)
@@ -152,8 +150,9 @@ def render_capital_chart() -> go.Figure:
     layout = dict(PLOTLY_LAYOUT)
     try:
         rows = safe_query(
-            "SELECT timestamp, portfolio_value FROM portfolio_snapshots "
-            "WHERE portfolio_value > 0 ORDER BY timestamp ASC",
+            "SELECT timestamp, portfolio_value FROM portfolio_snapshots ps WHERE portfolio_value > 0 "
+            "AND NOT EXISTS (SELECT 1 FROM trades t WHERE t.action = 'SELL_RECONCILE' "
+            "AND t.portfolio_value = ps.portfolio_value) ORDER BY timestamp ASC",
             default=[],
         )
         if rows:
@@ -162,13 +161,18 @@ def render_capital_chart() -> go.Figure:
             fig.add_trace(go.Scatter(
                 x=dates, y=vals, name="TradeGenius Capital",
                 line=dict(color=GAIN, width=2),
-                fill="tozeroy", fillcolor=f"{GAIN}22",
+                fill="tozeroy", fillcolor="rgba(0,200,83,0.13)",
             ))
-    except Exception:
-        pass
-    layout.update({"title": "", "xaxis_title": "", "yaxis_title": "Portfolio Value ($)", "showlegend": False})
-    fig.update_layout(**layout)
-    return fig
+        layout.update({"title": "", "xaxis_title": "", "yaxis_title": "Portfolio Value ($)", "showlegend": False})
+        fig.update_layout(**layout)
+        return fig
+    except Exception as exc:
+        log_exception(_logger, "render_capital_chart", exc)
+        fig = go.Figure()
+        fig.update_layout(**{k: v for k, v in PLOTLY_LAYOUT.items() if k not in ("xaxis", "yaxis")})
+        fig.add_annotation(text=f"Chart error: {exc}", xref="paper", yref="paper",
+                           x=0.5, y=0.5, showarrow=False, font=dict(color=LOSS))
+        return fig
 
 
 @timed(_logger)

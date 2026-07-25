@@ -45,8 +45,8 @@ def _get_daily_actions() -> list[dict]:
                 }
                 for r in rows
             ]
-    except Exception:
-        pass
+    except Exception as exc:
+        _logger.debug(f"render_decision_bar: query: {exc}")
     # Fallback: derive from sell analysis
     from dashboard.components.brief import _action_items
     items = _action_items()
