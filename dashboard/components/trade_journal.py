@@ -165,7 +165,7 @@ def render_trade_journal() -> str:
 
 
 register(ComponentSpec(
-    key="trade_journal",
+    key="trade_journal_out",
     group=RefreshGroup.SLOW,
     render_fn=render_trade_journal,
     priority=55,
