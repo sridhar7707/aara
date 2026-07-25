@@ -20,9 +20,23 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tempfile
 
 import gradio as gr
 import pytest
+
+# analytics_service.py opens a module-level, class-shared DuckDB connection on
+# import (database/repositories/analytics_repository.py:55) and holds it for
+# the life of the process. If an earlier test in this same pytest session
+# already imported it, that connection still holds the real analytics.duckdb
+# file locked — DuckDB only allows one writer per file — so this subprocess's
+# own `import dashboard.app` would collide on the same physical path. Point it
+# at an isolated temp DB instead of the real one before the import chain runs.
+_ISOLATE_DB = (
+    "import database.repositories.analytics_repository as _ar, pathlib, tempfile;"
+    "_ar.DB_PATH = pathlib.Path(tempfile.mkdtemp()) / 'analytics_test.duckdb';"
+    "import dashboard.app"
+)
 
 
 @pytest.mark.skipif(
@@ -38,7 +52,7 @@ def test_dashboard_app_imports_without_crashing():
     missing mounts, and any other module-level wiring error that unit tests can't see
     because they never construct the actual gr.Blocks app."""
     result = subprocess.run(
-        [sys.executable, "-c", "import dashboard.app"],
+        [sys.executable, "-c", _ISOLATE_DB],
         cwd=".",
         capture_output=True,
         text=True,
