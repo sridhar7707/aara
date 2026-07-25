@@ -155,18 +155,6 @@ def _init_v2_tables(con: sqlite3.Connection) -> None:
                 "confidence_today INTEGER, action_yesterday TEXT, action_today TEXT,"
                 "action_changed INTEGER DEFAULT 0, change_reason TEXT,"
                 "significance TEXT DEFAULT 'minor', UNIQUE(symbol, change_date))")
-    con.execute("CREATE TABLE IF NOT EXISTS investor_profile ("
-                "id INTEGER PRIMARY KEY, last_updated TEXT,"
-                "avg_hold_duration_days REAL DEFAULT 0.0, early_exit_rate REAL DEFAULT 0.0,"
-                "trim_compliance_rate REAL DEFAULT 0.0,"
-                "best_performing_sectors TEXT DEFAULT '[]',"
-                "worst_performing_sectors TEXT DEFAULT '[]',"
-                "best_market_condition TEXT, worst_market_condition TEXT,"
-                "behavioral_insights TEXT DEFAULT '[]', ai_adaptations TEXT DEFAULT '[]')")
-    con.execute("CREATE TABLE IF NOT EXISTS behavioral_observations ("
-                "observation_id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                "observation_date TEXT NOT NULL, observation_type TEXT NOT NULL,"
-                "symbol TEXT, trade_id INTEGER, outcome TEXT, notes TEXT)")
 
 
 def _anchor_daily_start(con: sqlite3.Connection) -> tuple[float | None, str]:
