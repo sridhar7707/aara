@@ -23,6 +23,7 @@ from bot.core.recommendation_engine import (
     get_portfolio_action, get_position_sizing, get_sell_analysis,
     get_recommendation_explanation,
 )
+from bot.core.recommendation_portfolio import _portfolio_val
 _logger = logger
 
 
@@ -33,11 +34,7 @@ def _explain_every_dollar(symbol: str, d: dict, pos: dict | None,
         return ""
     prices = d.get("prices", {})
     cur    = prices.get(symbol, 0.0)
-    pv     = 0.0
-    try:
-        pv = float(d.get("portfolio", "0").replace("$", "").replace(",", ""))
-    except (ValueError, TypeError) as exc:
-        _logger.debug(f"symbol_detail: portfolio value parse: {exc}")
+    pv     = _portfolio_val(d)
 
     # Portfolio weight
     cur_val = pos["shares"] * cur if cur > 0 else pos["invested"]

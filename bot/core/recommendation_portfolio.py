@@ -24,6 +24,16 @@ _FALLBACK_HEALTH = {"total": 0, "grade": "—", "grade_label": "Unknown",
 
 
 def _portfolio_val(d: dict) -> float:
+    """Single source of truth for reading portfolio value out of the data dict.
+
+    Prefers the pre-parsed float (avoids a string round-trip); falls back to
+    parsing the display string for callers/fixtures that only set "portfolio".
+    """
+    if "portfolio_value_raw" in d:
+        try:
+            return float(d["portfolio_value_raw"])
+        except (TypeError, ValueError):
+            return 0.0
     try:
         pv = d.get("portfolio", "—")
         return float(str(pv).replace("$", "").replace(",", "")) if pv != "—" else 0.0

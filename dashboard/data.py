@@ -31,7 +31,7 @@ _PRICE_CACHE_TTL: float = 3600.0
 
 _EMPTY_CACHE: dict = {
     "open_pos": {}, "prices": {}, "trades_df": pd.DataFrame(),
-    "portfolio": "&mdash;", "cash": 0.0, "regime_raw": "Unknown",
+    "portfolio": "&mdash;", "portfolio_value_raw": 0.0, "cash": 0.0, "regime_raw": "Unknown",
     "total_trades": 0, "buy_count": 0, "sell_count": 0, "win_count": 0,
     "recent_trades": [],
     "vix": 0.0, "spy_pct": 0.0, "avg_confidence": 0.0, "sentiment_avg": 0.0,
@@ -249,8 +249,9 @@ def _refresh_cache() -> dict:
     result["win_count"]    = int((sells_mask & (df["pnl_pct"] > 0)).sum())
 
     last = df.iloc[-1]
-    result["portfolio"]  = (f"${last['portfolio_value']:,.2f}"
-                            if pd.notna(last["portfolio_value"]) else "&mdash;")
+    _pv_known = pd.notna(last["portfolio_value"])
+    result["portfolio"]      = f"${last['portfolio_value']:,.2f}" if _pv_known else "&mdash;"
+    result["portfolio_value_raw"] = float(last["portfolio_value"]) if _pv_known else 0.0
     result["regime_raw"] = (str(last["regime"] or "Unknown")).replace("_", " ")
 
     try:

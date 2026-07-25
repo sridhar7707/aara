@@ -11,6 +11,7 @@ from dashboard.design_system import (
 )
 from dashboard.data import get_data, safe_query, _market_status
 from bot.core.error_logger import safe_render, timed
+from bot.core.recommendation_portfolio import _portfolio_val
 
 _logger = logger
 
@@ -46,11 +47,7 @@ def render_executive_summary() -> str:
     d = get_data()
     mkt_label, mkt_color = _market_status()
 
-    try:
-        pv = float(d.get("portfolio", "0").replace("$", "").replace(",", ""))
-    except (ValueError, TypeError) as exc:
-        _logger.debug(f"render_executive_summary: portfolio parse: {exc}")
-        pv = 0.0
+    pv = _portfolio_val(d)
 
     delta, delta_pct = _today_pnl()
     delta_color = GAIN if delta >= 0 else LOSS

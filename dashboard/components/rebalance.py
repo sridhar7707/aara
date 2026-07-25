@@ -18,6 +18,7 @@ from dashboard.data import get_data
 from dashboard.builders import build_rebalance_vm
 from bot.core.error_logger import safe_render, timed
 from bot.core.recommendation_engine import get_portfolio_health
+from bot.core.recommendation_portfolio import _portfolio_val
 _logger = logger
 
 
@@ -33,11 +34,7 @@ def render_rebalance() -> str:
                 f'{_card(_empty_state("💰", "Fully in cash", "Rebalance panel activates once the bot holds positions."))}</div>')
 
     d = get_data()
-    _pv = 0.0
-    try:
-        _pv = float(d["portfolio"].replace("$","").replace(",","")) if d["portfolio"] != "&mdash;" else 0.0
-    except Exception as exc:
-        logger.debug(f"parse_portfolio_value render_rebalance: {exc}")
+    _pv = _portfolio_val(d)
 
     prices = d.get("prices", {})
     open_pos = d.get("open_pos", {})

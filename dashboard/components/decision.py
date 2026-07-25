@@ -20,8 +20,6 @@ _logger = logger
 
 
 # ── PANEL: Decision Center &mdash; what to do with each position ────────────────────
-# NOTE: render_portfolio_actions, render_sell_analysis, render_position_sizing_panel
-#       are consolidated here. They remain functional but are not wired to layout.
 @timed(_logger)
 @safe_render("Decision Center")
 def render_decision_center() -> str:

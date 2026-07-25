@@ -62,22 +62,6 @@ class HealthViewModel:
 
 
 @dataclass
-class ActionRow:
-    number: int
-    symbol: str
-    action: str
-    badge_size: str
-    reason: str
-    detail: str
-    urgency: str        # "high" | "medium" | "low"
-    row_bg: str
-    row_border: str
-    sym_color: str
-    rsn_color: str
-    confidence: int = 0
-
-
-@dataclass
 class DecisionRow:
     symbol: str
     action: str

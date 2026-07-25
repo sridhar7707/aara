@@ -13,6 +13,7 @@ from dashboard.design_system import (
 from dashboard.data import get_data, get_db_conn, DB_PATH, safe_query, _now_ct, _market_status
 from bot.core.error_logger import safe_render, timed, log_exception
 from bot.core.recommendation_engine import get_portfolio_health, get_sell_analysis
+from bot.core.recommendation_portfolio import _portfolio_val
 import os
 
 _CRON_INTERVAL_MINS = 5  # expected cron cadence
@@ -84,13 +85,10 @@ def _market_sentiment() -> str:
 def _cash_pct() -> float:
     """Available cash as % of total portfolio value."""
     d = get_data()
-    try:
-        pv = float(d.get("portfolio", "0").replace("$", "").replace(",", ""))
-        cash = d.get("cash", 0.0)
-        if pv > 0:
-            return round(cash / pv * 100, 1)
-    except Exception:
-        pass
+    pv = _portfolio_val(d)
+    cash = d.get("cash", 0.0)
+    if pv > 0:
+        return round(cash / pv * 100, 1)
     return 0.0
 
 

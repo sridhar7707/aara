@@ -17,12 +17,13 @@ from config import STOP_LOSS_PCT as _STOP_LOSS_PCT, ATR_TRAIL_MULTIPLIER as _ATR
 from dashboard.data import get_data, _to_ct, safe_query
 from dashboard.viewmodels import (
     PositionRow, TradeRow, HealthComponent, HealthViewModel,
-    ActionRow, DecisionRow, RebalanceRow,
+    DecisionRow, RebalanceRow,
     CommitteeMember, CommitteeViewModel,
 )
 from bot.core.recommendation_engine import (
     get_portfolio_action, get_position_sizing, get_sell_analysis, get_portfolio_health,
 )
+from bot.core.recommendation_portfolio import _portfolio_val
 
 
 # ── Color helpers ─────────────────────────────────────────────────────────────
@@ -84,11 +85,7 @@ def build_positions_vm() -> list[PositionRow]:
         _logger.debug(f"build_positions_vm: position_state read: {exc}")
 
     _today = datetime.date.today()
-    _pv = 0.0
-    try:
-        _pv = float(d["portfolio"].replace("$", "").replace(",", "")) if d.get("portfolio", "&mdash;") != "&mdash;" else 0.0
-    except Exception as exc:
-        _logger.debug(f"build_positions_vm: portfolio value parse: {exc}")
+    _pv = _portfolio_val(d)
 
     rows: list[PositionRow] = []
     for sym, v in open_syms.items():
@@ -216,76 +213,6 @@ def build_health_vm() -> HealthViewModel:
         biggest_risk_color=risk_c,
         strengths=list(strengths),
     )
-
-
-# ── Actions builder ────────────────────────────────────────────────────────────
-
-_ACTION_ORDER = {"EXIT": 0, "SELL": 1, "TRIM": 2, "WATCH": 3, "ADD": 4, "BUY": 5, "HOLD": 6}
-
-_URGENCY_ROW_BG = {
-    "high":   ACTION_SELL_BG,
-    "medium": ACTION_TRIM_BG,
-    "low":    "transparent",
-}
-_URGENCY_BORDER = {
-    "high":   ACTION_SELL,
-    "medium": ACTION_TRIM,
-    "low":    "transparent",
-}
-
-
-def build_actions_vm() -> list[ActionRow]:
-    d        = get_data()
-    open_pos = d.get("open_pos", {})
-    recs: list[dict] = []
-    for sym in open_pos:
-        rec   = get_portfolio_action(sym, d)
-        sz    = get_position_sizing(sym, d)
-        action      = rec.get("action", "HOLD")
-        dol_display = sz.get("dollar_display", "&mdash;")
-        # Only show delta for actionable signals; HOLD/WATCH with a negative
-        # delta reads as a loss to users &mdash; suppress it.
-        if action in ("HOLD", "WATCH") and str(dol_display).startswith("-"):
-            dol_display = "&mdash;"
-        recs.append({
-            "symbol":       sym,
-            "action":       action,
-            "confidence":   rec.get("confidence", 0),
-            "reason":       rec.get("reason", "&mdash;"),
-            "detail":       dol_display,
-            "urgency":      rec.get("urgency", "low"),
-        })
-    recs.sort(key=lambda r: (_ACTION_ORDER.get(r["action"], 9), -r["confidence"]))
-
-    rows: list[ActionRow] = []
-    for i, r in enumerate(recs):
-        action  = r["action"]
-        urgency = r["urgency"]
-        _urgent = action in ("EXIT", "SELL")
-        _medium = action in ("TRIM", "BUY", "ADD")
-        badge_size = (
-            "large"  if _urgent or action in ("TRIM", "BUY") else
-            "normal" if action in ("ADD", "WATCH") else
-            "small"
-        )
-        conf   = r["confidence"]
-        sym_c  = TEXT1 if (_urgent or _medium) else TEXT2
-        rsn_c  = LOSS if urgency == "high" else (NEURAL if urgency == "medium" else TEXT2)
-        rows.append(ActionRow(
-            number=i + 1,
-            symbol=r["symbol"],
-            action=action,
-            badge_size=badge_size,
-            reason=r["reason"],
-            detail=r["detail"],
-            urgency=urgency,
-            row_bg=_URGENCY_ROW_BG.get(urgency, "transparent"),
-            row_border=_URGENCY_BORDER.get(urgency, "transparent"),
-            sym_color=sym_c,
-            rsn_color=rsn_c,
-            confidence=conf,
-        ))
-    return rows
 
 
 # ── Decision builder ───────────────────────────────────────────────────────────

@@ -212,28 +212,6 @@ def test_build_health_vm_strengths():
     assert len(vm.strengths) <= 2
 
 
-# ── ActionRow tests ───────────────────────────────────────────────────────────
-
-def test_build_actions_empty_when_no_positions(monkeypatch):
-    import dashboard.builders as bld
-    monkeypatch.setattr(bld, "get_data", lambda: _empty_data())
-    from dashboard.builders import build_actions_vm
-    assert build_actions_vm() == []
-
-
-def test_build_actions_fields(monkeypatch):
-    import dashboard.builders as bld
-    monkeypatch.setattr(bld, "get_data", lambda: _pos_data(["AAPL"]))
-    from dashboard.builders import build_actions_vm
-    from dashboard.viewmodels import ActionRow
-    rows = build_actions_vm()
-    assert len(rows) == 1
-    r = rows[0]
-    assert isinstance(r, ActionRow)
-    assert r.symbol == "AAPL"
-    assert r.action == "HOLD"
-    assert r.confidence == 70
-    assert r.urgency == "low"
 
 
 # ── DecisionRow tests ─────────────────────────────────────────────────────────

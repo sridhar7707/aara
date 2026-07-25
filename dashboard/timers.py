@@ -12,16 +12,34 @@ Batching all callbacks into a single timer.tick() per timer prevents Gradio 5
 from firing N separate sequential SSE events (one per registration), which
 causes components to show loading indicators one-by-one and looks like a
 continuous page refresh on slow servers.
+
+Each batch runs its unique render functions CONCURRENTLY (not in a sequential
+loop). A batch shares one Gradio event, so every one of its outputs sits in a
+pending/spinner state for the full duration of the tick — running sequentially
+means one slow call (e.g. market_mood's yfinance fetch, up to ~20s) freezes
+every other output in the group, including ones that individually take <50ms.
+Running concurrently bounds the wait to the slowest single call instead of the
+sum of all of them.
 """
 from __future__ import annotations
 
+import concurrent.futures as _cf
+
 import gradio as gr
+from loguru import logger
 
 from dashboard.registry import RefreshGroup, by_group, widget, require_widgets
 from dashboard.components.history import render_portfolio_performance, perf_choices, PERF_SEP
 from dashboard.components.symbol_detail import render_symbol_detail
 
 require_widgets("sim_sym_dd", "perf_tabs", "perf_out", "symbol_selector", "symbol_detail_out")
+
+_logger = logger
+
+# Shared across both batches — sized for I/O-bound work (DB reads, yfinance,
+# news), not CPU-bound, so more workers than cores is fine. One pool for the
+# app's lifetime avoids spinning up/tearing down threads every tick.
+_TICK_EXECUTOR = _cf.ThreadPoolExecutor(max_workers=12, thread_name_prefix="dash_tick")
 
 
 def register_all_timers(timer_ui: gr.Timer, timer_data: gr.Timer) -> None:
@@ -32,25 +50,32 @@ def register_all_timers(timer_ui: gr.Timer, timer_data: gr.Timer) -> None:
 
 # ── Shared helper ─────────────────────────────────────────────────────────────
 
+def _safe_call(fn) -> str:
+    """Run a render_fn, falling back to '' if it raises outside its own @safe_render guard."""
+    try:
+        return fn()
+    except Exception as exc:
+        _logger.error(f"tick: {getattr(fn, '__name__', fn)} raised: {exc}")
+        return ""
+
+
 def _batch_tick(timer: gr.Timer, group: RefreshGroup) -> None:
     """Register one batched tick for all specs in *group*.
 
     Deduplicates calls to the same render_fn within a single tick so widgets
     sharing a function (e.g. pos_brief_out and pos_out both using render_positions)
-    only trigger one DB call per cycle.
+    only trigger one DB call per cycle. Unique render functions are submitted to
+    the shared thread pool and run concurrently — see module docstring for why.
     """
-    specs   = by_group(group)
-    fns     = [s.render_fn for s in specs]
-    outputs = [s.output    for s in specs]
+    specs      = by_group(group)
+    fns        = [s.render_fn for s in specs]
+    outputs    = [s.output    for s in specs]
+    unique_fns = list(dict.fromkeys(fns))  # de-dupe, preserve first-seen order
 
     def _tick():
-        cache: dict = {}
-        results = []
-        for fn in fns:
-            if fn not in cache:
-                cache[fn] = fn()
-            results.append(cache[fn])
-        return tuple(results)
+        futures = {fn: _TICK_EXECUTOR.submit(_safe_call, fn) for fn in unique_fns}
+        cache   = {fn: fut.result() for fn, fut in futures.items()}
+        return tuple(cache[fn] for fn in fns)
 
     timer.tick(fn=_tick, outputs=outputs)
 

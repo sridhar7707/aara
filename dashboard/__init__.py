@@ -29,15 +29,6 @@ from dashboard.components.history import (
     render_portfolio_performance,
     perf_choices,
 )
-from dashboard.components.actions import (
-    render_todays_actions,
-    render_portfolio_actions,
-)
-from dashboard.components.analysis import (
-    render_sell_analysis,
-    render_position_sizing_panel,
-    render_position_sizing,
-)
 from dashboard.components.decision import render_decision_center
 from dashboard.components.rebalance import render_rebalance
 from dashboard.components.symbol_detail import (

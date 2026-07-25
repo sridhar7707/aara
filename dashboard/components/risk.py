@@ -15,6 +15,7 @@ from dashboard.design_system import (
 )
 from dashboard.data import get_data, _now_ct
 from bot.core.error_logger import safe_render
+from bot.core.recommendation_portfolio import _portfolio_val
 _logger = logger
 
 _SECTOR_MAP: dict[str, str] = {
@@ -86,12 +87,7 @@ def render_risk_panel() -> str:
     vix      = d.get("vix", 0.0)
     df       = d["trades_df"]
 
-    # Portfolio value as float
-    pv = 0.0
-    try:
-        pv = float(d["portfolio"].replace("$", "").replace(",", "")) if d["portfolio"] != "&mdash;" else 0.0
-    except Exception as exc:
-        logger.debug(f"parse_portfolio_value render_risk_panel: {exc}")
+    pv = _portfolio_val(d)
 
     total_invested = sum(v["invested"] for v in open_pos.values())
     cash_pct = ((pv - total_invested) / pv * 100) if pv > 0 else 100.0

@@ -24,14 +24,13 @@ from dashboard.data import (
 )
 from dashboard.builders import build_health_vm
 from bot.core.error_logger import safe_render, timed, log_exception
+from bot.core.recommendation_portfolio import _portfolio_val
 _logger = logger
 
 
-# ── PANEL 0: Daily Headline ───────────────────────────────────────────────────
-@safe_render("Daily Headline")
-def render_daily_headline() -> str:
-    """Pinned one-liner: today's P&L, trade count, alert count."""
-    d         = get_data()
+# ── Shared: today's $ delta + trade count (feeds the hero's "Today" stat) ─────
+def _today_delta() -> tuple[str, str]:
+    """Return (delta_str, color) for today's portfolio $ change vs yesterday."""
     today_str = str(datetime.date.today())
     yest_str  = str(datetime.date.today() - datetime.timedelta(days=1))
 
@@ -56,29 +55,17 @@ def render_daily_headline() -> str:
         sign      = "+" if delta_d >= 0 else ""
         delta_str = f"{arrow} {sign}${abs(delta_d):,.0f} ({delta_pct:+.2f}%)"
     else:
-        delta_d   = None
-        delta_pct = None
         pnl_c     = TEXT2
-        delta_str = "—"
+        delta_str = "&mdash;"
 
     trade_count = safe_query(
         "SELECT COUNT(*) FROM trades "
         "WHERE date(timestamp) = ? AND action != 'SELL_RECONCILE'",
         (today_str,), default=[(0,)],
     )
-    n_trades = int(trade_count[0][0]) if trade_count else 0
-    trade_str = f"{n_trades} trade{'s' if n_trades != 1 else ''} today" if n_trades else "no trades today"
-
-    return (
-        f'<div style="background:{pnl_c}11;border-left:3px solid {pnl_c};'
-        f'border-radius:0 8px 8px 0;padding:10px 18px;margin-bottom:4px;'
-        f'display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">'
-        f'<span style="font-weight:700;color:{pnl_c};font-size:{FONT_VALUE};">'
-        f'Today &nbsp; {delta_str}</span>'
-        f'<span style="font-size:{FONT_LABEL};color:{TEXT2};">'
-        f'{trade_str}</span>'
-        f'</div>'
-    )
+    n_trades  = int(trade_count[0][0]) if trade_count else 0
+    trade_sfx = f" &nbsp;·&nbsp; {n_trades} trade{'s' if n_trades != 1 else ''}" if n_trades else ""
+    return delta_str + trade_sfx, pnl_c
 
 
 # ── PANEL 1: Portfolio Health Hero ────────────────────────────────────────────
@@ -201,7 +188,7 @@ def render_portfolio_health_hero() -> str:
             _age_mins   = (_dt2.datetime.utcnow() - _last_naive).total_seconds() / 60
             _has_recent = _age_mins <= 90
         except Exception as exc:
-            _logger.debug(f"render_daily_headline: signal age parse: {exc}")
+            _logger.debug(f"render_portfolio_health_hero: signal age parse: {exc}")
     if "closed" in mkt_label.lower() or "pre" in mkt_label.lower() or "after" in mkt_label.lower():
         bot_status, bot_c = "Market Closed", TEXT3
     elif _last_ts_ct:
@@ -212,9 +199,12 @@ def render_portfolio_health_hero() -> str:
     else:
         bot_status, bot_c = "Waiting", NEURAL
 
+    today_str, today_c = _today_delta()
+
     stats_row = (
         f'<div style="display:flex;flex-wrap:wrap;border-top:1px solid {BORDER};margin-top:10px;">'
         + _stat("Portfolio", d.get("portfolio", "&mdash;"), TEXT1)
+        + _stat("Today", today_str, today_c)
         + _stat("Open P&L", hero_chg, pnl_c)
         + _stat("Realized Gain", realized_str, realized_c)
         + _stat("Positions", str(len(open_pos)), TEXT1)
@@ -259,13 +249,7 @@ def render_portfolio_health_hero() -> str:
 @safe_render("Benchmark")
 def render_benchmark_comparison() -> str:
     d = get_data()
-    pv = 0.0
-    try:
-        raw = d.get("portfolio", "&mdash;")
-        if raw != "&mdash;":
-            pv = float(raw.replace("$", "").replace(",", ""))
-    except (ValueError, TypeError):
-        pass
+    pv = _portfolio_val(d)
 
     port_return = 0.0
     if pv > 0:
@@ -394,13 +378,7 @@ def render_trade_frequency() -> str:
 @safe_render("SPY Banner")
 def render_spy_banner() -> str:
     d = get_data()
-    pv = 0.0
-    try:
-        raw = d.get("portfolio", "—")
-        if raw not in ("—", "&mdash;"):
-            pv = float(raw.replace("$", "").replace(",", ""))
-    except (ValueError, TypeError):
-        pass
+    pv = _portfolio_val(d)
 
     port_return = 0.0
     if pv > 0:
@@ -453,7 +431,6 @@ def render_spy_banner() -> str:
 
 
 from dashboard.registry import ComponentSpec, RefreshGroup, register
-register(ComponentSpec("daily_headline_out", RefreshGroup.FAST, render_daily_headline,       priority=20))
 register(ComponentSpec("hero_out",           RefreshGroup.SLOW, render_portfolio_health_hero, priority=80))
 register(ComponentSpec("spy_banner_out",     RefreshGroup.SLOW, render_spy_banner,           priority=81))
 register(ComponentSpec("trade_freq_out",     RefreshGroup.SLOW, render_trade_frequency,      priority=35))

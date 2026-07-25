@@ -11,6 +11,7 @@ from dashboard.design_system import (
 )
 from dashboard.data import get_data
 from bot.core.error_logger import safe_render, timed
+from bot.core.recommendation_portfolio import _portfolio_val
 from database.user_settings import get_setting
 from config import SECTOR_MAP as _SECTOR_MAP
 
@@ -40,13 +41,7 @@ def simulate_buy(symbol: str, dollar_amount: float, d: dict) -> dict:
     """
     open_pos = d.get("open_pos", {})
     prices   = d.get("prices", {})
-    pv = 0.0
-    try:
-        raw = d.get("portfolio", "0") or "0"
-        if raw.startswith("$"):
-            pv = float(raw.replace("$", "").replace(",", ""))
-    except (ValueError, AttributeError):
-        pass
+    pv = _portfolio_val(d)
     cash = d.get("cash", 0.0)
     cur_price = prices.get(symbol, 0.0)
 

@@ -52,7 +52,7 @@ from dashboard.charts import (
     _get_sym_hist, _sym_perf, _sparkline, _FI_LABELS,
 )
 from dashboard.components.overview import (
-    render_daily_headline, render_portfolio_health_hero,
+    render_portfolio_health_hero,
     render_trade_frequency, render_spy_banner,
 )
 from dashboard.components.market_mood import render_market_mood
@@ -70,8 +70,6 @@ from dashboard.components.recommendation_history import (
 )
 from dashboard.components.news import render_news_feed, render_news_feed_initial
 from dashboard.components.signal_history import render_signal_history
-from dashboard.components.actions import render_todays_actions, render_portfolio_actions
-from dashboard.components.analysis import render_sell_analysis, render_position_sizing_panel, render_position_sizing
 from dashboard.components.decision import render_decision_center
 from dashboard.components.rebalance import render_rebalance
 from dashboard.components.symbol_detail import render_symbol_detail, _get_symbol_choices
@@ -219,7 +217,6 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
 
         # ── Tab 3: Analytics (deep-dive — one tap from Brief / Portfolio) ─────
         with gr.TabItem("🔍 Analytics"):
-            daily_headline_out  = registry.mount("daily_headline_out",  gr.HTML(value=render_daily_headline))
             spy_banner_out      = registry.mount("spy_banner_out",      gr.HTML(value=""))
             with gr.Row():
                 with gr.Column(scale=6):

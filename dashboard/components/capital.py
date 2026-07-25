@@ -14,6 +14,7 @@ from dashboard.design_system import (
 from dashboard.data import get_data, safe_query
 from database.user_settings import get_setting, save_setting
 from bot.core.error_logger import safe_render, timed
+from bot.core.recommendation_portfolio import _portfolio_val
 
 _logger = logger
 _DEFAULT_DEPOSIT = 1000.0
@@ -66,10 +67,7 @@ def _reinvest_on() -> bool:
 
 def _capital_stats() -> dict:
     d = get_data()
-    try:
-        pv = float(d.get("portfolio", "0").replace("$", "").replace(",", ""))
-    except Exception:
-        pv = 0.0
+    pv = _portfolio_val(d)
     initial = _initial_deposit()
     ai_profit = pv - initial
     realized = 0.0

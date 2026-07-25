@@ -158,7 +158,6 @@ _SMOKE: list[tuple[str, str, str, dict]] = [
     ("decision_timeline",        "dashboard.components.timeline",               "render_decision_timeline",        {"symbol": None}),
     # Portfolio tab
     ("weekly_summary",           "dashboard.components.weekly_summary",         "render_weekly_summary",           {}),
-    ("daily_headline",           "dashboard.components.overview",               "render_daily_headline",           {}),
     ("portfolio_health_hero",    "dashboard.components.overview",               "render_portfolio_health_hero",    {}),
     ("spy_banner",               "dashboard.components.overview",               "render_spy_banner",               {}),
     ("benchmark_comparison",     "dashboard.components.overview",               "render_benchmark_comparison",     {}),
@@ -172,8 +171,6 @@ _SMOKE: list[tuple[str, str, str, dict]] = [
     ("rebalance",                "dashboard.components.rebalance",              "render_rebalance",                {}),
     ("rebalance_suggestions",    "dashboard.components.rebalance",              "render_rebalance_suggestions",    {}),
     ("thesis_tracker",           "dashboard.components.thesis",                 "render_thesis_tracker",           {}),
-    ("todays_actions",           "dashboard.components.actions",                "render_todays_actions",           {}),
-    ("portfolio_actions",        "dashboard.components.actions",                "render_portfolio_actions",        {}),
     ("portfolio_simulator",      "dashboard.components.simulator",              "render_portfolio_simulator",      {"symbol": None}),
     # Capital tab
     ("capital_overview",         "dashboard.components.capital",                "render_capital_overview",         {}),
@@ -197,10 +194,6 @@ _SMOKE: list[tuple[str, str, str, dict]] = [
     # Settings tab
     ("settings_summary",         "dashboard.components.settings",               "render_settings_summary",         {}),
     ("investor_profile",         "dashboard.components.settings",               "render_investor_profile",         {}),
-    # Analysis / misc
-    ("sell_analysis",            "dashboard.components.analysis",               "render_sell_analysis",            {}),
-    ("position_sizing",          "dashboard.components.analysis",               "render_position_sizing",          {}),
-    ("position_sizing_panel",    "dashboard.components.analysis",               "render_position_sizing_panel",    {}),
 ]
 
 
