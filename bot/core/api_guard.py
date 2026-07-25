@@ -30,7 +30,7 @@ def _is_retryable(exc: Exception, rate_limit_only: bool) -> bool:
         or type(exc).__name__.lower() in {"ratelimitexceeded", "ratelimiterror"}
     )
 
-    # alpaca_trade_api.rest.APIError / requests.HTTPError expose status codes
+    # alpaca.common.exceptions.APIError / requests.HTTPError expose status codes
     status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
     if not is_rate_limit and status is not None:
         is_rate_limit = is_rate_limit or (status == 429)

@@ -551,7 +551,7 @@ Add at: repo → Settings → Secrets → Actions
 ## 🐍 Key Dependencies
 
 ```
-alpaca-trade-api     # Broker API
+alpaca-py            # Broker API
 stable-baselines3    # PPO reinforcement learning
 gymnasium            # RL environment
 torch                # Neural network backend
@@ -943,7 +943,7 @@ def get_stock_news(ticker: str, company: str) -> list:
 
 ```
 # Existing
-alpaca-trade-api     # Broker API
+alpaca-py            # Broker API
 stable-baselines3    # PPO reinforcement learning
 gymnasium            # RL environment
 torch                # Neural network backend

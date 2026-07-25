@@ -10,8 +10,8 @@ Full pinned list in `requirements.txt` (bot + dashboard) and `requirements_space
 ### Broker / Execution
 | Package | Version | Purpose | Upgrade policy |
 |---------|---------|---------|----------------|
-| alpaca-trade-api | ≥ 3.0.0 | Order submission, portfolio data, market data | Pin minor on next release |
-| aiohttp | ≥ 3.9.0, < 3.10.0 | Async HTTP (alpaca dependency) | Locked to 3.9.x (3.10 breaks alpaca SSL) |
+| alpaca-py | ≥ 0.40.0 | Order submission, portfolio data, market data | Flexible — actively maintained, no known SSL/websockets pin conflicts |
+| aiohttp | ≥ 3.9.0, < 3.10.0 | Async HTTP | This pin existed for the old alpaca-trade-api SDK's SSL handshake (see migration note below); likely safe to loosen now, but untested — verify before changing |
 
 ### Machine Learning
 | Package | Version | Purpose | Upgrade policy |
@@ -62,8 +62,10 @@ pytest-asyncio (optional)
 
 ## Python Version
 
-Minimum: Python 3.9 (f-strings with `=`, `typing.Union` shorthand).
-Tested on: Python 3.9 (GitHub Actions ubuntu-latest, 2026-06-25).
+Minimum: Python 3.9 (f-strings with `=`, `typing.Union` shorthand). `gradio>=5.0.0`
+requires Python >=3.10, so local dev on 3.9 cannot install the real dashboard deps —
+CI runs Python 3.11.
+Tested on: Python 3.11 (GitHub Actions ubuntu-latest, 2026-07-25).
 
 ## Upgrade Protocol
 
@@ -75,6 +77,15 @@ Tested on: Python 3.9 (GitHub Actions ubuntu-latest, 2026-06-25).
 
 ## Known Conflicts
 
-- `aiohttp >= 3.10` breaks `alpaca-trade-api` SSL handshake (locked to 3.9.x)
+- **Resolved 2026-07-25**: `alpaca-trade-api` (all versions ≥3.0.0) pins `websockets<11`,
+  which conflicts with `gradio_client`'s actual runtime need for `websockets>=13`
+  (its own declared metadata is looser than its code requires — a packaging bug in
+  `gradio_client`, not something fixable via a `requirements.txt` pin). This broke CI
+  on every push once PyPI resolved to the affected `gradio_client` release. Fixed by
+  migrating the broker client from `alpaca-trade-api` to `alpaca-py`
+  (`bot/execution/alpaca_client.py`), which only requires `websockets>=10.4` with no
+  upper bound. `aiohttp >= 3.10` breaking `alpaca-trade-api`'s SSL handshake (the old
+  reason for the 3.9.x lock above) is also no longer applicable — that pin can likely
+  be loosened now, but hasn't been tested.
 - `numpy >= 2.0` deprecated `numpy.core` — shows DeprecationWarning via `stable-baselines3`;
   harmless but watch for sb3 upgrade that resolves it

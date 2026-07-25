@@ -1,4 +1,4 @@
-alpaca-trade-api>=3.0.0
+alpaca-py>=0.40.0
 aiohttp>=3.9.0,<3.10.0
 # ML library pins — must match the training environment.
 # After changing any of these, trigger retrain.yml to rebuild models.
