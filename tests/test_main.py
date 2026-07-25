@@ -10,6 +10,7 @@ from bot.main import (
     _reconcile_positions, _load_risk_state, _save_risk_state,
     _upsert_position_state, _delete_position_state, _is_wash_sale_risk,
     _record_snapshot, _anchor_daily_start, _apply_sim_capital, _log_signal,
+    _fetch_positions_for_reconcile,
 )
 from bot.risk.risk_manager import RiskManager
 
@@ -485,6 +486,53 @@ def test_reconcile_falls_back_to_entry_price_on_client_error(db):
     ).fetchone()
     assert row is not None
     assert row[0] == pytest.approx(200.0)  # fell back to entry price
+
+
+# --- _fetch_positions_for_reconcile ---
+
+class _CountingClient:
+    """Fake Alpaca client returning a scripted sequence of get_positions() results."""
+    def __init__(self, results):
+        self._results = list(results)
+        self.calls = 0
+
+    def get_positions(self):
+        self.calls += 1
+        return self._results[min(self.calls, len(self._results)) - 1]
+
+
+def test_fetch_positions_returns_immediately_when_nonempty(db, monkeypatch):
+    monkeypatch.setattr("bot._main_reconcile.time.sleep", lambda s: None)
+    client = _CountingClient([{"AAPL": object()}])
+    result = _fetch_positions_for_reconcile(client, db)
+    assert "AAPL" in result
+    assert client.calls == 1
+
+
+def test_fetch_positions_empty_and_db_expects_nothing_skips_reverify(db, monkeypatch):
+    monkeypatch.setattr("bot._main_reconcile.time.sleep", lambda s: None)
+    client = _CountingClient([{}])
+    result = _fetch_positions_for_reconcile(client, db)
+    assert result == {}
+    assert client.calls == 1  # no retry — DB had nothing open to contradict the empty read
+
+
+def test_fetch_positions_reverifies_and_recovers_from_transient_glitch(db, monkeypatch):
+    monkeypatch.setattr("bot._main_reconcile.time.sleep", lambda s: None)
+    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0)
+    client = _CountingClient([{}, {"AAPL": object()}])
+    result = _fetch_positions_for_reconcile(client, db)
+    assert "AAPL" in result
+    assert client.calls == 2  # recovered on first re-verify, no need for a second
+
+
+def test_fetch_positions_reverifies_and_accepts_genuinely_empty(db, monkeypatch):
+    monkeypatch.setattr("bot._main_reconcile.time.sleep", lambda s: None)
+    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0)
+    client = _CountingClient([{}])  # stays empty on every call
+    result = _fetch_positions_for_reconcile(client, db)
+    assert result == {}
+    assert client.calls == 1 + 2  # initial + both re-verify attempts exhausted
 
 
 # --- _load_risk_state / _save_risk_state ---

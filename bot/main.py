@@ -71,6 +71,7 @@ from bot._main_positions import (
     _opened_today, _passes_correlation_gate, _reconcile_positions,
     _signal_sell, _trim_position, _upsert_position_state,
 )
+from bot._main_reconcile import _fetch_positions_for_reconcile
 from bot._main_market import (
     _import_screener_picks, _is_market_hours, _is_near_earnings,
     _load_premarket_sentiment, _load_today_universe, _log_buy_skip,
@@ -244,7 +245,7 @@ def run(
         logger.warning(f"Account compliance check failed: {e}")
         pdt_exempt = False
 
-    positions       = client.get_positions()
+    positions       = _fetch_positions_for_reconcile(client, con)
     if not _sanity_blocked:
         _reconcile_positions(con, positions, portfolio_value=portfolio_value, client=client)
     buy_order_syms, sell_order_syms = client.get_open_order_symbols()
