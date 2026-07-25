@@ -40,8 +40,11 @@ def _spy_pct_today() -> float:
         import yfinance as yf
         df = yf.download("SPY", period="5d", progress=False, auto_adjust=True)
         if len(df) >= 2:
+            close = df["Close"]
+            if hasattr(close, "squeeze"):
+                close = close.squeeze()
             _spy_cache["pct"] = float(
-                (df["Close"].iloc[-1] / df["Close"].iloc[-2] - 1) * 100
+                (close.iloc[-1] - close.iloc[-2]) / close.iloc[-2] * 100
             )
         else:
             _spy_cache["pct"] = 0.0

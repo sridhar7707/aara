@@ -139,7 +139,8 @@ def phase2_db(tmp_path, monkeypatch):
 
 # ── Tier 1: Smoke tests — every render function ───────────────────────────────
 # Tuple: (test_id, module, function_name, kwargs)
-# Excluded: render_news_feed — makes live yfinance HTTP calls.
+# Excluded: render_news_feed, render_market_mood — make live yfinance HTTP calls;
+# network access is unreliable in CI so these return their "unavailable" fallback.
 _SMOKE: list[tuple[str, str, str, dict]] = [
     # Brief tab
     ("executive_summary",        "dashboard.components.executive_summary",      "render_executive_summary",        {}),
@@ -148,7 +149,6 @@ _SMOKE: list[tuple[str, str, str, dict]] = [
     ("scheduler_status",         "dashboard.components.brief",                  "render_scheduler_status",         {}),
     ("decision_bar",             "dashboard.components.decision_bar",           "render_decision_bar",             {}),
     ("whats_changed",            "dashboard.components.history",                "render_whats_changed",            {}),
-    ("market_mood",              "dashboard.components.market_mood",            "render_market_mood",              {}),
     ("ai_recommendation",        "dashboard.components.ai_panel",               "render_ai_recommendation",        {}),
     ("ai_committee",             "dashboard.components.ai_panel",               "render_ai_committee",             {}),
     ("risk_panel",               "dashboard.components.risk",                   "render_risk_panel",               {}),
