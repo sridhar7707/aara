@@ -30,6 +30,7 @@ from config import (
 )
 from database.user_settings import get_setting as _get_setting
 from bot._main_db import log_trade, _save_risk_state
+from database.trade_journal import open_entry as _journal_open
 from bot.capital.pool import CapitalPool, update_on_buy as _pool_buy
 from bot.decision.daily_actions import record as _rec_action
 from bot._main_market import _log_buy_skip
@@ -412,17 +413,29 @@ def _handle_entry(
                 f"XGB: {xgb_prob:.0%}, LSTM: {lstm_prob:.0%}, regime: {regime_name}. "
                 f"Stop: {stop_pct:.1%}, target: {tp_target_pct:.1%}, R:R: {rr_ratio:.2f}x."
             )
-            log_trade(con, symbol, "BUY", fill_shares,
-                      fill_price, notional, regime_name, portfolio_value, 0,
-                      xgb_prob=xgb_prob, lstm_prob=lstm_prob,
-                      sentiment_score=sentiments.get(symbol, 0.0),
-                      macro_score=macro_score,
-                      order_id=result.get("order_id"),
-                      feature_drivers=json.dumps(_drivers) if _drivers is not None else None,
-                      ai_reasoning=_ai_rsn,
-                      stop_loss=round(fill_price * (1 - stop_pct), 4),
-                      take_profit=round(fill_price * (1 + tp_target_pct), 4),
-                      risk_reward_ratio=round(rr_ratio, 4))
+            _trade_id = log_trade(con, symbol, "BUY", fill_shares,
+                                  fill_price, notional, regime_name, portfolio_value, 0,
+                                  xgb_prob=xgb_prob, lstm_prob=lstm_prob,
+                                  sentiment_score=sentiments.get(symbol, 0.0),
+                                  macro_score=macro_score,
+                                  order_id=result.get("order_id"),
+                                  feature_drivers=json.dumps(_drivers) if _drivers is not None else None,
+                                  ai_reasoning=_ai_rsn,
+                                  stop_loss=round(fill_price * (1 - stop_pct), 4),
+                                  take_profit=round(fill_price * (1 + tp_target_pct), 4),
+                                  risk_reward_ratio=round(rr_ratio, 4))
+            _journal_open(
+                con, symbol, _trade_id,
+                entry_reason=_ai_rsn,
+                entry_signals={
+                    "xgb_prob": xgb_prob, "lstm_prob": lstm_prob,
+                    "macro_score": macro_score, "regime": regime_name,
+                    "stop_pct": round(stop_pct, 4), "tp_pct": round(tp_target_pct, 4),
+                    "rr_ratio": round(rr_ratio, 3), "volume_ratio": round(volume_ratio, 3),
+                },
+                entry_confidence=xgb_prob,
+                pattern_tags=[regime_name, SECTOR_MAP.get(symbol, "Unknown")],
+            )
             if pool:
                 _pool_buy(con, pool.id, notional, symbol=symbol)
             _rec_action(con, "buy", symbol, reasoning=_ai_rsn,

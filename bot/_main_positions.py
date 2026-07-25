@@ -20,6 +20,7 @@ from config import (
     MAX_POSITION_DRIFT_PCT, MAX_POSITION_PCT,
 )
 from bot._main_db import log_trade, _save_risk_state
+from database.trade_journal import close_entry as _journal_close
 from bot.decision.daily_actions import record as _rec_action
 from bot.capital.pool import CapitalPool, update_on_sell as _pool_sell
 from bot.strategy.ensemble import BUY_FRACTION
@@ -311,17 +312,20 @@ def _signal_sell(con: sqlite3.Connection, client: AlpacaClient, symbol: str, pos
         order_id = sell_result.get("order_id")
         if is_from_stop:
             tg.alert_stop_loss(symbol, pnl_pct, notional=sell_notional)
-            log_trade(con, symbol, "SELL_STOP", pos_qty, current_price, sell_notional,
-                      regime_name, portfolio_value, pnl_pct, entry_price=entry_price,
-                      order_id=order_id, holding_days=holding_days)
+            _sell_trade_id = log_trade(con, symbol, "SELL_STOP", pos_qty, current_price,
+                                       sell_notional, regime_name, portfolio_value, pnl_pct,
+                                       entry_price=entry_price, order_id=order_id,
+                                       holding_days=holding_days)
         else:
             action_tag = "SELL" if reason == "signal" else f"SELL_{reason.upper().replace('-','_')}"
             _freed_pct = sell_notional / portfolio_value * 100 if portfolio_value > 0 else 0.0
             tg.alert_sell(symbol, pos_qty, current_price, pnl_pct, reason=reason,
                           notional=sell_notional, cash_freed_pct=_freed_pct)
-            log_trade(con, symbol, action_tag, pos_qty, current_price, sell_notional,
-                      regime_name, portfolio_value, pnl_pct, entry_price=entry_price,
-                      order_id=order_id, holding_days=holding_days)
+            _sell_trade_id = log_trade(con, symbol, action_tag, pos_qty, current_price,
+                                       sell_notional, regime_name, portfolio_value, pnl_pct,
+                                       entry_price=entry_price, order_id=order_id,
+                                       holding_days=holding_days)
+        _journal_close(con, symbol, _sell_trade_id, reason, pnl_pct, holding_days)
         if pool:
             cost_basis = entry_price * pos_qty if entry_price > 0 else pos_qty * current_price
             _pool_sell(con, pool.id, cost_basis, pos_qty * current_price, symbol=symbol)

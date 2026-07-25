@@ -391,12 +391,12 @@ def log_trade(
     stop_loss: float | None = None,
     take_profit: float | None = None,
     risk_reward_ratio: float | None = None,
-) -> None:
+) -> int | None:
     sentiment_norm  = (sentiment_score + 1.0) / 2.0
     ensemble_score  = (WEIGHTS["xgb"]  * xgb_prob + WEIGHTS["lstm"] * lstm_prob
                        + WEIGHTS["sentiment"] * sentiment_norm + WEIGHTS["macro"] * macro_score)
     realized_pnl = shares * (price - entry_price) if "SELL" in action and entry_price > 0 else 0.0
-    con.execute(
+    cur = con.execute(
         """INSERT INTO trades
            (timestamp, symbol, action, shares, price, notional, regime, portfolio_value, pnl_pct,
             xgb_prob, lstm_prob, sentiment_score, macro_score, ensemble_score, realized_pnl,
@@ -408,6 +408,7 @@ def log_trade(
          order_id, holding_days, feature_drivers, ai_reasoning, stop_loss, take_profit, risk_reward_ratio),
     )
     con.commit()
+    return cur.lastrowid
 
 
 def _week_key() -> str:

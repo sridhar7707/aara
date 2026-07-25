@@ -93,6 +93,7 @@ from dashboard.components.attribution import (
     render_attribution_by_symbol, render_attribution_by_sector,
     render_attribution_by_model, render_attribution_by_trade,
 )
+from dashboard.components.trade_journal import render_trade_journal
 from dashboard.timers import register_all_timers
 import dashboard.registry as registry
 from database.user_settings import get_all_settings, save_setting, get_setting
@@ -347,7 +348,13 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
                     with gr.Column(scale=35):
                         val_out = registry.mount("val_out", gr.HTML(value=""))
 
-        # ── Tab 6: Settings ───────────────────────────────────────────────────
+        # ── Tab 6: Trade Journal ──────────────────────────────────────────────
+        with gr.TabItem("📓 Journal"):
+            trade_journal_out = registry.mount(
+                "trade_journal_out", gr.HTML(value=render_trade_journal)
+            )
+
+        # ── Tab 7: Settings ───────────────────────────────────────────────────
         with gr.TabItem("⚙️ Settings"):
             _s0 = get_all_settings()
             def _pct(key: str, default: str) -> float:
