@@ -142,14 +142,16 @@ def _section_title(title: str, note: str = "") -> str:
 def _action_badge(action: str, size: str = "normal") -> str:
     """Colored action badge. Single source of truth. Colors FIXED &mdash; never override."""
     action = action.upper()
+    if action == "ADD":
+        action = "BUY"
+    elif action == "EXIT":
+        action = "SELL"
     _colors = {
-        "BUY":   (ACTION_BUY,   ACTION_BUY_BG),
-        "ADD":   (ACTION_ADD,   ACTION_ADD_BG),
-        "HOLD":  (ACTION_HOLD,  ACTION_HOLD_BG),
-        "TRIM":  (ACTION_TRIM,  ACTION_TRIM_BG),
-        "SELL":  (ACTION_SELL,  ACTION_SELL_BG),
-        "EXIT":  (ACTION_EXIT,  ACTION_EXIT_BG),
-        "WATCH": (ACTION_WATCH, ACTION_WATCH_BG),
+        "BUY":   (ACTION_BUY,  ACTION_BUY_BG),
+        "HOLD":  (ACTION_HOLD, ACTION_HOLD_BG),
+        "TRIM":  (ACTION_TRIM, ACTION_TRIM_BG),
+        "SELL":  (ACTION_SELL, ACTION_SELL_BG),
+        "WATCH": (TEXT3,       SURFACE2),
     }
     color, bg = _colors.get(action, (TEXT2, SURFACE2))
     _sizes = {
@@ -235,8 +237,12 @@ def _action_row(symbol: str, action: str, reason: str,
                 detail: str = "", number: int = None) -> str:
     """Single action row with correct visual hierarchy."""
     action = action.upper()
-    urgent = action in ("EXIT", "SELL")
-    medium = action in ("TRIM", "BUY", "ADD")
+    if action == "ADD":
+        action = "BUY"
+    elif action == "EXIT":
+        action = "SELL"
+    urgent = action == "SELL"
+    medium = action in ("TRIM", "BUY")
 
     if urgent:
         row_bg, row_border = ACTION_SELL_BG, f"border-left:3px solid {ACTION_SELL};"
