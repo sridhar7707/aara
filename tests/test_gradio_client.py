@@ -191,6 +191,7 @@ _SMOKE: list[tuple[str, str, str, dict]] = [
     ("attribution_by_sector",    "dashboard.components.attribution",            "render_attribution_by_sector",    {}),
     ("attribution_by_model",     "dashboard.components.attribution",            "render_attribution_by_model",     {}),
     ("attribution_by_trade",     "dashboard.components.attribution",            "render_attribution_by_trade",     {}),
+    ("confidence_calibration",   "dashboard.components.attribution",            "render_confidence_calibration",   {}),
     # Settings tab
     ("settings_summary",         "dashboard.components.settings",               "render_settings_summary",         {}),
     ("investor_profile",         "dashboard.components.settings",               "render_investor_profile",         {}),
@@ -336,6 +337,46 @@ def test_attribution_by_trade_has_two_sections(phase2_db):
     from dashboard.components.attribution import render_attribution_by_trade
     html = render_attribution_by_trade()
     assert "Top" in html and ("Bottom" in html or "Worst" in html)
+
+
+def test_confidence_calibration_buckets_seeded_trades(phase2_db):
+    # Seeded: AAPL ens=0.70 (70-80%), MSFT ens=0.62 (60-70%), NVDA ens=0.80 (80%+)
+    from dashboard.components.attribution import render_confidence_calibration
+    html = render_confidence_calibration()
+    assert "70-80%" in html
+    assert "60-70%" in html
+    assert "80%+" in html
+    assert "3 completed decisions" in html
+
+
+def test_confidence_calibration_gates_thin_buckets(phase2_db):
+    # Each seeded bucket has exactly 1 trade — below _MIN_BUCKET_N (5) — so no
+    # bucket should show a bare win-rate percentage as if it were evidence.
+    from dashboard.components.attribution import render_confidence_calibration
+    html = render_confidence_calibration()
+    assert "Insufficient data" in html
+    assert "Early evidence" in html
+
+
+def test_confidence_calibration_shows_strong_evidence_above_threshold(phase2_db):
+    import sqlite3
+    from dashboard.components.attribution import render_confidence_calibration
+    con = sqlite3.connect(phase2_db)
+    for i in range(50):
+        con.execute(
+            "INSERT INTO trades (timestamp,symbol,action,shares,price,notional,regime,"
+            "portfolio_value,pnl_pct,xgb_prob,lstm_prob,sentiment_score,macro_score,"
+            "ensemble_score) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (_ts(9), "AAPL", "SELL", 1.0, 100.0, 100.0, "TRENDING_UP",
+             10_000.0, 0.05, 0.8, 0.8, 0.6, 0.4, 0.75),
+        )
+    con.commit()
+    con.close()
+    ddata._CACHE.clear()
+    ddata._CACHE_TS = 0.0
+    html = render_confidence_calibration()
+    assert "Strong evidence" in html
+    assert "70-80%" in html
 
 
 # ── Live-server tests (skipped when :7860 is not running) ─────────────────────

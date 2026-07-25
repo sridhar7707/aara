@@ -207,6 +207,101 @@ def render_attribution_by_model() -> str:
     return f'<div class="nt nt-wrap">{_section("🤖", "By Model", note)}{table}</div>'
 
 
+# ── Confidence Calibration ──────────────────────────────────────────────────
+
+_CALIBRATION_BUCKETS = [
+    (0.00, 0.50, "<50%"),
+    (0.50, 0.60, "50-60%"),
+    (0.60, 0.70, "60-70%"),
+    (0.70, 0.80, "70-80%"),
+    (0.80, 1.01, "80%+"),
+]
+_MIN_BUCKET_N = 5    # fewer trades than this and a bucket's win rate is noise, not evidence
+_MIN_STRONG_N = 50   # north-star evidence standard: 50+ decisions for a "strong" verdict
+
+
+@timed(_logger)
+@safe_render("Confidence Calibration")
+def render_confidence_calibration() -> str:
+    """Bucket closed trades by ensemble_score at entry; show win rate per bucket.
+
+    Answers "does this system's confidence actually mean anything" — the same
+    question that should drive buy-threshold and position-sizing decisions,
+    with evidence instead of feel. Gated below _MIN_BUCKET_N per bucket and
+    _MIN_STRONG_N overall so a thin sample never reads as a confident verdict.
+    """
+    rows = [r for r in _query_closed_trades() if (r[7] or 0) > 0]  # ensemble_score > 0
+    if not rows:
+        return _card(_empty_state(
+            "🎯", "Calibration needs more data",
+            "Scores are recorded from V4 onwards. This view builds as trades close."
+        ))
+
+    buckets: dict[str, dict] = {
+        label: {"trades": 0, "wins": 0, "ret_sum": 0.0} for _, _, label in _CALIBRATION_BUCKETS
+    }
+    for r in rows:
+        score = float(r[7] or 0)
+        pct   = float(r[2] or 0)
+        for lo, hi, label in _CALIBRATION_BUCKETS:
+            if lo <= score < hi:
+                b = buckets[label]
+                b["trades"]  += 1
+                b["ret_sum"] += pct
+                if pct > 0:
+                    b["wins"] += 1
+                break
+
+    n_total = len(rows)
+    if n_total >= _MIN_STRONG_N:
+        evidence, ev_color = "Strong", GAIN
+    elif n_total >= 30:
+        evidence, ev_color = "Moderate", NEURAL
+    else:
+        evidence, ev_color = "Early", NEURAL
+
+    active = [(lo, hi, label) for lo, hi, label in _CALIBRATION_BUCKETS if buckets[label]["trades"] > 0]
+    n_active = len(active)
+    tbody = ""
+    for i, (lo, hi, label) in enumerate(active):
+        b  = buckets[label]
+        n  = b["trades"]
+        td = TD if i < n_active - 1 else TD0
+        if n < _MIN_BUCKET_N:
+            wr_html  = f'<span style="color:{TEXT3};">Insufficient data</span>'
+            ret_html = f'<span style="color:{TEXT3};">&mdash;</span>'
+        else:
+            win_rate = b["wins"] / n * 100
+            avg_ret  = b["ret_sum"] / n * 100
+            wr_color = GAIN if win_rate >= 60 else (NEURAL if win_rate >= 45 else LOSS)
+            wr_html  = f'<span style="color:{wr_color};font-weight:{WEIGHT_BOLD};">{win_rate:.0f}%</span>'
+            ret_html = f'<span style="color:{_pnl_color(avg_ret)};">{avg_ret:+.1f}%</span>'
+        tbody += (
+            f"<tr>"
+            f"<td {td} style='{_CELL}font-weight:{WEIGHT_BOLD};color:{TEXT1};'>{label}</td>"
+            f"<td {td} style='{_CELL}'>{n}</td>"
+            f"<td {td} style='{_CELL}'>{wr_html}</td>"
+            f"<td {td} style='{_CELL}'>{ret_html}</td>"
+            f"</tr>"
+        )
+
+    strong_hint = (
+        f' &nbsp;·&nbsp; {_MIN_STRONG_N}+ needed for a strong conclusion' if n_total < _MIN_STRONG_N else ""
+    )
+    note = (
+        f'<div style="padding:10px 14px;font-size:{FONT_LABEL};color:{TEXT2};">'
+        f'<span style="color:{ev_color};font-weight:{WEIGHT_BOLD};">{evidence} evidence</span>'
+        f' &nbsp;·&nbsp; {n_total} completed decisions{strong_hint}</div>'
+    )
+    table = _wrap(
+        f'<table class="nt-tbl"><thead><tr>'
+        f'<th {TH}>Confidence</th><th {TH}>Trades</th>'
+        f'<th {TH}>Win Rate</th><th {TH}>Avg Return</th>'
+        f'</tr></thead><tbody>{tbody}</tbody></table>'
+    )
+    return f'<div class="nt nt-wrap">{_section("🎯", "Confidence Calibration", "Historically, what worked?")}{table}{note}</div>'
+
+
 # ── Best / Worst Trades ───────────────────────────────────────────────────────
 
 @timed(_logger)
@@ -251,7 +346,8 @@ def render_attribution_by_trade() -> str:
 
 
 from dashboard.registry import ComponentSpec, RefreshGroup, register
-register(ComponentSpec("attribution_symbol_out", RefreshGroup.SLOW, render_attribution_by_symbol, priority=80))
-register(ComponentSpec("attribution_sector_out", RefreshGroup.SLOW, render_attribution_by_sector, priority=81))
-register(ComponentSpec("attribution_model_out",  RefreshGroup.SLOW, render_attribution_by_model,  priority=82))
-register(ComponentSpec("attribution_trade_out",  RefreshGroup.SLOW, render_attribution_by_trade,  priority=83))
+register(ComponentSpec("attribution_symbol_out",      RefreshGroup.SLOW, render_attribution_by_symbol,      priority=80))
+register(ComponentSpec("attribution_sector_out",      RefreshGroup.SLOW, render_attribution_by_sector,      priority=81))
+register(ComponentSpec("attribution_model_out",       RefreshGroup.SLOW, render_attribution_by_model,       priority=82))
+register(ComponentSpec("attribution_trade_out",       RefreshGroup.SLOW, render_attribution_by_trade,       priority=83))
+register(ComponentSpec("confidence_calibration_out",  RefreshGroup.SLOW, render_confidence_calibration,     priority=84))
