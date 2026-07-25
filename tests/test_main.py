@@ -885,7 +885,7 @@ def test_latest_portfolio_value_zero_when_empty(db):
 
 def test_record_snapshot_upserts_same_timestamp(db, monkeypatch):
     """Two writes in the same cycle (same timestamp) must not duplicate rows."""
-    import bot._main_db as _db_mod
+    import bot.db.trade_log as _tl_mod
     fixed = "2026-06-11T12:00:00+00:00"
 
     class _FixedDT:
@@ -894,7 +894,7 @@ def test_record_snapshot_upserts_same_timestamp(db, monkeypatch):
             from datetime import datetime as _dt
             return _dt.fromisoformat(fixed)
 
-    monkeypatch.setattr(_db_mod, "datetime", _FixedDT)
+    monkeypatch.setattr(_tl_mod, "datetime", _FixedDT)
     _record_snapshot(db, 10_000.0, 1_000.0, 1)
     _record_snapshot(db, 10_050.0, 950.0, 1)
     n = db.execute("SELECT COUNT(*) FROM portfolio_snapshots").fetchone()[0]
