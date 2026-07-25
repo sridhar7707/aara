@@ -64,6 +64,18 @@ TRAINING_SYMBOLS = SYMBOLS + TRAINING_EXTRA
 # 0 = disabled (use the real account value). Example: PAPER_SIM_CAPITAL=1000
 PAPER_SIM_CAPITAL = float(os.getenv("PAPER_SIM_CAPITAL", "0") or 0)
 
+# --- Decision authority (NOT paper/live — that's ALPACA_BASE_URL above) ---
+# Who approves a BUY that passes all entry gates before it executes.
+# AUTONOMOUS: executes immediately (today's only behavior).
+# SUPERVISED: decision_status=WAITING_APPROVAL, holds for human approval.
+# Orthogonal to broker target — e.g. paper+SUPERVISED tests the approval
+# workflow safely before ever combining SUPERVISED with a live account.
+# Named DECISION_MODE (not TRADING_MODE) because TRADING_MODE=paper already
+# exists in .env / .github/workflows/trade.yml for an unrelated, unused
+# purpose — no code reads it today, but reusing the name would silently pick
+# up "paper" as the value here instead of the AUTONOMOUS/SUPERVISED default.
+DECISION_MODE = os.getenv("DECISION_MODE", "AUTONOMOUS")
+
 # --- Trading parameters ---
 MAX_POSITION_PCT = float(os.getenv("MAX_POSITION_PCT", 0.20))
 STOP_LOSS_PCT = float(os.getenv("STOP_LOSS_PCT", 0.04))       # fallback flat stop (no ATR data)

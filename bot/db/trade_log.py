@@ -55,8 +55,10 @@ def log_signal(
     con: sqlite3.Connection, symbol: str,
     xgb_prob: float, lstm_prob: float, sentiment_score: float,
     macro_score: float, regime: str, ensemble_action: str,
-) -> None:
-    """Record model output for every symbol evaluated each cycle (caller commits)."""
+) -> int | None:
+    """Record model output for every symbol evaluated each cycle (caller commits).
+    Returns the new signal_log row id so callers (e.g. decision_service) can
+    link a decision back to the model evidence that produced it."""
     sent_norm      = (sentiment_score + 1.0) / 2.0
     ensemble_score = (
         WEIGHTS["xgb"]       * xgb_prob +
@@ -64,7 +66,7 @@ def log_signal(
         WEIGHTS["sentiment"] * sent_norm +
         WEIGHTS["macro"]     * macro_score
     )
-    con.execute(
+    cur = con.execute(
         "INSERT INTO signal_log "
         "(timestamp, symbol, xgb_prob, lstm_prob, sentiment_score, macro_score, "
         "ensemble_score, ensemble_action, regime) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -72,6 +74,7 @@ def log_signal(
          round(xgb_prob, 4), round(lstm_prob, 4), round(sentiment_score, 4),
          round(macro_score, 4), round(ensemble_score, 4), ensemble_action, regime),
     )
+    return cur.lastrowid
 
 
 def log_recommendation(
