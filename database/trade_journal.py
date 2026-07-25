@@ -82,6 +82,12 @@ def close_entry(
             (sell_trade_id, exit_reason, outcome_pct, holding_days, lesson, closed_at, row[0]),
         )
         logger.debug(f"Journal close [{row[0]}] {symbol}: {exit_reason} {outcome_pct:+.1%}")
+    elif sell_trade_id is not None and con.execute(
+        "SELECT 1 FROM trade_journal WHERE sell_trade_id=? LIMIT 1", (sell_trade_id,)
+    ).fetchone():
+        # Idempotency: same sell already journaled (retry scenario)
+        logger.debug(f"Journal close {symbol}: sell_trade_id={sell_trade_id} already recorded, skipping")
+        return
     else:
         con.execute(
             """INSERT INTO trade_journal
@@ -96,7 +102,11 @@ def close_entry(
 def _auto_lesson(exit_reason: str, outcome_pct: float, holding_days: int) -> str:
     if exit_reason == "take-profit":
         return "Take-profit reached — entry setup worked as planned."
-    if exit_reason in ("stop-loss", "STOP", "gap-down"):
+    if exit_reason == "gap-down":
+        return "Gap-down hard floor hit — position market-sold immediately to prevent deeper loss."
+    if exit_reason == "reconcile":
+        return "Position closed externally (manually or by broker) — not an automated exit."
+    if exit_reason in ("stop-loss", "STOP"):
         if holding_days <= 2:
             return "Stopped out quickly — entry timing may have been premature."
         if holding_days >= 14:

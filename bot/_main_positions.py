@@ -236,9 +236,10 @@ def _reconcile_positions(con: sqlite3.Connection, alpaca_positions: dict,
                     holding_days = (datetime.now(timezone.utc) - opened).days
                 except Exception:
                     holding_days = 0
-            log_trade(con, sym, "SELL_RECONCILE", net_shares, sell_price,
-                      notional, "reconcile", portfolio_value, pnl_pct,
-                      entry_price=entry_price, holding_days=holding_days)
+            _rec_id = log_trade(con, sym, "SELL_RECONCILE", net_shares, sell_price,
+                                notional, "reconcile", portfolio_value, pnl_pct,
+                                entry_price=entry_price, holding_days=holding_days)
+            _journal_close(con, sym, _rec_id, "reconcile", pnl_pct, holding_days)
             logger.warning(
                 f"Reconcile: logged SELL_RECONCILE for {sym} "
                 f"({net_shares:.4f} shares @ ${sell_price:.2f}, entry=${entry_price:.2f}, "
@@ -384,11 +385,12 @@ def _handle_exits(
         if sell_result:
             client.wait_for_fill(sell_result["order_id"], timeout_secs=10)
             tg.alert_stop_loss(symbol, pnl_pct, notional=pos_qty * current_price)
-            log_trade(con, symbol, "SELL_GAP_DOWN", pos_qty, current_price,
-                      pos_qty * current_price, regime_name, portfolio_value, pnl_pct,
-                      entry_price=entry_price,
-                      order_id=sell_result.get("order_id"),
-                      holding_days=holding_days)
+            _gd_id = log_trade(con, symbol, "SELL_GAP_DOWN", pos_qty, current_price,
+                               pos_qty * current_price, regime_name, portfolio_value, pnl_pct,
+                               entry_price=entry_price,
+                               order_id=sell_result.get("order_id"),
+                               holding_days=holding_days)
+            _journal_close(con, symbol, _gd_id, "gap-down", pnl_pct, holding_days)
             if pool:
                 cost_basis = entry_price * pos_qty if entry_price > 0 else pos_qty * current_price
                 _pool_sell(con, pool.id, cost_basis, pos_qty * current_price, symbol=symbol)

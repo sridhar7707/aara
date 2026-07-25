@@ -183,73 +183,47 @@ def _handle_entry(
     symbol: str, ctx: EntryContext,
 ) -> float:
     """Process entry gates and buy execution. Returns updated available_cash."""
-    positions         = ctx.positions
-    buy_order_syms    = ctx.buy_order_syms
-    earnings_map      = ctx.earnings_map
-    bars_map          = ctx.bars_map
-    sig_bars          = ctx.sig_bars
-    latest            = ctx.latest
-    current_price     = ctx.current_price
-    current_atr       = ctx.current_atr
-    regime_name       = ctx.regime_name
-    portfolio_value   = ctx.portfolio_value
-    available_cash    = ctx.available_cash
-    xgb_prob          = ctx.xgb_prob
-    lstm_prob         = ctx.lstm_prob
-    macro_score       = ctx.macro_score
-    macro_cap         = ctx.macro_cap
-    macro_halt        = ctx.macro_halt
-    spy_5bar_return   = ctx.spy_5bar_return
-    vs_spy_today      = ctx.vs_spy_today
-    sentiments        = ctx.sentiments
-    ensemble_size     = ctx.ensemble_size
-    xgb               = ctx.xgb
-    stop_fired_today  = ctx.stop_fired_today
-    volume_ratio      = ctx.volume_ratio
-    tradeable_capital = ctx.tradeable_capital
-    pool              = ctx.pool
+    available_cash = ctx.available_cash  # mutable local; all other fields accessed via ctx
+
     # Gate 0 — VIX emergency halt: no new positions when VIX >= 40
-    if macro_halt:
+    if ctx.macro_halt:
         _log_buy_skip(symbol, "VIX emergency halt")
         return available_cash
 
     # Gate 1 — Regime: only buy in trending or ranging markets
-    if regime_name not in ENTRY_REGIMES:
-        _log_buy_skip(symbol, f"regime={regime_name} (allowed: {ENTRY_REGIMES})")
+    if ctx.regime_name not in ENTRY_REGIMES:
+        _log_buy_skip(symbol, f"regime={ctx.regime_name} (allowed: {ENTRY_REGIMES})")
         return available_cash
 
     # Gate 2 — Volume: confirm institutional participation
-    if volume_ratio < MIN_VOLUME_RATIO:
-        _log_buy_skip(symbol, f"volume ratio {volume_ratio:.2f} < {MIN_VOLUME_RATIO}")
+    if ctx.volume_ratio < MIN_VOLUME_RATIO:
+        _log_buy_skip(symbol, f"volume ratio {ctx.volume_ratio:.2f} < {MIN_VOLUME_RATIO}")
         return available_cash
 
     # Gate 3 — XGB minimum confidence: live trades show 62% WR at >=0.55 vs 25% below
-    if xgb_prob < XGB_MIN_CONFIDENCE:
-        _log_buy_skip(symbol, f"xgb_prob {xgb_prob:.3f} < min {XGB_MIN_CONFIDENCE:.2f}")
+    if ctx.xgb_prob < XGB_MIN_CONFIDENCE:
+        _log_buy_skip(symbol, f"xgb_prob {ctx.xgb_prob:.3f} < min {XGB_MIN_CONFIDENCE:.2f}")
         return available_cash
 
     # Gate 4 — Relative strength: stock must be outperforming SPY over last N bars
-    if spy_5bar_return is not None and symbol != "SPY":
-        stock_5bar = sig_bars["close"].pct_change(RS_LOOKBACK_BARS).iloc[-1]
-        if not math.isnan(stock_5bar) and float(stock_5bar) < spy_5bar_return:
-            _log_buy_skip(
-                symbol,
-                f"RS weak ({stock_5bar:.2%} vs SPY {spy_5bar_return:.2%})"
-            )
+    if ctx.spy_5bar_return is not None and symbol != "SPY":
+        stock_5bar = ctx.sig_bars["close"].pct_change(RS_LOOKBACK_BARS).iloc[-1]
+        if not math.isnan(stock_5bar) and float(stock_5bar) < ctx.spy_5bar_return:
+            _log_buy_skip(symbol, f"RS weak ({stock_5bar:.2%} vs SPY {ctx.spy_5bar_return:.2%})")
             return available_cash
 
     # Gate 5 — Open order: no duplicate limit buy submissions
-    if symbol in buy_order_syms:
+    if symbol in ctx.buy_order_syms:
         _log_buy_skip(symbol, "open buy order already pending")
         return available_cash
 
     # Gate 6 — Earnings proximity (prefetched in parallel before loop)
-    if earnings_map.get(symbol, False):
+    if ctx.earnings_map.get(symbol, False):
         _log_buy_skip(symbol, "earnings proximity")
         return available_cash
 
     # Gate 7 — Correlation: avoid adding a position highly correlated with existing holdings
-    if not _passes_correlation_gate(symbol, positions, bars_map):
+    if not _passes_correlation_gate(symbol, ctx.positions, ctx.bars_map):
         return available_cash
 
     # Gate 7.5 — Wash-sale guard (IRS IRC §1091): block re-buy within 30 days of a loss sale
@@ -258,14 +232,14 @@ def _handle_entry(
         return available_cash
 
     # Gate 7.7 — Stop re-entry block: don't re-buy a symbol whose stop fired today
-    if symbol in stop_fired_today:
+    if symbol in ctx.stop_fired_today:
         _log_buy_skip(symbol, "stop-loss fired earlier today (re-entry blocked)")
         return available_cash
 
     # Gate 7.9 — MACD confirmation (daily bars only — intraday MACD oscillates too fast)
     # Disabled by default (MACD_CONFIRMATION_MIN=-inf). Set to 0.0 to require positive crossover.
     if not math.isinf(MACD_CONFIRMATION_MIN):
-        _daily_bars = bars_map.get(symbol, BarData(pd.DataFrame(), pd.DataFrame())).bars_daily
+        _daily_bars = ctx.bars_map.get(symbol, BarData(pd.DataFrame(), pd.DataFrame())).bars_daily
         if not _daily_bars.empty:
             _macd_diff = float(_daily_bars.iloc[-1].get("macd_diff", 0.0))
             if _macd_diff <= MACD_CONFIRMATION_MIN:
@@ -278,26 +252,26 @@ def _handle_entry(
     # Gate 8 — Cash and risk approval
     # ensemble_size: STRONG_BUY=0.20, BUY=0.12 — use as confidence multiplier on Kelly
     kelly_f      = _kelly_fraction(con, symbol)
-    confidence   = ensemble_size / BUY_FRACTION  # 1.0 for BUY, 1.67 for STRONG_BUY
-    pos_fraction = min(kelly_f * macro_cap * confidence, KELLY_FRACTION_MAX)
+    confidence   = ctx.ensemble_size / BUY_FRACTION  # 1.0 for BUY, 1.67 for STRONG_BUY
+    pos_fraction = min(kelly_f * ctx.macro_cap * confidence, KELLY_FRACTION_MAX)
 
     # Reinvestment guard: tradeable_capital is pre-computed once per cycle by main.py
     # using compute_tradeable_capital() so we avoid per-symbol DB reads here.
-    if tradeable_capital <= 0.0:
+    if ctx.tradeable_capital <= 0.0:
         _log_buy_skip(symbol, "no tradeable capital (profits only mode, no profits yet)")
         return available_cash
-    notional = tradeable_capital * pos_fraction
+    notional = ctx.tradeable_capital * pos_fraction
     if notional <= 0.0:
-        _log_buy_skip(symbol, f"zero position size (kelly={kelly_f:.3f}, macro_cap={macro_cap:.2f})")
+        _log_buy_skip(symbol, f"zero position size (kelly={kelly_f:.3f}, macro_cap={ctx.macro_cap:.2f})")
         return available_cash
 
     # Risk-per-trade cap: size so max dollar loss ≤ MAX_RISK_PER_TRADE_PCT of portfolio.
     # Derives the implied stop % from ATR (same formula as risk_manager), then back-calculates
     # max safe notional — volatile stocks get smaller positions automatically.
-    if current_atr and current_atr > 0 and current_price > 0:
+    if ctx.current_atr and ctx.current_atr > 0 and ctx.current_price > 0:
         stop_pct = max(ATR_MIN_STOP_PCT, min(ATR_MAX_STOP_PCT,
-                       (ATR_STOP_MULTIPLIER * current_atr) / current_price))
-        tp_target_pct = _atr_tp_pct(current_atr, current_price)
+                       (ATR_STOP_MULTIPLIER * ctx.current_atr) / ctx.current_price))
+        tp_target_pct = _atr_tp_pct(ctx.current_atr, ctx.current_price)
     else:
         stop_pct = STOP_LOSS_PCT
         tp_target_pct = _TP_FLOOR
@@ -316,7 +290,7 @@ def _handle_entry(
         )
         return available_cash
 
-    max_risk_notional = (portfolio_value * MAX_RISK_PER_TRADE_PCT) / stop_pct
+    max_risk_notional = (ctx.portfolio_value * MAX_RISK_PER_TRADE_PCT) / stop_pct
     if notional > max_risk_notional:
         logger.info(
             f"BUY {symbol}: notional capped ${notional:.0f}→${max_risk_notional:.0f} "
@@ -329,10 +303,10 @@ def _handle_entry(
     if _sym_sector not in ("Unknown", "Broad_ETF"):
         _sector_val = sum(
             float(getattr(pos, "market_value", 0) or 0)
-            for sym, pos in positions.items()
+            for sym, pos in ctx.positions.items()
             if SECTOR_MAP.get(sym, "Unknown") == _sym_sector
         )
-        _sector_pct = _sector_val / portfolio_value if portfolio_value > 0 else 0
+        _sector_pct = _sector_val / ctx.portfolio_value if ctx.portfolio_value > 0 else 0
         if _sector_pct >= MAX_SECTOR_EXPOSURE_PCT:
             _log_buy_skip(
                 symbol,
@@ -341,11 +315,10 @@ def _handle_entry(
             return available_cash
 
     # Gate 8e — Cash reserve: always keep MIN_CASH_RESERVE_PCT uninvested
-    _min_reserve = portfolio_value * MIN_CASH_RESERVE_PCT
+    _min_reserve = ctx.portfolio_value * MIN_CASH_RESERVE_PCT
     if notional > available_cash * CASH_USE_FRACTION:
         logger.warning(
-            f"BUY {symbol} skipped — need ${notional:.2f}, "
-            f"running cash ${available_cash:.2f}"
+            f"BUY {symbol} skipped — need ${notional:.2f}, running cash ${available_cash:.2f}"
         )
         return available_cash
     if available_cash - notional < _min_reserve:
@@ -354,54 +327,54 @@ def _handle_entry(
             f"(need ${notional:.0f}, reserve=${_min_reserve:.0f}, cash=${available_cash:.0f})"
         )
         return available_cash
-    _managed = pool.tradeable_cash if pool else None
-    if not risk.approve_buy(symbol, notional, portfolio_value,
-                            portfolio_value, positions, managed_capital=_managed):
+    _managed = ctx.pool.tradeable_cash if ctx.pool else None
+    if not risk.approve_buy(symbol, notional, ctx.portfolio_value,
+                            ctx.portfolio_value, ctx.positions, managed_capital=_managed):
         return available_cash
 
-    result = client.buy(symbol, notional, limit_price=current_price)
+    result = client.buy(symbol, notional, limit_price=ctx.current_price)
     if result:
         filled_qty = client.wait_for_fill(result["order_id"], timeout_secs=15)
         if filled_qty > 0:
             # Use actual fill price for P&L accuracy; fall back to limit estimate
             _actual_fill = client.get_fill_price(result["order_id"])
             if _actual_fill is None:
-                fill_price = current_price
+                fill_price = ctx.current_price
                 logger.warning(
                     f"BUY {symbol}: actual fill price unavailable — "
-                    f"using limit estimate ${current_price:.2f} (audit: cost basis may differ)"
+                    f"using limit estimate ${ctx.current_price:.2f} (audit: cost basis may differ)"
                 )
             else:
                 fill_price = _actual_fill
-                slippage_bps = (_actual_fill - current_price) / current_price * 10_000
+                slippage_bps = (_actual_fill - ctx.current_price) / ctx.current_price * 10_000
                 logger.info(
                     f"BUY {symbol}: filled ${_actual_fill:.2f} "
-                    f"({slippage_bps:+.1f} bps vs limit ${current_price:.2f})"
+                    f"({slippage_bps:+.1f} bps vs limit ${ctx.current_price:.2f})"
                 )
             fill_shares = notional / fill_price
-            _drivers = xgb.explain(latest)
-            _sent_s = sentiments.get(symbol, 0.0)
+            _drivers = ctx.xgb.explain(ctx.latest)
+            _sent_s = ctx.sentiments.get(symbol, 0.0)
             _ens_score = (
-                WEIGHTS["xgb"]       * xgb_prob +
-                WEIGHTS["lstm"]      * lstm_prob +
+                WEIGHTS["xgb"]       * ctx.xgb_prob +
+                WEIGHTS["lstm"]      * ctx.lstm_prob +
                 WEIGHTS["sentiment"] * ((_sent_s + 1.0) / 2.0) +
-                WEIGHTS["macro"]     * macro_score
+                WEIGHTS["macro"]     * ctx.macro_score
             )
             _sym_sector_tg = SECTOR_MAP.get(symbol, "")
             _sect_pct_tg = 0.0
-            if _sym_sector_tg and _sym_sector_tg not in ("Unknown", "Broad_ETF") and portfolio_value > 0:
+            if _sym_sector_tg and _sym_sector_tg not in ("Unknown", "Broad_ETF") and ctx.portfolio_value > 0:
                 _existing_sv = sum(
                     float(getattr(p, "market_value", 0) or 0)
-                    for s2, p in positions.items()
+                    for s2, p in ctx.positions.items()
                     if SECTOR_MAP.get(s2, "") == _sym_sector_tg
                 )
-                _sect_pct_tg = (_existing_sv + notional) / portfolio_value * 100
-            _cash_pct_tg = ((available_cash - notional) / portfolio_value * 100
-                            if portfolio_value > 0 else 0.0)
+                _sect_pct_tg = (_existing_sv + notional) / ctx.portfolio_value * 100
+            _cash_pct_tg = ((available_cash - notional) / ctx.portfolio_value * 100
+                            if ctx.portfolio_value > 0 else 0.0)
             tg.alert_buy(symbol, fill_shares, fill_price,
-                         regime_name, portfolio_value, vs_spy_today * 100,
+                         ctx.regime_name, ctx.portfolio_value, ctx.vs_spy_today * 100,
                          notional=notional,
-                         xgb_prob=xgb_prob, lstm_prob=lstm_prob,
+                         xgb_prob=ctx.xgb_prob, lstm_prob=ctx.lstm_prob,
                          sentiment_score=_sent_s,
                          ensemble_score=_ens_score,
                          drivers=_drivers,
@@ -410,39 +383,42 @@ def _handle_entry(
                          cash_pct_after=_cash_pct_tg)
             _ai_rsn = (
                 f"Bought {symbol} at ${fill_price:.2f}. "
-                f"XGB: {xgb_prob:.0%}, LSTM: {lstm_prob:.0%}, regime: {regime_name}. "
+                f"XGB: {ctx.xgb_prob:.0%}, LSTM: {ctx.lstm_prob:.0%}, regime: {ctx.regime_name}. "
                 f"Stop: {stop_pct:.1%}, target: {tp_target_pct:.1%}, R:R: {rr_ratio:.2f}x."
             )
             _trade_id = log_trade(con, symbol, "BUY", fill_shares,
-                                  fill_price, notional, regime_name, portfolio_value, 0,
-                                  xgb_prob=xgb_prob, lstm_prob=lstm_prob,
-                                  sentiment_score=sentiments.get(symbol, 0.0),
-                                  macro_score=macro_score,
+                                  fill_price, notional, ctx.regime_name, ctx.portfolio_value, 0,
+                                  xgb_prob=ctx.xgb_prob, lstm_prob=ctx.lstm_prob,
+                                  sentiment_score=ctx.sentiments.get(symbol, 0.0),
+                                  macro_score=ctx.macro_score,
                                   order_id=result.get("order_id"),
                                   feature_drivers=json.dumps(_drivers) if _drivers is not None else None,
                                   ai_reasoning=_ai_rsn,
                                   stop_loss=round(fill_price * (1 - stop_pct), 4),
                                   take_profit=round(fill_price * (1 + tp_target_pct), 4),
                                   risk_reward_ratio=round(rr_ratio, 4))
-            _journal_open(
-                con, symbol, _trade_id,
-                entry_reason=_ai_rsn,
-                entry_signals={
-                    "xgb_prob": xgb_prob, "lstm_prob": lstm_prob,
-                    "macro_score": macro_score, "regime": regime_name,
-                    "stop_pct": round(stop_pct, 4), "tp_pct": round(tp_target_pct, 4),
-                    "rr_ratio": round(rr_ratio, 3), "volume_ratio": round(volume_ratio, 3),
-                },
-                entry_confidence=xgb_prob,
-                pattern_tags=[regime_name, SECTOR_MAP.get(symbol, "Unknown")],
-            )
-            if pool:
-                _pool_buy(con, pool.id, notional, symbol=symbol)
+            try:
+                _journal_open(
+                    con, symbol, _trade_id,
+                    entry_reason=_ai_rsn,
+                    entry_signals={
+                        "xgb_prob": ctx.xgb_prob, "lstm_prob": ctx.lstm_prob,
+                        "macro_score": ctx.macro_score, "regime": ctx.regime_name,
+                        "stop_pct": round(stop_pct, 4), "tp_pct": round(tp_target_pct, 4),
+                        "rr_ratio": round(rr_ratio, 3), "volume_ratio": round(ctx.volume_ratio, 3),
+                    },
+                    entry_confidence=ctx.xgb_prob,
+                    pattern_tags=[ctx.regime_name, SECTOR_MAP.get(symbol, "Unknown")],
+                )
+            except Exception as _je:
+                logger.warning(f"Journal open failed for {symbol} (non-fatal): {_je}")
+            if ctx.pool:
+                _pool_buy(con, ctx.pool.id, notional, symbol=symbol)
             _rec_action(con, "buy", symbol, reasoning=_ai_rsn,
-                        confidence=int(xgb_prob * 100), status="executed")
-            _upsert_position_state(con, symbol, fill_price, fill_price, current_atr)
+                        confidence=int(ctx.xgb_prob * 100), status="executed")
+            _upsert_position_state(con, symbol, fill_price, fill_price, ctx.current_atr)
             available_cash -= notional
-            buy_order_syms.discard(symbol)  # order is now filled, not pending
+            ctx.buy_order_syms.discard(symbol)  # order is now filled, not pending
         else:
             logger.warning(f"BUY {symbol} order did not fill — position state NOT recorded")
 
