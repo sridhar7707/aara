@@ -21,10 +21,33 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-          cache: pip
+          cache: pip            # speeds up downloads on venv cache-miss
+
+      - name: Cache virtualenv
+        uses: actions/cache@v6
+        id: cache-venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py311-${{ hashFiles('requirements.txt') }}
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip --quiet
+          # CPU-only torch: avoids the ~2.5 GB CUDA wheel (tests don't need a GPU)
+          .venv/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu --quiet
+          .venv/bin/pip install -r requirements.txt --quiet
+
+      - name: Activate venv
+        run: echo "$GITHUB_WORKSPACE/.venv/bin" >> $GITHUB_PATH
+
+      # Fast structural gate (file size, print() in bot/dashboard, missing type
+      # hints, etc.) — fails only on BLOCK/ERROR-severity findings, same bar
+      # enforced manually all along; this makes it automatic instead of relying
+      # on remembering to run it locally before every push.
+      - name: Architecture & standards review
+        run: python scripts/arch_review.py
 
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short
