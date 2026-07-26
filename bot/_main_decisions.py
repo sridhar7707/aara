@@ -52,6 +52,20 @@ def backfill_decisions_from_trades(con: sqlite3.Connection) -> int:
 
     Returns the number of decision_log rows created.
     """
+    # A now-retired dashboard mechanism (dashboard/components/timeline.py's
+    # _sync_from_trades(), removed) used to lazily backfill decision_log with
+    # a narrower, unlinked format (no trade_id, decision_status always NULL)
+    # whenever the Symbol Detail timeline was viewed — before this function
+    # existed. Those rows are pure duplicates of what this function creates
+    # properly linked; decision_status is NULL only ever for that legacy
+    # format (every row this module writes always sets it), so it's a safe,
+    # precise way to find and remove them before backfilling cleanly.
+    _stale = con.execute(
+        "DELETE FROM decision_log WHERE decision_status IS NULL"
+    ).rowcount
+    if _stale:
+        _logger.info(f"Decision backfill: removed {_stale} stale rows from the retired timeline sync")
+
     already_linked = {
         r[0] for r in con.execute(
             "SELECT trade_id FROM decision_log WHERE trade_id IS NOT NULL"

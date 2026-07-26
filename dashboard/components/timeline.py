@@ -81,49 +81,6 @@ def _load_timeline(symbol: str) -> list[dict]:
         return []
 
 
-def _sync_from_trades(symbol: str | None = None) -> None:
-    """One-time backfill: create decision_log entries from existing trades rows."""
-    if not os.path.exists(DB_PATH):
-        return
-    try:
-        with get_db_conn() as con:
-            # Per-symbol check when a symbol is given; global check for full backfill
-            if symbol:
-                count = con.execute(
-                    "SELECT COUNT(*) FROM decision_log WHERE symbol=?", (symbol,)
-                ).fetchone()[0]
-            else:
-                count = con.execute("SELECT COUNT(*) FROM decision_log").fetchone()[0]
-            if count > 0:
-                return
-            where = "WHERE symbol=?" if symbol else ""
-            params = (symbol,) if symbol else ()
-            rows = con.execute(
-                f"SELECT symbol, date(timestamp), action, price, shares,"
-                f"ensemble_score, portfolio_value, ai_reasoning FROM trades "
-                f"{where} ORDER BY id ASC",
-                params
-            ).fetchall()
-            for r in rows:
-                sym, dt, action, price, shares, ens, pv, reasoning = r
-                if not dt:
-                    continue
-                dt_str = str(dt)[:10]
-                dtype  = "buy"  if "BUY"  in str(action) else "sell"
-                conf   = int(float(ens or 0) * 100) if ens else None
-                note   = reasoning or f"{action} via AI bot"
-                con.execute(
-                    "INSERT OR IGNORE INTO decision_log "
-                    "(symbol, decision_date, decision_type, price_at_decision,"
-                    "quantity_changed, reasoning, ai_confidence,"
-                    "portfolio_value_at_time, triggered_by) VALUES (?,?,?,?,?,?,?,?,?)",
-                    (sym, dt_str, dtype, price, shares, note, conf, pv, "ai")
-                )
-            con.commit()
-    except Exception as exc:
-        log_exception(_logger, "_sync_from_trades", exc)
-
-
 def render_decision_timeline(symbol: str | None = None) -> str:
     """Render decision timeline for a single symbol."""
     if not symbol:
@@ -133,7 +90,6 @@ def render_decision_timeline(symbol: str | None = None) -> str:
             f'{_card(_empty_state("⏱", "Select a symbol", "Choose a symbol to view its decision timeline."))}'
             f'</div>'
         )
-    _sync_from_trades(symbol)
     entries = _load_timeline(symbol)
 
     if not entries:
@@ -222,7 +178,6 @@ def render_decision_timeline(symbol: str | None = None) -> str:
 @safe_render("Decision Timeline")
 def render_all_timelines() -> str:
     """Overview: all symbols with decision history, most recent first."""
-    _sync_from_trades()
     if not os.path.exists(DB_PATH):
         return (f'<div class="nt nt-wrap">'
                 f'{_section("⏱", "Decision Timeline", "All positions")}'

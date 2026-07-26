@@ -123,3 +123,29 @@ def test_backfill_skips_trades_already_linked_by_live_wiring(db):
     assert created == 0
     n = db.execute("SELECT COUNT(*) FROM decision_log WHERE symbol='BAC'").fetchone()[0]
     assert n == 1
+
+
+def test_backfill_removes_stale_rows_from_retired_timeline_sync(db):
+    """dashboard/components/timeline.py's old _sync_from_trades() (now
+    removed) used to write decision_log rows with no trade_id and
+    decision_status always NULL. If that already happened before this
+    function ever ran, it must clean those up rather than create duplicates
+    alongside them."""
+    log_trade(db, "GOOGL", "BUY", 1.0, 300.0, 300.0, "TRENDING_UP", 10000.0, 0.0)
+    # Simulate a leftover row from the retired mechanism: no trade_id, no
+    # decision_status — exactly what _sync_from_trades used to insert.
+    db.execute(
+        "INSERT INTO decision_log (symbol, decision_date, decision_type, price_at_decision, "
+        "reasoning, ai_confidence, portfolio_value_at_time, triggered_by) "
+        "VALUES ('GOOGL', '2026-06-23', 'buy', 300.0, 'BUY via AI bot', 70, 10000.0, 'ai')"
+    )
+    db.commit()
+    assert db.execute("SELECT COUNT(*) FROM decision_log").fetchone()[0] == 1
+
+    created = backfill_decisions_from_trades(db)
+
+    assert created == 1
+    rows = db.execute("SELECT COUNT(*), trade_id, decision_status FROM decision_log WHERE symbol='GOOGL'").fetchone()
+    assert rows[0] == 1  # stale row removed, exactly one clean replacement — not two
+    assert rows[1] is not None      # properly linked this time
+    assert rows[2] == "APPROVED"
