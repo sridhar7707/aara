@@ -24,6 +24,11 @@ def load_completed_trades(
 
     The Nth SELL for a symbol is matched to the Nth BUY (in timestamp order).
     This is the only reliable link without a foreign-key trade_id column.
+    SELL_RECONCILE rows are excluded entirely (not just their P&L) — they
+    never represented a real close (see the 2026-07-07 corruption incident),
+    so removing them lets the remaining real sells re-rank and pair
+    correctly with their true buy; including them as a "sell" would shift
+    every later sell for that symbol onto the wrong buy.
 
     Returned columns:
       symbol, buy_ts, sell_ts, entry_price, exit_price,
@@ -67,7 +72,7 @@ def load_completed_trades(
                    holding_days,
                    realized_pnl
             FROM trades
-            WHERE action LIKE 'SELL%' AND timestamp >= ?
+            WHERE action LIKE 'SELL%' AND action != 'SELL_RECONCILE' AND timestamp >= ?
             ORDER BY symbol, timestamp
             """,
             con, params=[cutoff],
@@ -88,6 +93,11 @@ def load_completed_trades(
     merged["pnl_pct"]      = pd.to_numeric(merged["pnl_pct"],      errors="coerce").fillna(0.0)
     merged["holding_days"] = pd.to_numeric(merged["holding_days"], errors="coerce").fillna(0.0)
     merged["realized_pnl"] = pd.to_numeric(merged["realized_pnl"], errors="coerce").fillna(0.0)
+    # Defensive sanity check: a sell can never close a buy that hasn't happened
+    # yet. Should never trigger on clean data, but cheaply guards against a
+    # pathological multi-reconcile sequence silently misaligning the Nth-buy-
+    # to-Nth-sell ranking rather than producing an inverted round trip.
+    merged = merged[merged["sell_ts"] >= merged["buy_ts"]]
     return merged.reset_index(drop=True)
 
 
