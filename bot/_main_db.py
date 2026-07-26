@@ -126,6 +126,8 @@ def init_db(db_path: str = TRADE_DB_PATH) -> sqlite3.Connection:
     _init_v2_tables(con)
     _init_qm_schema(con)
     con.commit()
+    from bot._main_decisions import backfill_decisions_from_trades
+    backfill_decisions_from_trades(con)
     return con
 
 
