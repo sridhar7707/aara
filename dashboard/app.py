@@ -235,6 +235,10 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
             trades_out = registry.mount("trades_out", gr.HTML(value=render_trades))
 
         # ── Tab 3: Analytics (deep-dive — one tap from Brief / Portfolio) ─────
+        # Secondary/drill-down sections live in collapsed accordions so the
+        # tab isn't ~6000px of unconditional scroll — nothing removed, just
+        # progressive disclosure. Keep only the most glanceable, highest-
+        # value sections unconditionally visible at the top.
         with gr.TabItem("🔍 Analytics"):
             spy_banner_out      = registry.mount("spy_banner_out",      gr.HTML(value=""))
             with gr.Row():
@@ -242,11 +246,8 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
                     alloc_plot = registry.mount("alloc_plot", gr.Plot(value=_ci["alloc"], label="", show_label=False))
                 with gr.Column(scale=4):
                     pnl_plot   = registry.mount("pnl_plot",  gr.Plot(value=_ci["pnl"],   label="", show_label=False))
-            committee_out       = registry.mount("committee_out",       gr.HTML(value=""))
-            decision_center_out = registry.mount("decision_center_out", gr.HTML(value=""))
-            rebalance_out       = registry.mount("rebalance_out",       gr.HTML(value=""))
+            ai_rec_brief_out   = registry.mount("ai_rec_brief_out",   gr.HTML(value=render_ai_recommendation))
             watchlist_out       = registry.mount("watchlist_out",       gr.HTML(value=render_watchlist))
-            thesis_out          = registry.mount("thesis_out",          gr.HTML(value=""))
             _initial_choices = _get_symbol_choices()
             _initial_sym     = _initial_choices[0] if _initial_choices else None
             symbol_selector  = registry.mount("symbol_selector", gr.Dropdown(
@@ -254,18 +255,33 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
                 value=_initial_sym, container=True, elem_classes=["sym-selector"],
             ))
             symbol_detail_out = registry.mount("symbol_detail_out", gr.HTML(value=render_symbol_detail(_initial_sym) if _initial_sym else ""))
-            _sim_syms  = sorted(get_data().get("prices", {}).keys()) or []
-            sim_sym_dd = registry.mount("sim_sym_dd", gr.Dropdown(choices=_sim_syms, label="🔬 Simulate: Symbol", container=True))
-            sim_amt_sl = gr.Slider(minimum=100, maximum=10000, value=500, step=100,
-                                   label="Amount ($)", container=True)
-            simulator_out = gr.HTML(value="")
-            whats_changed_out  = registry.mount("whats_changed_out",  gr.HTML(value=render_whats_changed))
-            market_mood_out    = registry.mount("market_mood_out",    gr.HTML(value=_ci["market_mood"]))
-            ai_rec_brief_out   = registry.mount("ai_rec_brief_out",   gr.HTML(value=render_ai_recommendation))
-            risk_panel_out     = registry.mount("risk_panel_out",     gr.HTML(value=render_risk_panel))
-            mkt_intel_out      = registry.mount("mkt_intel_out",      gr.HTML(value=render_market_intelligence))
-            news_out           = registry.mount("news_out",           gr.HTML(value=_ci["news"]))
-            timeline_brief_out = registry.mount("timeline_brief_out", gr.HTML(value=render_all_timelines))
+
+            with gr.Accordion("🗳️ AI Committee", open=False):
+                committee_out       = registry.mount("committee_out",       gr.HTML(value=""))
+            with gr.Accordion("✅ Decision Center", open=False):
+                decision_center_out = registry.mount("decision_center_out", gr.HTML(value=""))
+            with gr.Accordion("⚖️ Rebalance", open=False):
+                rebalance_out       = registry.mount("rebalance_out",       gr.HTML(value=""))
+            with gr.Accordion("📝 Thesis Tracker", open=False):
+                thesis_out          = registry.mount("thesis_out",          gr.HTML(value=""))
+            with gr.Accordion("🔬 Simulate a Trade", open=False):
+                _sim_syms  = sorted(get_data().get("prices", {}).keys()) or []
+                sim_sym_dd = registry.mount("sim_sym_dd", gr.Dropdown(choices=_sim_syms, label="Symbol", container=True))
+                sim_amt_sl = gr.Slider(minimum=100, maximum=10000, value=500, step=100,
+                                       label="Amount ($)", container=True)
+                simulator_out = gr.HTML(value="")
+            with gr.Accordion("📅 Since Yesterday", open=False):
+                whats_changed_out  = registry.mount("whats_changed_out",  gr.HTML(value=render_whats_changed))
+            with gr.Accordion("🌡️ Market Mood", open=False):
+                market_mood_out    = registry.mount("market_mood_out",    gr.HTML(value=_ci["market_mood"]))
+            with gr.Accordion("🛡️ Risk Controls", open=False):
+                risk_panel_out     = registry.mount("risk_panel_out",     gr.HTML(value=render_risk_panel))
+            with gr.Accordion("📡 Market Intelligence", open=False):
+                mkt_intel_out      = registry.mount("mkt_intel_out",      gr.HTML(value=render_market_intelligence))
+            with gr.Accordion("📰 Market News", open=False):
+                news_out           = registry.mount("news_out",           gr.HTML(value=_ci["news"]))
+            with gr.Accordion("🕐 Decision Timeline", open=False):
+                timeline_brief_out = registry.mount("timeline_brief_out", gr.HTML(value=render_all_timelines))
 
         # ── Tab 4: Capital ────────────────────────────────────────────────────
         with gr.TabItem("💰 Capital"):
