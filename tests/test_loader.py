@@ -50,6 +50,28 @@ def test_load_completed_trades_reconcile_does_not_shift_later_pairing(db):
     assert (df["sell_ts"] >= df["buy_ts"]).all()
 
 
+def test_load_completed_trades_exposes_exit_reason(db):
+    log_trade(db, "AAPL", "BUY", 5.0, 100.0, 500.0, "TRENDING_UP", 10000.0, 0.0)
+    log_trade(db, "AAPL", "SELL_TIME_EXIT", 5.0, 110.0, 550.0, "TRENDING_UP", 10000.0, 0.10)
+    df = load_completed_trades(con=db)
+    assert df.iloc[0]["exit_reason"] == "SELL_TIME_EXIT"
+
+
+def test_load_completed_trades_excludes_sell_trim_entirely(db):
+    """SELL_TRIM is a partial sell that leaves the position open (see
+    _trim_position()) — the same shape of bug as SELL_RECONCILE: if counted
+    as a "sell" here it would falsely close the round trip early and shift
+    every later real sell for the symbol onto the wrong buy."""
+    log_trade(db, "NVDA", "BUY", 4.0, 500.0, 2000.0, "TRENDING_UP", 10000.0, 0.0)          # buy 1
+    log_trade(db, "NVDA", "SELL_TRIM", 1.0, 520.0, 520.0, "TRENDING_UP", 10000.0, 0.04)     # partial, still open
+    log_trade(db, "NVDA", "SELL_TIME_EXIT", 3.0, 530.0, 1590.0, "TRENDING_UP", 10000.0, 0.06)  # real close
+
+    df = load_completed_trades(con=db)
+    assert len(df) == 1
+    assert df.iloc[0]["pnl_pct"] == pytest.approx(0.06)  # the real close, not the trim
+    assert df.iloc[0]["exit_reason"] == "SELL_TIME_EXIT"
+
+
 def test_load_completed_trades_orphan_sell_with_no_buy_produces_no_row(db):
     log_trade(db, "MS", "SELL_STOP", 3.0, 200.0, 600.0, "TRENDING_UP", 10000.0, -0.05)
     df = load_completed_trades(con=db)

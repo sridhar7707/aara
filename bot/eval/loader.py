@@ -24,15 +24,17 @@ def load_completed_trades(
 
     The Nth SELL for a symbol is matched to the Nth BUY (in timestamp order).
     This is the only reliable link without a foreign-key trade_id column.
-    SELL_RECONCILE rows are excluded entirely (not just their P&L) — they
-    never represented a real close (see the 2026-07-07 corruption incident),
-    so removing them lets the remaining real sells re-rank and pair
-    correctly with their true buy; including them as a "sell" would shift
-    every later sell for that symbol onto the wrong buy.
+    SELL_RECONCILE and SELL_TRIM rows are excluded entirely (not just their
+    P&L) — neither represents a real close (a reconcile never really
+    happened; a trim is a partial sell that leaves the position open, per
+    bot/_main_positions.py::_trim_position()), so removing them lets the
+    remaining real sells re-rank and pair correctly with their true buy;
+    including either as a "sell" would shift every later sell for that
+    symbol onto the wrong buy.
 
     Returned columns:
       symbol, buy_ts, sell_ts, entry_price, exit_price,
-      pnl_pct, holding_days, realized_pnl, regime,
+      pnl_pct, holding_days, realized_pnl, regime, exit_reason,
       xgb_prob, lstm_prob, sentiment_score, macro_score, ensemble_score,
       stop_loss, take_profit, risk_reward_ratio, notional, portfolio_value
     """
@@ -70,9 +72,11 @@ def load_completed_trades(
                    price      AS exit_price,
                    pnl_pct,
                    holding_days,
-                   realized_pnl
+                   realized_pnl,
+                   action     AS exit_reason
             FROM trades
-            WHERE action LIKE 'SELL%' AND action != 'SELL_RECONCILE' AND timestamp >= ?
+            WHERE action LIKE 'SELL%' AND action NOT IN ('SELL_RECONCILE', 'SELL_TRIM')
+              AND timestamp >= ?
             ORDER BY symbol, timestamp
             """,
             con, params=[cutoff],

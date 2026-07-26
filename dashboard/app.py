@@ -94,6 +94,7 @@ from dashboard.components.attribution import (
 )
 from dashboard.components.decision_quality import render_decision_quality_summary
 from dashboard.components.trade_journal import render_trade_journal
+from dashboard.components.loss_explanation import render_loss_explanation
 from dashboard.timers import register_all_timers
 import dashboard.registry as registry
 from database.user_settings import get_all_settings, save_setting, get_setting
@@ -377,6 +378,9 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
         with gr.TabItem("📓 Journal"):
             trade_journal_out = registry.mount(
                 "trade_journal_out", gr.HTML(value=render_trade_journal)
+            )
+            loss_explanation_out = registry.mount(
+                "loss_explanation_out", gr.HTML(value=render_loss_explanation)
             )
 
         # ── Tab 8: Settings ───────────────────────────────────────────────────

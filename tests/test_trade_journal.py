@@ -3,7 +3,7 @@ import sqlite3
 import pytest
 from database.trade_journal import (
     _ensure_table, open_entry, close_entry, query_pattern_stats, recent_entries,
-    _auto_lesson,
+    auto_lesson,
 )
 
 
@@ -95,5 +95,5 @@ def test_recent_entries(db):
     ("signal",       -0.03,  9,  "false positive"),
 ])
 def test_auto_lesson(reason, pct, days, expected_fragment):
-    lesson = _auto_lesson(reason, pct, days)
+    lesson = auto_lesson(reason, pct, days)
     assert expected_fragment in lesson

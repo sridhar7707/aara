@@ -67,7 +67,7 @@ def close_entry(
 ) -> None:
     """Close the most-recent open journal entry for symbol at SELL time."""
     _ensure_table(con)
-    lesson = _auto_lesson(exit_reason, outcome_pct, holding_days)
+    lesson = auto_lesson(exit_reason, outcome_pct, holding_days)
     closed_at = datetime.now(timezone.utc).isoformat()
     row = con.execute(
         "SELECT id FROM trade_journal WHERE symbol=? AND closed_at IS NULL ORDER BY id DESC LIMIT 1",
@@ -99,7 +99,7 @@ def close_entry(
     con.commit()
 
 
-def _auto_lesson(exit_reason: str, outcome_pct: float, holding_days: int) -> str:
+def auto_lesson(exit_reason: str, outcome_pct: float, holding_days: int) -> str:
     if exit_reason == "take-profit":
         return "Take-profit reached — entry setup worked as planned."
     if exit_reason == "gap-down":
