@@ -18,7 +18,7 @@ from dashboard.data import DB_PATH
 from dashboard.design_system import (
     BORDER, LOSS, NEURAL, TEXT1, TEXT2, TEXT3,
     FONT_VALUE, WEIGHT_BOLD,
-    TH, _section, _empty_state, _card, _wrap,
+    th_style, _section, _empty_state, _card, _wrap,
 )
 from dashboard.registry import ComponentSpec, RefreshGroup, register
 
@@ -118,13 +118,13 @@ def render_loss_explanation() -> str:
     table = (
         f"<table style='width:100%;border-collapse:collapse;'>"
         f"<thead><tr>"
-        f"<th {TH} style='text-align:left;'>Symbol</th>"
-        f"<th {TH} style='text-align:left;'>Closed</th>"
-        f"<th {TH} style='text-align:right;'>Return</th>"
-        f"<th {TH} style='text-align:left;'>Exit</th>"
-        f"<th {TH} style='text-align:right;'>Confidence</th>"
-        f"<th {TH} style='text-align:left;'>Verdict</th>"
-        f"<th {TH} style='text-align:left;'>Lesson</th>"
+        f"<th {th_style('text-align:left;')}>Symbol</th>"
+        f"<th {th_style('text-align:left;')}>Closed</th>"
+        f"<th {th_style('text-align:right;')}>Return</th>"
+        f"<th {th_style('text-align:left;')}>Exit</th>"
+        f"<th {th_style('text-align:right;')}>Confidence</th>"
+        f"<th {th_style('text-align:left;')}>Verdict</th>"
+        f"<th {th_style('text-align:left;')}>Lesson</th>"
         f"</tr></thead><tbody>{rows_html}</tbody></table>"
     )
     subtitle = f"{n} of {len(df)} completed trades" + (

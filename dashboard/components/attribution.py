@@ -13,13 +13,14 @@ from dashboard.data import safe_query
 from dashboard.design_system import (
     BORDER, GAIN, LOSS, NEURAL, SURFACE, TEXT1, TEXT2, TEXT3,
     FONT_HERO, FONT_LABEL, FONT_VALUE, WEIGHT_BOLD,
-    TH, TD, TD0, _section, _empty_state, _card, _wrap,
+    TH, TD, TD0, td_style, _section, _empty_state, _card, _wrap,
 )
 
 _logger = logger
 
-_CELL = f"padding:8px 14px;font-size:{FONT_VALUE};color:{TEXT2};"
-_NUM  = f"padding:8px 14px;font-size:{FONT_VALUE};color:{TEXT1};text-align:right;font-family:Courier New,monospace;font-weight:{WEIGHT_BOLD};"
+# !important needed: class="nt-tbl" forces color via layout.py's `.nt-tbl td` rule.
+_CELL = f"padding:8px 14px;font-size:{FONT_VALUE};color:{TEXT2} !important;"
+_NUM  = f"padding:8px 14px;font-size:{FONT_VALUE};color:{TEXT1} !important;text-align:right;font-family:Courier New,monospace;font-weight:{WEIGHT_BOLD};"
 
 
 def _pnl_color(val: float) -> str:
@@ -117,7 +118,7 @@ def render_attribution_by_symbol() -> str:
 
     tbody = ""
     for i, (sym, v) in enumerate(ranked):
-        td = TD if i < len(ranked) - 1 else TD0
+        border = i < len(ranked) - 1
         win_rate = v["wins"] / v["trades"] * 100 if v["trades"] else 0
         color = _pnl_color(v["pnl"])
         bar_pct = abs(v["pnl"]) / (max(abs(v2["pnl"]) for v2 in agg.values()) or 1) * 100
@@ -133,21 +134,21 @@ def render_attribution_by_symbol() -> str:
             alpha_html = f'<span style="color:{TEXT3};">&mdash;</span>'
         tbody += (
             f"<tr>"
-            f"<td {td} style='{_CELL}'>{i+1}</td>"
-            f"<td {td} style='{_CELL}font-weight:{WEIGHT_BOLD};color:{TEXT1};'>{sym}</td>"
-            f"<td {td} style='{_NUM}color:{color};'>{_pnl_str(v['pnl'])}</td>"
-            f"<td {td} style='{_CELL}'>{bar}</td>"
-            f"<td {td} style='{_CELL}'>{win_rate:.0f}%</td>"
-            f"<td {td} style='{_CELL}'>{v['trades']}</td>"
-            f"<td {td} style='{_CELL}'>{alpha_html}</td>"
+            f"<td {td_style(_CELL, border=border)}>{i+1}</td>"
+            f"<td {td_style(_CELL + f'font-weight:{WEIGHT_BOLD};color:{TEXT1} !important;', border=border)}>{sym}</td>"
+            f"<td {td_style(_NUM + f'color:{color} !important;', border=border)}>{_pnl_str(v['pnl'])}</td>"
+            f"<td {td_style(_CELL, border=border)}>{bar}</td>"
+            f"<td {td_style(_CELL, border=border)}>{win_rate:.0f}%</td>"
+            f"<td {td_style(_CELL, border=border)}>{v['trades']}</td>"
+            f"<td {td_style(_CELL, border=border)}>{alpha_html}</td>"
             f"</tr>"
         )
 
     total_color = _pnl_color(total_pnl)
     footer = (
         f'<tr style="background:{SURFACE};">'
-        f'<td colspan="2" {TD0} style="{_CELL}font-weight:{WEIGHT_BOLD};color:{TEXT1};">Total</td>'
-        f'<td {TD0} style="{_NUM}color:{total_color};">{_pnl_str(total_pnl)}</td>'
+        f'<td colspan="2" {td_style(_CELL + f"font-weight:{WEIGHT_BOLD};color:{TEXT1} !important;", border=False)}>Total</td>'
+        f'<td {td_style(_NUM + f"color:{total_color} !important;", border=False)}>{_pnl_str(total_pnl)}</td>'
         f'<td colspan="4" {TD0}></td></tr>'
     )
     table = _wrap(
@@ -189,7 +190,7 @@ def render_attribution_by_sector() -> str:
 
     tbody = ""
     for i, (sector, v) in enumerate(ranked):
-        td = TD if i < len(ranked) - 1 else TD0
+        border = i < len(ranked) - 1
         color = _pnl_color(v["pnl"])
         bar_pct = abs(v["pnl"]) / max_abs * 100
         bar_color = GAIN if v["pnl"] >= 0 else LOSS
@@ -205,12 +206,12 @@ def render_attribution_by_sector() -> str:
             alpha_html = f'<span style="color:{TEXT3};">&mdash;</span>'
         tbody += (
             f"<tr>"
-            f"<td {td} style='{_CELL}font-weight:{WEIGHT_BOLD};color:{TEXT1};'>{sector.replace('_', ' ')}</td>"
-            f"<td {td} style='{_NUM}color:{color};'>{_pnl_str(v['pnl'])}</td>"
-            f"<td {td} style='{_CELL}'>{bar}</td>"
-            f"<td {td} style='{_CELL}color:{TEXT3};'>{share:+.0f}%</td>"
-            f"<td {td} style='{_CELL}'>{v['trades']}</td>"
-            f"<td {td} style='{_CELL}'>{alpha_html}</td>"
+            f"<td {td_style(_CELL + f'font-weight:{WEIGHT_BOLD};color:{TEXT1} !important;', border=border)}>{sector.replace('_', ' ')}</td>"
+            f"<td {td_style(_NUM + f'color:{color} !important;', border=border)}>{_pnl_str(v['pnl'])}</td>"
+            f"<td {td_style(_CELL, border=border)}>{bar}</td>"
+            f"<td {td_style(_CELL + f'color:{TEXT3} !important;', border=border)}>{share:+.0f}%</td>"
+            f"<td {td_style(_CELL, border=border)}>{v['trades']}</td>"
+            f"<td {td_style(_CELL, border=border)}>{alpha_html}</td>"
             f"</tr>"
         )
 
@@ -253,7 +254,7 @@ def render_attribution_by_model() -> str:
     tbody = ""
     n = len(models)
     for i, (name, idx, icon) in enumerate(models):
-        td = TD if i < n - 1 else TD0
+        border = i < n - 1
         w_avg = _avg(wins, idx)
         l_avg = _avg(loses, idx)
         delta = w_avg - l_avg
@@ -261,11 +262,11 @@ def render_attribution_by_model() -> str:
         verdict = "Adds edge" if delta > 0.02 else ("Hurts" if delta < -0.02 else "Neutral")
         tbody += (
             f"<tr>"
-            f"<td {td} style='{_CELL}'>{icon} {name}</td>"
-            f"<td {td} style='{_CELL}'>{w_avg:.3f}</td>"
-            f"<td {td} style='{_CELL}'>{l_avg:.3f}</td>"
-            f"<td {td} style='{_NUM}color:{color};'>{delta:+.3f}</td>"
-            f"<td {td} style='{_CELL}'>{verdict}</td>"
+            f"<td {td_style(_CELL, border=border)}>{icon} {name}</td>"
+            f"<td {td_style(_CELL, border=border)}>{w_avg:.3f}</td>"
+            f"<td {td_style(_CELL, border=border)}>{l_avg:.3f}</td>"
+            f"<td {td_style(_NUM + f'color:{color} !important;', border=border)}>{delta:+.3f}</td>"
+            f"<td {td_style(_CELL, border=border)}>{verdict}</td>"
             f"</tr>"
         )
 
@@ -338,7 +339,7 @@ def render_confidence_calibration() -> str:
     for i, (lo, hi, label) in enumerate(active):
         b  = buckets[label]
         n  = b["trades"]
-        td = TD if i < n_active - 1 else TD0
+        border = i < n_active - 1
         if n < _MIN_BUCKET_N:
             wr_html  = f'<span style="color:{TEXT3};">Insufficient data</span>'
             ret_html = f'<span style="color:{TEXT3};">&mdash;</span>'
@@ -350,10 +351,10 @@ def render_confidence_calibration() -> str:
             ret_html = f'<span style="color:{_pnl_color(avg_ret)};">{avg_ret:+.1f}%</span>'
         tbody += (
             f"<tr>"
-            f"<td {td} style='{_CELL}font-weight:{WEIGHT_BOLD};color:{TEXT1};'>{label}</td>"
-            f"<td {td} style='{_CELL}'>{n}</td>"
-            f"<td {td} style='{_CELL}'>{wr_html}</td>"
-            f"<td {td} style='{_CELL}'>{ret_html}</td>"
+            f"<td {td_style(_CELL + f'font-weight:{WEIGHT_BOLD};color:{TEXT1} !important;', border=border)}>{label}</td>"
+            f"<td {td_style(_CELL, border=border)}>{n}</td>"
+            f"<td {td_style(_CELL, border=border)}>{wr_html}</td>"
+            f"<td {td_style(_CELL, border=border)}>{ret_html}</td>"
             f"</tr>"
         )
 
@@ -392,15 +393,15 @@ def render_attribution_by_trade() -> str:
         n = len(trades)
         for i, r in enumerate(trades):
             sym, pnl, pct, *_, ts, _holding_days = r
-            td = TD if (i < n - 1 or last_border) else TD0
+            border = i < n - 1 or last_border
             color = _pnl_color(float(pnl or 0))
             date = str(ts)[:10] if ts else "—"
             html += (
                 f"<tr>"
-                f"<td {td} style='{_CELL}font-weight:{WEIGHT_BOLD};color:{TEXT1};'>{sym}</td>"
-                f"<td {td} style='{_NUM}color:{color};'>{_pnl_str(float(pnl or 0))}</td>"
-                f"<td {td} style='{_CELL}color:{color};'>{float(pct or 0)*100:+.2f}%</td>"
-                f"<td {td} style='{_CELL}color:{TEXT3};'>{date}</td>"
+                f"<td {td_style(_CELL + f'font-weight:{WEIGHT_BOLD};color:{TEXT1} !important;', border=border)}>{sym}</td>"
+                f"<td {td_style(_NUM + f'color:{color} !important;', border=border)}>{_pnl_str(float(pnl or 0))}</td>"
+                f"<td {td_style(_CELL + f'color:{color} !important;', border=border)}>{float(pct or 0)*100:+.2f}%</td>"
+                f"<td {td_style(_CELL + f'color:{TEXT3} !important;', border=border)}>{date}</td>"
                 f"</tr>"
             )
         return html
@@ -465,7 +466,7 @@ def render_exit_attribution() -> str:
     ranked = sorted(reasons.items(), key=lambda kv: kv[1]["trades"], reverse=True)
     tbody = ""
     for i, (action, r) in enumerate(ranked):
-        td = TD if i < len(ranked) - 1 else TD0
+        border = i < len(ranked) - 1
         icon, label = _EXIT_LABELS.get(action, ("🚪", action.replace("SELL_", "").replace("_", " ").title()))
         n = r["trades"]
         win_rate = r["wins"] / n * 100
@@ -473,10 +474,10 @@ def render_exit_attribution() -> str:
         wr_color = GAIN if win_rate >= 60 else (NEURAL if win_rate >= 45 else LOSS)
         tbody += (
             f"<tr>"
-            f"<td {td} style='{_CELL}font-weight:{WEIGHT_BOLD};color:{TEXT1};'>{icon} {label}</td>"
-            f"<td {td} style='{_CELL}'>{n}</td>"
-            f"<td {td} style='{_CELL}color:{wr_color};font-weight:{WEIGHT_BOLD};'>{win_rate:.0f}%</td>"
-            f"<td {td} style='{_CELL}color:{_pnl_color(avg_ret)};'>{avg_ret:+.1f}%</td>"
+            f"<td {td_style(_CELL + f'font-weight:{WEIGHT_BOLD};color:{TEXT1} !important;', border=border)}>{icon} {label}</td>"
+            f"<td {td_style(_CELL, border=border)}>{n}</td>"
+            f"<td {td_style(_CELL + f'color:{wr_color} !important;font-weight:{WEIGHT_BOLD};', border=border)}>{win_rate:.0f}%</td>"
+            f"<td {td_style(_CELL + f'color:{_pnl_color(avg_ret)} !important;', border=border)}>{avg_ret:+.1f}%</td>"
             f"</tr>"
         )
 

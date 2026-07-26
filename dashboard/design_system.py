@@ -343,6 +343,30 @@ TD  = (f'style="font-size:{FONT_VALUE};color:{TEXT1};padding:12px 14px;'
 TD0 = (f'style="font-size:{FONT_VALUE};color:{TEXT1};padding:12px 14px;'
        f'white-space:nowrap;"')
 
+
+def th_style(extra: str = "") -> str:
+    """Build ONE complete <th style="..."> attribute (base header styling
+    plus any extra CSS, e.g. "text-align:right;"). Never write
+    `f"<th {TH} style='...'>"` — a second style= attribute on the same tag
+    is silently dropped by the browser (duplicate HTML attributes keep only
+    the first), so the override never applies. Use this helper instead."""
+    return (f'style="background:{BG};color:{TEXT2};font-size:{FONT_LABEL};'
+            f'font-weight:{WEIGHT_MEDIUM};text-transform:uppercase;letter-spacing:1px;'
+            f'padding:10px 14px;border-bottom:1px solid {BORDER};white-space:nowrap;{extra}"')
+
+
+def td_style(extra: str = "", border: bool = True, nowrap: bool = True) -> str:
+    """Build ONE complete <td style="..."> attribute — base cell styling
+    (color, padding, optional border/nowrap) plus any extra CSS (colors,
+    font-weight, alignment, wrapping overrides, etc). Same rule as
+    th_style(): never append a second style= after this or TD/TD0."""
+    base = f"font-size:{FONT_VALUE};color:{TEXT1};padding:12px 14px;"
+    if border:
+        base += f"border-bottom:1px solid {BORDER};"
+    if nowrap:
+        base += "white-space:nowrap;"
+    return f'style="{base}{extra}"'
+
 # ── XGBoost feature-name → human-readable display labels ─────────────────────
 _FI_LABELS: dict[str, str] = {
     "rsi":            "RSI",
