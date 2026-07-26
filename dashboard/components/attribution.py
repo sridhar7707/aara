@@ -417,9 +417,82 @@ def render_attribution_by_trade() -> str:
     )
 
 
+# ── By Exit Reason ───────────────────────────────────────────────────────────
+
+_EXIT_LABELS: dict[str, tuple[str, str]] = {
+    "SELL_STOP":     ("🛑", "Stop-Loss"),
+    "SELL_TP":       ("🎯", "Take-Profit"),
+    "SELL_TRAIL":    ("📉", "Trailing Stop"),
+    "SELL_TIME_EXIT":("⏱️", "Time Exit"),
+    "SELL_ENSEMBLE": ("⚡", "Signal Reversal"),
+    "SELL_GAP_DOWN": ("⬇️", "Gap-Down Floor"),
+    "SELL_TRIM":     ("✂️", "Drift Trim"),
+    "SELL":          ("⚡", "Signal Exit"),
+}
+
+
+def _query_closed_trades_by_reason() -> list[tuple]:
+    """Return (action, pnl_pct, realized_pnl) for all real SELL rows, exit
+    reason included — SELL_RECONCILE excluded for the same reason as
+    _query_closed_trades()."""
+    return safe_query(
+        "SELECT action, pnl_pct, realized_pnl FROM trades "
+        "WHERE action LIKE 'SELL%' AND action != 'SELL_RECONCILE' "
+        "AND pnl_pct IS NOT NULL ORDER BY timestamp DESC",
+        default=[],
+    ) or []
+
+
+@timed(_logger)
+@safe_render("Exit Attribution")
+def render_exit_attribution() -> str:
+    """Win rate and average return grouped by why the position closed — was
+    it a disciplined stop, a target hit, or the model changing its mind?
+    Groups by whatever exit reasons actually occur; not hardcoded to a fixed
+    set, so a new exit type (e.g. drift-trim) appears the first time it fires."""
+    rows = _query_closed_trades_by_reason()
+    if not rows:
+        return _card(_empty_state("🚪", "No closed trades yet", "Exit attribution builds as trades close."))
+
+    reasons: dict[str, dict] = defaultdict(lambda: {"trades": 0, "wins": 0, "ret_sum": 0.0})
+    for action, pct, _realized in rows:
+        r = reasons[action]
+        r["trades"] += 1
+        r["ret_sum"] += float(pct or 0)
+        if (pct or 0) > 0:
+            r["wins"] += 1
+
+    ranked = sorted(reasons.items(), key=lambda kv: kv[1]["trades"], reverse=True)
+    tbody = ""
+    for i, (action, r) in enumerate(ranked):
+        td = TD if i < len(ranked) - 1 else TD0
+        icon, label = _EXIT_LABELS.get(action, ("🚪", action.replace("SELL_", "").replace("_", " ").title()))
+        n = r["trades"]
+        win_rate = r["wins"] / n * 100
+        avg_ret  = r["ret_sum"] / n * 100
+        wr_color = GAIN if win_rate >= 60 else (NEURAL if win_rate >= 45 else LOSS)
+        tbody += (
+            f"<tr>"
+            f"<td {td} style='{_CELL}font-weight:{WEIGHT_BOLD};color:{TEXT1};'>{icon} {label}</td>"
+            f"<td {td} style='{_CELL}'>{n}</td>"
+            f"<td {td} style='{_CELL}color:{wr_color};font-weight:{WEIGHT_BOLD};'>{win_rate:.0f}%</td>"
+            f"<td {td} style='{_CELL}color:{_pnl_color(avg_ret)};'>{avg_ret:+.1f}%</td>"
+            f"</tr>"
+        )
+
+    table = _wrap(
+        f'<table class="nt-tbl"><thead><tr>'
+        f'<th {TH}>Exit Reason</th><th {TH}>Trades</th>'
+        f'<th {TH}>Win Rate</th><th {TH}>Avg Return</th>'
+        f'</tr></thead><tbody>{tbody}</tbody></table>'
+    )
+    return f'<div class="nt nt-wrap">{_section("🚪", "By Exit Reason", f"{len(rows)} closed trades")}{table}</div>'
+
+
 from dashboard.registry import ComponentSpec, RefreshGroup, register
 register(ComponentSpec("attribution_symbol_out",      RefreshGroup.SLOW, render_attribution_by_symbol,      priority=80))
 register(ComponentSpec("attribution_sector_out",      RefreshGroup.SLOW, render_attribution_by_sector,      priority=81))
 register(ComponentSpec("attribution_model_out",       RefreshGroup.SLOW, render_attribution_by_model,       priority=82))
 register(ComponentSpec("attribution_trade_out",       RefreshGroup.SLOW, render_attribution_by_trade,       priority=83))
 register(ComponentSpec("confidence_calibration_out",  RefreshGroup.SLOW, render_confidence_calibration,     priority=84))
+register(ComponentSpec("exit_attribution_out",        RefreshGroup.SLOW, render_exit_attribution,          priority=85))

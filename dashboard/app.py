@@ -90,7 +90,7 @@ from dashboard.components.capital import (
 from dashboard.components.attribution import (
     render_attribution_by_symbol, render_attribution_by_sector,
     render_attribution_by_model, render_attribution_by_trade,
-    render_confidence_calibration,
+    render_confidence_calibration, render_exit_attribution,
 )
 from dashboard.components.trade_journal import render_trade_journal
 from dashboard.timers import register_all_timers
@@ -350,6 +350,7 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
             with gr.Row():
                 attribution_model_out = registry.mount("attribution_model_out", gr.HTML(value=render_attribution_by_model))
                 attribution_trade_out = registry.mount("attribution_trade_out", gr.HTML(value=render_attribution_by_trade))
+            exit_attribution_out = registry.mount("exit_attribution_out", gr.HTML(value=render_exit_attribution))
             confidence_calibration_out = registry.mount(
                 "confidence_calibration_out", gr.HTML(value=render_confidence_calibration)
             )
