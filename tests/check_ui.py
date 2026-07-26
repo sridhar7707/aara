@@ -68,7 +68,7 @@ TAB_SPECS: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("No component crash cards",         "not:text=unavailable"),
             ("Portfolio value shown ($)",        "text=$"),
             ("Decision bar rendered",            "text=Today"),
-            ("Morning brief rendered",           "text=Morning"),
+            ("Morning brief rendered",           "text=Portfolio Health"),
             ("Positions snapshot rendered",      "text=Position"),
         ],
         4.0,
@@ -106,7 +106,7 @@ TAB_SPECS: list[tuple[str, str, list[tuple[str, str]], float]] = [
         [
             ("No component crash cards",         "not:text=unavailable"),
             ("Capital overview rendered",        "text=Initial Deposit"),
-            ("Managed Capital Pool shown",       "text=Managed Capital Pool"),
+            ("Managed Capital Pool shown",       "text=Capital Pool"),
             ("Tradeable cash row shown",          "text=Tradeable"),
             ("Reserve row shown",                "text=Reserve"),
             ("Invested row shown",               "text=Invested"),
@@ -120,8 +120,8 @@ TAB_SPECS: list[tuple[str, str, list[tuple[str, str]], float]] = [
         "Trades",
         [
             ("No component crash cards",         "not:text=unavailable"),
-            ("Top picks rendered",               "text=Top Pick"),
-            ("Trade frequency rendered",         "text=Frequency"),
+            ("Top picks rendered",               "text=Buy Picks"),
+            ("Trade frequency rendered",         "text=This Week"),
             ("Buy candidates rendered",          "text=Buy"),
             ("Signal history rendered",          "text=Signal"),
             ("Recommendation history rendered",  "text=Recommendation"),
@@ -203,16 +203,23 @@ def wait_for_server(timeout: int = 120) -> bool:
 # -- Assertion runner -----------------------------------------------------------
 
 def _check(page, description: str, selector: str) -> tuple[bool, str]:
+    # dashboard/app.py pre-renders every tab's content into the DOM at startup
+    # and tab-switching only toggles visibility — so an unscoped page.locator()
+    # search can match hidden content belonging to a completely different,
+    # inactive tab (e.g. another tab's own "Win Rate" stat or "Buy" badge).
+    # Scoping to the one visible [role="tabpanel"] avoids that cross-tab
+    # false-negative entirely.
+    panel = page.locator('[role="tabpanel"]:visible')
     if selector.startswith("not:"):
         inner = selector[4:]
         try:
-            if page.locator(inner).count() > 0:
+            if panel.locator(inner).count() > 0:
                 return False, f"Unexpected content found: {inner!r}"
             return True, ""
         except Exception:
             return True, ""
     try:
-        page.locator(selector).first.wait_for(state="visible", timeout=5_000)
+        panel.locator(selector).first.wait_for(state="visible", timeout=5_000)
         return True, ""
     except Exception as exc:
         return False, str(exc)[:120]
