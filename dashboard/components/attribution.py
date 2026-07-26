@@ -32,11 +32,16 @@ def _pnl_str(val: float) -> str:
 
 
 def _query_closed_trades() -> list[tuple]:
-    """Return (symbol, realized_pnl, pnl_pct, xgb_prob, lstm_prob, sentiment_score, macro_score, ensemble_score, timestamp, holding_days) for all SELL rows."""
+    """Return (symbol, realized_pnl, pnl_pct, xgb_prob, lstm_prob, sentiment_score, macro_score, ensemble_score, timestamp, holding_days) for all SELL rows.
+    Excludes SELL_RECONCILE — a startup reconcile records whatever
+    portfolio_value/pnl_pct the broker returned at the moment of a possibly
+    transient bad read, not a real trading outcome (see the 2026-07-07
+    corruption incident: 8 of 20 rows here were SELL_RECONCILE before this
+    exclusion, including a fake +$808.83 "best trade")."""
     return safe_query(
         "SELECT symbol, realized_pnl, pnl_pct, xgb_prob, lstm_prob, "
         "sentiment_score, macro_score, ensemble_score, timestamp, holding_days "
-        "FROM trades WHERE action LIKE 'SELL%' "
+        "FROM trades WHERE action LIKE 'SELL%' AND action != 'SELL_RECONCILE' "
         "AND realized_pnl IS NOT NULL AND pnl_pct IS NOT NULL "
         "ORDER BY timestamp DESC",
         default=[],

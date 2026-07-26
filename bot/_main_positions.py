@@ -80,7 +80,7 @@ def _kelly_fraction(con: sqlite3.Connection, symbol: str, default: float = BUY_F
     """Half-Kelly position fraction from recent closed trades; returns `default`
     when fewer than 10 observations exist (not enough data)."""
     rows = con.execute(
-        "SELECT pnl_pct FROM trades WHERE symbol=? AND action LIKE 'SELL%' "
+        "SELECT pnl_pct FROM trades WHERE symbol=? AND action LIKE 'SELL%' AND action != 'SELL_RECONCILE' "
         "ORDER BY timestamp DESC LIMIT ?",
         (symbol, KELLY_LOOKBACK_TRADES),
     ).fetchall()
@@ -162,7 +162,7 @@ def _is_wash_sale_risk(con: sqlite3.Connection, symbol: str) -> bool:
     # (a microsecond-precise "now - 30d" made the 30-day edge race-dependent).
     cutoff = (datetime.now(timezone.utc).date() - timedelta(days=30)).isoformat()
     row = con.execute(
-        "SELECT 1 FROM trades WHERE symbol=? AND action LIKE 'SELL%' "
+        "SELECT 1 FROM trades WHERE symbol=? AND action LIKE 'SELL%' AND action != 'SELL_RECONCILE' "
         "AND (realized_pnl < 0 OR (realized_pnl = 0 AND pnl_pct < 0)) "
         "AND timestamp >= ? LIMIT 1",
         (symbol, cutoff),

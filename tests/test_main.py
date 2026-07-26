@@ -318,6 +318,29 @@ def test_kelly_fraction_minimum_floor(db):
     assert result >= 0.02
 
 
+def test_kelly_fraction_excludes_sell_reconcile(db):
+    """SELL_RECONCILE records whatever the broker returned at a possibly-bad
+    reconcile read, not a real trading outcome — must never feed sizing math.
+    Compares a symbol with a fabricated -90% reconcile "loss" mixed into its
+    real trades against an identical symbol with no reconcile row at all;
+    if the reconcile leaked in, its huge fake loss would drag the result down."""
+    for _ in range(12):
+        _insert_sell(db, "NVDA", 0.08)
+        _insert_sell(db, "AMD", 0.08)
+    for _ in range(3):
+        _insert_sell(db, "NVDA", -0.02)
+        _insert_sell(db, "AMD", -0.02)
+    db.execute(
+        "INSERT INTO trades (timestamp,symbol,action,shares,price,notional,regime,portfolio_value,pnl_pct) "
+        "VALUES (?,?,?,?,?,?,?,?,?)",
+        (_today_ts(), "NVDA", "SELL_RECONCILE", 1.0, 100.0, 100.0, "reconcile", 10000.0, -0.90),
+    )
+    db.commit()
+    with_reconcile_present = _kelly_fraction(db, "NVDA")
+    no_reconcile_at_all    = _kelly_fraction(db, "AMD")
+    assert with_reconcile_present == no_reconcile_at_all
+
+
 # --- _passes_correlation_gate ---
 
 def _make_bars(closes) -> pd.DataFrame:
@@ -671,6 +694,21 @@ def test_wash_sale_blocks_on_negative_pnl_pct_without_realized(db):
     # Should fall back to pnl_pct < 0 as the loss signal
     _insert_loss_sell(db, "NVDA", pnl_pct=-0.03, days_ago=10, realized_pnl=0.0)
     assert _is_wash_sale_risk(db, "NVDA") is True
+
+
+def test_wash_sale_ignores_sell_reconcile_fake_loss(db):
+    """The exact PANW case from the 2026-07-07 corruption incident: a
+    SELL_RECONCILE recorded a fabricated small loss for a position whose real
+    trade was a win. Must not block a legitimate re-buy using fake data."""
+    from datetime import timezone, timedelta
+    ts = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+    db.execute(
+        "INSERT INTO trades (timestamp,symbol,action,shares,price,notional,regime,"
+        "portfolio_value,pnl_pct,realized_pnl) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (ts, "PANW", "SELL_RECONCILE", 10.0, 90.0, 900.0, "reconcile", 9900.0, -0.0039, -31.35),
+    )
+    db.commit()
+    assert _is_wash_sale_risk(db, "PANW") is False
 
 
 # --- log_trade audit fields ---

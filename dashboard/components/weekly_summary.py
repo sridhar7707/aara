@@ -155,8 +155,8 @@ def render_weekly_summary() -> str:
             # Sells this week
             week_sells = con.execute(
                 "SELECT symbol, action, pnl_pct, realized_pnl, holding_days, timestamp "
-                "FROM trades WHERE action LIKE 'SELL%' AND date(timestamp) >= ? "
-                "ORDER BY timestamp DESC",
+                "FROM trades WHERE action LIKE 'SELL%' AND action != 'SELL_RECONCILE' "
+                "AND date(timestamp) >= ? ORDER BY timestamp DESC",
                 (str(mon),),
             ).fetchall()
 
