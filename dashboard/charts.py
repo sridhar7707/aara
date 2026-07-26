@@ -88,7 +88,7 @@ def render_equity_chart(period: str = "All Time") -> Any:
 
         if not has_data:
             fig.add_annotation(
-                text="Building history &mdash; bot trades 9:30am-4pm ET, Mon-Fri. Chart appears after the first trading day.",
+                text="Building history — bot trades 9:30am-4pm ET, Mon-Fri. Chart appears after the first trading day.",
                 xref="paper", yref="paper", x=0.5, y=0.5,
                 showarrow=False, font=dict(color=TEXT2, size=12))
         else:
@@ -136,7 +136,7 @@ def render_equity_chart(period: str = "All Time") -> Any:
                         ))
 
         fig.update_layout(
-            title=dict(text=f"Portfolio Value &mdash; {label}  <span style='font-size:11px;'>(end-of-day snapshots, includes cash + open positions)</span>",
+            title=dict(text=f"Portfolio Value — {label}  <span style='font-size:11px;'>(end-of-day snapshots, includes cash + open positions)</span>",
                        font=dict(color=TEXT1, size=13), x=0.01),
             xaxis=dict(title="", **PLOTLY_LAYOUT["xaxis"], tickfont=dict(color=TEXT2)),
             yaxis=dict(title="Account Value ($)", **PLOTLY_LAYOUT["yaxis"],
@@ -168,9 +168,17 @@ def render_allocation_chart() -> Any:
                 xref="paper", yref="paper", x=0.5, y=0.5,
                 showarrow=False, font=dict(color=TEXT2, size=13))
         else:
-            syms      = list(open_syms.keys())
-            invested  = [open_syms[s]["invested"] for s in syms]
-            total_inv = sum(invested)
+            all_syms  = list(open_syms.keys())
+            total_inv = sum(open_syms[s]["invested"] for s in all_syms)
+            # Dust positions (e.g. a SELL-flagged position reduced to a few
+            # dollars) round to "0%" with the .0% label format and add a
+            # legend entry with no visible slice — pure clutter. Filter by
+            # share of total, not absolute dollars, so this actually catches
+            # what rounds to 0% regardless of portfolio size. Still counted
+            # in total_inv above so the center label stays accurate.
+            syms     = [s for s in all_syms
+                        if total_inv > 0 and open_syms[s]["invested"] / total_inv >= 0.005]
+            invested = [open_syms[s]["invested"] for s in syms]
             palette   = [PRIMARY, GAIN, NEURAL, "#f7931a", "#e040fb", "#00bcd4", "#76ff03"]
             colors    = [palette[i % len(palette)] for i in range(len(syms))]
 
@@ -233,7 +241,7 @@ def render_pnl_chart() -> Any:
             ))
 
         fig.update_layout(
-            title=dict(text="Daily Realized P&L  <span style='font-size:11px;'>&mdash; profit/loss from SELL trades only (unrealized not included)</span>",
+            title=dict(text="Daily Realized P&L  <span style='font-size:11px;'>— profit/loss from SELL trades only (unrealized not included)</span>",
                        font=dict(color=TEXT1, size=13), x=0.01),
             xaxis=dict(title="", **PLOTLY_LAYOUT["xaxis"], tickfont=dict(color=TEXT2)),
             yaxis=dict(title="P&L ($)", **PLOTLY_LAYOUT["yaxis"], tickformat="$,.0f",
@@ -370,7 +378,7 @@ def render_returns_histogram() -> Any:
             ))
             fig.add_vline(x=0, line_width=1, line_color=TEXT2, opacity=0.5)
         fig.update_layout(
-            title=dict(text="Return Distribution  <span style='font-size:11px;'>&mdash; each bar = a closed trade</span>",
+            title=dict(text="Return Distribution  <span style='font-size:11px;'>— each bar = a closed trade</span>",
                        font=dict(color=TEXT1, size=13), x=0.01),
             xaxis=dict(title="Return %", **PLOTLY_LAYOUT["xaxis"], tickfont=dict(color=TEXT2)),
             yaxis=dict(title="Count", **PLOTLY_LAYOUT["yaxis"], tickfont=dict(color=TEXT2)),
@@ -440,7 +448,7 @@ def render_feature_importance_chart() -> Any:
         fi_path = "models/feature_importance.json"
         if not os.path.exists(fi_path):
             fig.add_annotation(
-                text="Feature importance not yet available &mdash; run scripts/train_model.py first, then push models to HF.",
+                text="Feature importance not yet available — run scripts/train_model.py first, then push models to HF.",
                 xref="paper", yref="paper", x=0.5, y=0.5,
                 showarrow=False, font=dict(color=TEXT2, size=12))
         else:
@@ -460,7 +468,7 @@ def render_feature_importance_chart() -> Any:
             ))
         fig.update_layout(
             title=dict(
-                text="Which signals drive the AI's BUY decisions  <span style='font-size:{FONT_LABEL};'>&mdash; longer bar = more influence on each trade</span>",
+                text="Which signals drive the AI's BUY decisions  <span style='font-size:11px;'>— longer bar = more influence on each trade</span>",
                 font=dict(color=TEXT1, size=13), x=0.01),
             xaxis=dict(title="Importance (normalised gain)", **PLOTLY_LAYOUT["xaxis"],
                        tickfont=dict(color=TEXT2)),

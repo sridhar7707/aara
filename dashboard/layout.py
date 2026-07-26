@@ -24,6 +24,10 @@ GRADIO_CSS = f"""
 span.error {{ display: none !important; }}
 .translucent {{ opacity: 1 !important; }}
 .pending     {{ opacity: 1 !important; }}
+/* opacity:1 above also un-hides Gradio's built-in "no content" placeholder
+   icon (.wrap.center.full.translucent) — never legitimate here since every
+   component pre-renders synchronously at startup; hide it outright. */
+.wrap.center.full {{ display: none !important; }}
 /* Override Gradio 5 CSS variables so inline var() references resolve to our colours.
    No !important on the variable values — only the consuming properties need it;
    !important inside var() is parsed as literal text in Safari < 15.4.            */
