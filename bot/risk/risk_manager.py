@@ -1,4 +1,5 @@
 from __future__ import annotations
+import sqlite3
 from collections import deque
 from datetime import date, timedelta
 from typing import Callable
@@ -11,7 +12,9 @@ from config import (
     ATR_STOP_MULTIPLIER, ATR_TRAIL_MULTIPLIER,
     ATR_MIN_STOP_PCT, ATR_MAX_STOP_PCT,
     MAX_POSITIONS, MAX_SECTOR_POSITIONS, SECTOR_MAP,
+    KELLY_LOOKBACK_TRADES, KELLY_FRACTION_MAX,
 )
+from bot.strategy.ensemble import BUY_FRACTION
 
 
 def _db_settings_fn(key: str, default: str) -> str:
@@ -277,4 +280,30 @@ class RiskManager:
         if not self.sector_check(symbol, open_positions):
             return False
         return True
+
+
+def kelly_fraction(con: sqlite3.Connection, symbol: str, default: float = BUY_FRACTION) -> float:
+    """Half-Kelly position fraction from recent closed trades; returns `default`
+    when fewer than 10 observations exist (not enough data). Extracted from
+    bot/_main_positions.py to keep that file under the project's 500-line
+    limit — Kelly sizing is a risk-management concern, not position-state
+    bookkeeping."""
+    rows = con.execute(
+        "SELECT pnl_pct FROM trades WHERE symbol=? AND action LIKE 'SELL%' AND action != 'SELL_RECONCILE' "
+        "ORDER BY timestamp DESC LIMIT ?",
+        (symbol, KELLY_LOOKBACK_TRADES),
+    ).fetchall()
+    if len(rows) < 10:
+        return default
+    pnls   = [r[0] for r in rows]
+    wins   = [p for p in pnls if p > 0]
+    losses = [abs(p) for p in pnls if p <= 0]
+    if not wins or not losses:
+        return default
+    win_rate = len(wins) / len(pnls)
+    b        = (sum(wins) / len(wins)) / (sum(losses) / len(losses))
+    kelly    = (win_rate * b - (1 - win_rate)) / b
+    half_k   = max(0.02, min(KELLY_FRACTION_MAX, kelly * 0.5))
+    logger.debug(f"Kelly {symbol}: win_rate={win_rate:.2f}, b={b:.2f}, half_f={half_k:.3f}")
+    return half_k
 

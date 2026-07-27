@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import math
 import os
 import sqlite3
 import sys
@@ -20,7 +19,7 @@ from config import (
     MARKET_OPEN_BUFFER_MINS, MARKET_CLOSE_BUFFER_MINS,
     EARNINGS_WINDOW_DAYS,
     MAX_HOLD_DAYS, KELLY_LOOKBACK_TRADES, KELLY_FRACTION_MAX,
-    CORRELATION_THRESHOLD, RS_LOOKBACK_BARS, ENTRY_REGIMES, MIN_VOLUME_RATIO,
+    CORRELATION_THRESHOLD, ENTRY_REGIMES, MIN_VOLUME_RATIO,
     PDT_MAX_DAY_TRADES, PDT_WINDOW_DAYS, PAPER_SIM_CAPITAL,
     MAX_RISK_PER_TRADE_PCT,
     ATR_STOP_MULTIPLIER, ATR_MIN_STOP_PCT, ATR_MAX_STOP_PCT, STOP_LOSS_PCT,
@@ -38,7 +37,7 @@ from bot.strategy.macro import _get_cached as _get_macro_cached
 from bot.strategy.reddit_sentiment import get_wsb_sentiment
 from bot.strategy.ensemble import ensemble_signal, action_to_int, BUY_FRACTION, WEIGHTS
 from bot.strategy.signal_gate import check_signal_gate
-from bot.risk.risk_manager import RiskManager, _business_days_between
+from bot.risk.risk_manager import RiskManager, _business_days_between, kelly_fraction as _kelly_fraction
 import bot.monitor.telegram_bot as tg
 
 # Sub-module imports (helpers extracted to keep this file under 500 lines)
@@ -46,7 +45,7 @@ from bot._main_signals import record_signal, update_signal_outcomes
 from bot._main_db import (
     RiskSnapshot,
     _anchor_daily_start, _enable_wal_mode,
-    _get_macro_from_db, _load_risk_state, _log_recommendation, _log_signal, _record_snapshot,
+    _load_risk_state, _log_recommendation, _log_signal, _record_snapshot,
     _save_risk_state, _week_key, log_trade,
     init_db as _init_db_core,
 )
@@ -67,25 +66,25 @@ def _apply_sim_capital(portfolio_value: float, available_cash: float) -> tuple[f
 from bot._main_positions import (
     BarData, PositionState,
     _check_time_exit, _delete_position_state, _is_wash_sale_risk,
-    _kelly_fraction, _load_position_state, _maybe_record_day_trade,
+    _load_position_state, _maybe_record_day_trade,
     _opened_today, _passes_correlation_gate, _reconcile_positions,
     _signal_sell, _trim_position, _upsert_position_state,
 )
 from bot._main_reconcile import _fetch_positions_for_reconcile
 from bot._main_market import (
     _import_screener_picks, _is_market_hours, _is_near_earnings,
-    _load_premarket_sentiment, _load_today_universe, _log_buy_skip,
-    _prefetch_earnings_parallel, _wsb,
-    _compute_sentiments, _log_cycle_summary, _maybe_push_db,
+    _load_today_universe, _log_buy_skip, _wsb,
+    _log_cycle_summary, _maybe_push_db,
 )
 from bot._main_cycle import (
     EntryContext,
-    _fetch_symbol, _handle_exits, _handle_entry, prefetch_bars,
+    _handle_exits, _handle_entry,
 )
 from bot._main_decisions import (
     create_buy_decision as _create_buy_decision,
     execute_approved_decisions as _execute_approved_decisions,
 )
+from bot._main_prep import prepare_cycle_context
 from bot.capital.pool import load_active_pool as _load_pool, compute_tradeable_capital
 from bot._main_runner import (
     _do_clean_db, _do_reset_daily_start, end_of_day_summary, run_loop,
@@ -137,6 +136,8 @@ def run(
     _import_screener_picks(con, _universe_payload)
 
     rs: RiskSnapshot = _load_risk_state(con)
+    daily_start = rs.daily_start  # captured before the anchor-fill below -- None here means
+                                   # this is the first cycle of the day (used further down)
 
     # Anchor daily_start to the account's value at yesterday's close (not current
     # live price), so Day P&L means "today's gain" rather than gain-since-inception.
@@ -252,89 +253,12 @@ def run(
     positions       = _fetch_positions_for_reconcile(client, con)
     if not _sanity_blocked:
         _reconcile_positions(con, positions, portfolio_value=portfolio_value, client=client)
-    buy_order_syms, sell_order_syms = client.get_open_order_symbols()
 
-    # Restore intraday halt — persists across 5-min cycles so a mid-day breach
-    # can't be traded through when the risk object is reconstructed each cycle.
-    _halt_row = con.execute(
-        "SELECT value FROM risk_state WHERE key='trading_halted_date'"
-    ).fetchone()
-    if _halt_row and _halt_row[0] == date.today().isoformat():
-        risk.halted = True
-        logger.warning("Halt state restored from DB — daily loss limit was breached earlier today")
-
-    # First cycle of the day — daily_start was None before reset_daily sets it
-    if daily_start is None:
-        tg.alert_bot_started(mode, real_portfolio_value)
-
-    # Always reset daily using the REAL account value so the dashboard's Day P&L
-    # baseline matches what Alpaca actually shows — not the sim-capped value.
-    risk.reset_daily(real_portfolio_value)
-    _save_risk_state(con, risk)
-
-    logger.info(
-        f"Portfolio: ${real_portfolio_value:.2f} (sim: ${portfolio_value:.2f}) | "
-        f"Cash: ${real_available_cash:.2f} | "
-        f"Open positions: {list(positions.keys())} | "
-        f"Pending buys: {buy_order_syms} | Pending sells: {sell_order_syms}"
+    (buy_order_syms, sell_order_syms, macro_score, macro_cap, macro_halt,
+     bars_map, sentiments, spy_5bar_return, vs_spy_today, earnings_map) = prepare_cycle_context(
+        con, client, risk, mode, daily_start, real_portfolio_value,
+        real_available_cash, portfolio_value, positions, active_symbols,
     )
-    # Heartbeat snapshot — always stores the REAL account value so the dashboard
-    # portfolio total is correct regardless of PAPER_SIM_CAPITAL.
-    _record_snapshot(con, real_portfolio_value, real_available_cash, len(positions))
-    if sell_order_syms:
-        logger.warning(
-            f"Open sell orders detected for {len(sell_order_syms)} symbol(s): {sell_order_syms} "
-            "— exit management paused for these symbols this cycle"
-        )
-
-    # Early warning: once per day when portfolio crosses 50% of daily loss limit
-    if risk.check_daily_loss_warning(portfolio_value):
-        pnl_warn = (portfolio_value - risk.daily_start_value) / risk.daily_start_value
-        tg.alert_risk_warning(portfolio_value, pnl_warn)
-        risk.daily_warning_sent = True
-        _save_risk_state(con, risk)
-
-    macro_score, macro_cap, macro_halt = _get_macro_from_db(con)
-    logger.info(f"Macro: score={macro_score:.2f}, cap={macro_cap:.1f}x, halt={macro_halt}")
-    if macro_halt:
-        logger.warning("VIX emergency halt active — no new buys this cycle")
-        tg.alert_vix_halt()  # fires every cycle — VIX crisis events warrant repeated alerts
-
-    # Weekly loss circuit breaker alert — sent once per week when limit is first hit
-    if not risk.check_weekly_loss(portfolio_value) and not risk.weekly_halt_alerted:
-        wk_pnl = (portfolio_value - risk.weekly_start_value) / risk.weekly_start_value
-        tg.alert_weekly_loss_limit(portfolio_value, wk_pnl)
-        risk.weekly_halt_alerted = True
-        _save_risk_state(con, risk)
-
-    premarket_sentiment = _load_premarket_sentiment()
-    if not premarket_sentiment:
-        logger.warning(
-            "Pre-market sentiment unavailable — sentiment defaults to neutral (0.0) this cycle. "
-            "NewsAPI quota (100 req/day) is not consumed in-cycle."
-        )
-
-    bars_map   = prefetch_bars(active_symbols, client)
-    sentiments = _compute_sentiments(active_symbols, premarket_sentiment)
-
-    # Pre-compute SPY N-bar return for relative strength gate (daily bars so it matches sig_bars)
-    _, spy_daily = bars_map.get("SPY", (pd.DataFrame(), pd.DataFrame()))
-    spy_5bar_return: float | None = None
-    if not spy_daily.empty and len(spy_daily) > RS_LOOKBACK_BARS:
-        v = spy_daily["close"].pct_change(RS_LOOKBACK_BARS).iloc[-1]
-        if not math.isnan(v):
-            spy_5bar_return = float(v)
-
-    # Use already-fetched SPY daily bars (yfinance) — avoids redundant Alpaca call that
-    # returns only 1 bar on the IEX free tier
-    vs_spy_today = 0.0
-    if not spy_daily.empty and len(spy_daily) > 1:
-        _v = spy_daily["close"].pct_change().iloc[-1]
-        if not math.isnan(_v):
-            vs_spy_today = float(_v)
-
-    # Prefetch earnings proximity in parallel — avoids 25 sequential yfinance HTTP calls
-    earnings_map = _prefetch_earnings_parallel(con, active_symbols)
 
     # Compute once per cycle — avoids N identical DB reads inside _handle_entry.
     _tradeable_capital = compute_tradeable_capital(con, portfolio_value)

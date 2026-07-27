@@ -8,9 +8,13 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
+import yfinance as yf
 from loguru import logger
 
+from bot.execution.alpaca_client import AlpacaClient
+from bot.strategy.features import compute_features
 from bot.strategy.reddit_sentiment import get_wsb_sentiment
+from bot._main_positions import BarData
 from config import EARNINGS_WINDOW_DAYS, MARKET_OPEN_BUFFER_MINS, MARKET_CLOSE_BUFFER_MINS, SYMBOLS
 
 _UNIVERSE_PATH   = "data/universe_today.json"
@@ -339,3 +343,107 @@ def _maybe_push_db(last_sync: float, interval: float) -> float:
     except Exception as _e:
         logger.warning(f"HF DB sync skipped: {_e}")
     return last_sync
+
+
+def _fetch_symbol(symbol: str, client: AlpacaClient, yf_batch: dict) -> tuple[str, pd.DataFrame, pd.DataFrame]:
+    """Return (symbol, bars_5m, bars_daily).
+
+    bars_5m  — intraday 5-min bars; empty when not enough today yet (< 60 bars) or
+               stale (feed broken).  Used for current price only.
+    bars_daily — 1-year daily OHLCV from yfinance; used for XGB/LSTM/regime (matches training).
+    Both empty → skip this symbol entirely (feed is stale/broken).
+    """
+    feed_stale = False
+    bars_5m    = pd.DataFrame()
+
+    try:
+        raw = client.get_bars(symbol, timeframe="5Min", limit=10)
+        if not raw.empty:
+            last_ts  = raw.index[-1]
+            now_utc  = pd.Timestamp.now(tz="UTC")
+            last_utc = (last_ts.tz_localize("UTC")
+                        if last_ts.tzinfo is None else last_ts.tz_convert("UTC"))
+            age_mins = (now_utc - last_utc).total_seconds() / 60
+            if age_mins > 30:
+                logger.warning(
+                    f"Stale bars for {symbol}: last bar is {age_mins:.0f}m old — skipping"
+                )
+                feed_stale = True
+            else:
+                bars_5m = raw
+    except ValueError:
+        # Not enough intraday bars yet (normal early-day condition with IEX free tier)
+        pass
+    except Exception as e:
+        logger.warning(f"5min bar fetch failed for {symbol}: {e}")
+        feed_stale = True
+
+    if feed_stale:
+        return symbol, pd.DataFrame(), pd.DataFrame()
+
+    # Daily bars from pre-fetched batch (thread-safe; computed before thread pool)
+    bars_daily = pd.DataFrame()
+    raw_d = yf_batch.get(symbol)
+    if raw_d is not None and not raw_d.empty:
+        try:
+            spy_raw   = yf_batch.get("SPY")
+            spy_close = spy_raw["close"] if (spy_raw is not None and not spy_raw.empty) else None
+            bars_daily = compute_features(raw_d, spy_close=spy_close)
+        except Exception as e:
+            logger.warning(f"Daily bar features failed for {symbol}: {e}")
+
+    return symbol, bars_5m, bars_daily
+
+
+def prefetch_bars(active_symbols: list[str], client: AlpacaClient) -> dict[str, BarData]:
+    """Batch-fetch daily bars (yfinance) + 5-min bars (Alpaca) for all symbols.
+    Returns bars_map: {symbol: (bars_5m_df, bars_daily_df)}. yfinance download
+    is one batched call to avoid rate limits; 5-min bars fetch in parallel."""
+    import bot.monitor.telegram_bot as _tg
+    _yf_batch: dict[str, pd.DataFrame] = {}
+    try:
+        _batch_syms = list(active_symbols)
+        if "SPY" not in _batch_syms:
+            _batch_syms.append("SPY")
+        _raw = yf.download(_batch_syms, period="2y", interval="1d",
+                           progress=False, auto_adjust=True, group_by="ticker")
+        for _sym in _batch_syms:
+            try:
+                _df = _raw[_sym].copy()
+                _df.columns = [c.lower() for c in _df.columns]
+                _df = _df[["open", "high", "low", "close", "volume"]].dropna()
+                if not _df.empty:
+                    _yf_batch[_sym] = _df
+            except Exception as _e:
+                logger.debug(f"yfinance batch skip {_sym}: {_e}")
+        loaded, total = len(_yf_batch), len(_batch_syms)
+        logger.info(f"yfinance batch: {loaded}/{total} symbols loaded")
+        if "SPY" not in _yf_batch:
+            logger.warning("SPY missing from yfinance batch — relative strength gate disabled")
+            _tg.send("⚠️ <b>SPY data missing</b> — relative strength gate disabled.")
+        if loaded < total * 0.5:
+            _tg.send(
+                f"⚠️ <b>yfinance data degraded</b> — only {loaded}/{total} symbols loaded.\n"
+                "Yahoo Finance may have changed their API format. "
+                "XGB/LSTM signals falling back to 5-min bars (out-of-distribution).\n"
+                "Check: <code>pip install --upgrade yfinance</code>"
+            )
+    except Exception as _e:
+        logger.warning(f"yfinance batch prefetch failed: {_e}")
+        _tg.send(
+            f"⚠️ <b>yfinance batch fetch failed</b> — {_e}\n"
+            "Daily bars unavailable this cycle. Check if Yahoo Finance format changed."
+        )
+
+    with ThreadPoolExecutor(max_workers=min(len(active_symbols), 8)) as pool:
+        futures = [pool.submit(_fetch_symbol, sym, client, _yf_batch) for sym in active_symbols]
+        fetched = [f.result() for f in futures]
+
+    bars_map = {sym: BarData(bars_5m=b5, bars_daily=bd) for sym, b5, bd in fetched}
+    _n_5m = sum(1 for _, b5, _ in fetched if not b5.empty)
+    if _n_5m < len(active_symbols) * 0.5:
+        _tg.send(
+            f"⚠️ <b>Alpaca feed degraded</b> — only {_n_5m}/{len(active_symbols)} symbols "
+            "have live 5-min bars. Most symbols will be skipped this cycle."
+        )
+    return bars_map

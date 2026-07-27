@@ -155,8 +155,9 @@ def get_overview() -> dict:
 
     db_mtime_s: float | None = None
     try:
+        import bot.monitor.dashboard_data as _dd
         db_mtime_s = (datetime.now(timezone.utc) - datetime.fromtimestamp(
-            Path(_DB).stat().st_mtime, tz=timezone.utc
+            Path(_dd._DB).stat().st_mtime, tz=timezone.utc
         )).total_seconds()
     except Exception:
         pass

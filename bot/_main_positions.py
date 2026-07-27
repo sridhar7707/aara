@@ -15,7 +15,7 @@ from bot.risk.risk_manager import RiskManager, _business_days_between
 import bot.monitor.telegram_bot as tg
 from config import (
     ATR_TP_MULTIPLIER, GAP_DOWN_FLOOR_PCT, TRAILING_STOP_ARM_PCT,
-    KELLY_LOOKBACK_TRADES, KELLY_FRACTION_MAX, CORRELATION_THRESHOLD,
+    CORRELATION_THRESHOLD,
     MAX_HOLD_DAYS, PDT_MAX_DAY_TRADES, PDT_WINDOW_DAYS,
     MAX_POSITION_DRIFT_PCT, MAX_POSITION_PCT,
 )
@@ -24,7 +24,6 @@ from database.trade_journal import close_entry as _journal_close
 from database.services.decision_service import find_open_decision_id, complete_decision
 from bot.decision.daily_actions import record as _rec_action
 from bot.capital.pool import CapitalPool, update_on_sell as _pool_sell
-from bot.strategy.ensemble import BUY_FRACTION
 
 
 class BarData(NamedTuple):
@@ -79,29 +78,6 @@ def _upsert_position_state(con: sqlite3.Connection, symbol: str, entry_price: fl
 def _delete_position_state(con: sqlite3.Connection, symbol: str) -> None:
     con.execute("DELETE FROM position_state WHERE symbol=?", (symbol,))
     con.commit()
-
-
-def _kelly_fraction(con: sqlite3.Connection, symbol: str, default: float = BUY_FRACTION) -> float:
-    """Half-Kelly position fraction from recent closed trades; returns `default`
-    when fewer than 10 observations exist (not enough data)."""
-    rows = con.execute(
-        "SELECT pnl_pct FROM trades WHERE symbol=? AND action LIKE 'SELL%' AND action != 'SELL_RECONCILE' "
-        "ORDER BY timestamp DESC LIMIT ?",
-        (symbol, KELLY_LOOKBACK_TRADES),
-    ).fetchall()
-    if len(rows) < 10:
-        return default
-    pnls   = [r[0] for r in rows]
-    wins   = [p for p in pnls if p > 0]
-    losses = [abs(p) for p in pnls if p <= 0]
-    if not wins or not losses:
-        return default
-    win_rate = len(wins) / len(pnls)
-    b        = (sum(wins) / len(wins)) / (sum(losses) / len(losses))
-    kelly    = (win_rate * b - (1 - win_rate)) / b
-    half_k   = max(0.02, min(KELLY_FRACTION_MAX, kelly * 0.5))
-    logger.debug(f"Kelly {symbol}: win_rate={win_rate:.2f}, b={b:.2f}, half_f={half_k:.3f}")
-    return half_k
 
 
 def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, BarData],
