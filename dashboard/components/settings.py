@@ -109,22 +109,27 @@ def _compute_investor_profile(d: dict) -> dict | None:
     losses       = [p for p in pnl_vals if p < 0]
     avg_hold     = sum(hold_vals) / len(hold_vals) if hold_vals else 0.0
     win_rate     = len(wins) / len(pnl_vals) * 100 if pnl_vals else 0.0
-    avg_win      = sum(wins) / len(wins) if wins else 0.0
-    avg_loss     = abs(sum(losses) / len(losses)) if losses else 0.0
+    # avg_win_frac/avg_loss_frac are raw fractions (0.05 = 5%), matching how pnl_pct
+    # is stored (see bot/_main_positions.py) -- kept unscaled for the scale-invariant
+    # ratio comparisons below; avg_win_pct/avg_loss_pct are the *100 display values.
+    avg_win_frac  = sum(wins) / len(wins) if wins else 0.0
+    avg_loss_frac = abs(sum(losses) / len(losses)) if losses else 0.0
+    avg_win_pct   = avg_win_frac * 100
+    avg_loss_pct  = avg_loss_frac * 100
 
     # Early-exit rate: trades closed at < 50% of average win
-    early_exits  = sum(1 for p in wins if p < avg_win * 0.5) if wins else 0
+    early_exits  = sum(1 for p in wins if p < avg_win_frac * 0.5) if wins else 0
     early_exit_r = early_exits / len(wins) * 100 if wins else 0.0
 
     insights: list[str] = []
     adaptations: list[str] = []
     if early_exit_r > 30:
-        insights.append(f"You tend to sell winners too early (avg exit at +{avg_win:.0f}%)")
+        insights.append(f"You tend to sell winners too early (avg exit at +{avg_win_pct:.0f}%)")
         adaptations.append("Raising take-profit targets on winners by 20%")
     if win_rate > 60:
         insights.append(f"Strong win rate ({win_rate:.0f}%) — strategy is performing well")
-    if avg_loss > avg_win * 1.5:
-        insights.append(f"Losses ({avg_loss:.0f}%) run larger than wins ({avg_win:.0f}%) — review stop-loss")
+    if avg_loss_frac > avg_win_frac * 1.5:
+        insights.append(f"Losses ({avg_loss_pct:.0f}%) run larger than wins ({avg_win_pct:.0f}%) — review stop-loss")
         adaptations.append("Tightening stop-loss on lower-confidence entries")
     if avg_hold < 2:
         insights.append(f"Average hold time is {avg_hold:.1f} days — consider longer holds for larger moves")
@@ -136,8 +141,8 @@ def _compute_investor_profile(d: dict) -> dict | None:
         "trade_count":     len(pnl_vals),
         "win_rate":        round(win_rate, 1),
         "avg_hold_days":   round(avg_hold, 1),
-        "avg_win_pct":     round(avg_win, 2),
-        "avg_loss_pct":    round(avg_loss, 2),
+        "avg_win_pct":     round(avg_win_pct, 2),
+        "avg_loss_pct":    round(avg_loss_pct, 2),
         "early_exit_rate": round(early_exit_r, 1),
         "insights":        insights[:5],
         "adaptations":     adaptations[:3],
