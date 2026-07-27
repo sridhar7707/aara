@@ -11,6 +11,12 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from loguru import logger
+
+from database.user_settings import get_setting as _get_setting
+
+_logger = logger
+
 _DDL_POOLS = """
 CREATE TABLE IF NOT EXISTS capital_pools (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -276,3 +282,58 @@ def append_ledger(
         "VALUES (?, ?, ?, ?, ?, ?)",
         (pool_id, event_type, amount, balance_after, symbol, notes),
     )
+
+
+def compute_tradeable_capital(con: sqlite3.Connection, portfolio_value: float) -> float:
+    """Capital available for new positions. When reinvest_profits_only=true:
+    tradeable = max(0, portfolio_value - initial_deposit). Computed once per
+    cycle by bot/main.py and passed into _handle_entry, avoiding per-symbol
+    DB reads. Extracted from bot/_main_cycle.py to keep that file under the
+    project's 500-line limit — thematically a capital-allocation concern,
+    not entry-gate logic."""
+    if _get_setting("reinvest_profits_only", "false") != "true":
+        return portfolio_value
+
+    dep_str = _get_setting("initial_deposit", None)
+    initial: float | None = None
+    if dep_str:
+        try:
+            initial = float(dep_str)
+        except Exception as exc:
+            _logger.debug(f"compute_tradeable_capital: initial_deposit setting parse: {exc}")
+
+    if initial is None:
+        try:
+            row = con.execute(
+                "SELECT portfolio_value FROM portfolio_snapshots "
+                "WHERE portfolio_value > 0 ORDER BY timestamp ASC LIMIT 1"
+            ).fetchone()
+            if row:
+                initial = float(row[0])
+        except Exception as exc:
+            _logger.debug(f"compute_tradeable_capital: portfolio_snapshots read: {exc}")
+
+    if initial is None:
+        try:
+            row = con.execute(
+                "SELECT portfolio_value FROM trades "
+                "WHERE portfolio_value > 0 ORDER BY id ASC LIMIT 1"
+            ).fetchone()
+            if row:
+                initial = float(row[0])
+        except Exception as exc:
+            _logger.debug(f"compute_tradeable_capital: trades read: {exc}")
+
+    if initial is None:
+        _logger.warning(
+            "reinvest_profits_only=true but initial deposit unknown "
+            "(no initial_deposit setting and no portfolio history) — trading full portfolio"
+        )
+        return portfolio_value
+
+    tradeable = max(0.0, portfolio_value - initial)
+    _logger.debug(
+        f"reinvest-profits-only: tradeable=${tradeable:.0f} "
+        f"(portfolio=${portfolio_value:.0f}, deposit=${initial:.0f})"
+    )
+    return tradeable

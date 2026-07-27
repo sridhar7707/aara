@@ -101,17 +101,100 @@ def approve_decision(con: sqlite3.Connection, decision_id: int, approved_by: str
     _logger.debug(f"Decision [{decision_id}] APPROVED by {approved_by}")
 
 
-def mark_waiting_approval(con: sqlite3.Connection, decision_id: int) -> None:
+def mark_waiting_approval(
+    con: sqlite3.Connection, decision_id: int,
+    suggested_notional: float | None = None,
+    suggested_stop_loss: float | None = None,
+    suggested_take_profit: float | None = None,
+    suggested_rr_ratio: float | None = None,
+) -> None:
     """Supervised-mode only: all gates passed, decision now waits on a human.
     Not one of the five originally-scoped functions — added because gates
     passing under SUPERVISED mode is a distinct transition from both
-    'system-approved' (autonomous) and the terminal 'user-approved' action."""
+    'system-approved' (autonomous) and the terminal 'user-approved' action.
+
+    The four suggested_* values capture the sizing/risk parameters already
+    computed by the entry-gate pipeline at this exact moment — so a later
+    human-approved resumption (see list_approved_unexecuted()) replays what
+    already passed the gates instead of recomputing Kelly sizing or ATR
+    stops against whatever the market looks like by the time a human acts."""
     con.execute(
-        "UPDATE decision_log SET decision_status='WAITING_APPROVAL' WHERE decision_id=?",
-        (decision_id,),
+        "UPDATE decision_log SET decision_status='WAITING_APPROVAL', "
+        "suggested_notional=?, suggested_stop_loss=?, suggested_take_profit=?, "
+        "suggested_rr_ratio=? WHERE decision_id=?",
+        (suggested_notional, suggested_stop_loss, suggested_take_profit,
+         suggested_rr_ratio, decision_id),
     )
     con.commit()
     _logger.info(f"Decision [{decision_id}] WAITING_APPROVAL")
+
+
+def has_pending_decision(con: sqlite3.Connection, symbol: str) -> bool:
+    """True if `symbol` already has a decision waiting on a human, or one a
+    human has approved but the bot hasn't executed yet. Used to stop the
+    entry-gate pipeline from spamming a fresh WAITING_APPROVAL row for the
+    same symbol every cycle its signal keeps firing while the first one is
+    still unresolved."""
+    row = con.execute(
+        "SELECT 1 FROM decision_log WHERE symbol=? AND ("
+        "decision_status='WAITING_APPROVAL' OR "
+        "(decision_status='APPROVED' AND execution_status='NOT_EXECUTED')"
+        ") LIMIT 1",
+        (symbol,),
+    ).fetchone()
+    return row is not None
+
+
+def list_pending_approvals(con: sqlite3.Connection) -> list[dict]:
+    """All decisions currently waiting on a human, oldest first — the
+    dashboard's approval queue."""
+    rows = con.execute(
+        "SELECT decision_id, symbol, ai_confidence, decision_reason, "
+        "suggested_notional, created_at FROM decision_log "
+        "WHERE decision_status='WAITING_APPROVAL' ORDER BY decision_id ASC"
+    ).fetchall()
+    keys = ["decision_id", "symbol", "ai_confidence", "decision_reason",
+            "suggested_notional", "created_at"]
+    return [dict(zip(keys, r)) for r in rows]
+
+
+def list_approved_unexecuted(con: sqlite3.Connection) -> list[dict]:
+    """Today's BUY decisions a human has approved but the bot hasn't placed
+    yet — what bot/_main_cycle.py's resumption step executes each cycle.
+    Scoped to today only; anything older is handled by
+    expire_stale_decisions() instead of executed on a stale price. Safe by
+    construction: an AUTONOMOUS approval executes in the same function call
+    as approve_decision(), so a row can only land here via a human clicking
+    approve under SUPERVISED mode."""
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    rows = con.execute(
+        "SELECT decision_id, symbol, suggested_notional, suggested_stop_loss, "
+        "suggested_take_profit, suggested_rr_ratio FROM decision_log "
+        "WHERE decision_status='APPROVED' AND execution_status='NOT_EXECUTED' "
+        "AND decision_type='BUY' AND decision_date=? ORDER BY decision_id ASC",
+        (today,),
+    ).fetchall()
+    keys = ["decision_id", "symbol", "suggested_notional", "suggested_stop_loss",
+            "suggested_take_profit", "suggested_rr_ratio"]
+    return [dict(zip(keys, r)) for r in rows]
+
+
+def expire_stale_decisions(con: sqlite3.Connection) -> int:
+    """Any decision still WAITING_APPROVAL, or APPROVED but not yet executed,
+    from a prior trading day is stale — the price/sizing it was built on no
+    longer reflects reality. Expire rather than silently execute on a
+    days-old quote. Returns the number of rows expired."""
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
+    cur = con.execute(
+        "UPDATE decision_log SET decision_status='EXPIRED' WHERE decision_date<? AND ("
+        "decision_status='WAITING_APPROVAL' OR "
+        "(decision_status='APPROVED' AND execution_status='NOT_EXECUTED'))",
+        (today,),
+    )
+    con.commit()
+    if cur.rowcount:
+        _logger.info(f"Decision backfill: expired {cur.rowcount} stale pending/approved decision(s)")
+    return cur.rowcount
 
 
 def mark_executed(con: sqlite3.Connection, decision_id: int, trade_id: int,

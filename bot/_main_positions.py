@@ -38,6 +38,7 @@ class PositionState:
     high_water_mark: float
     atr_at_entry: float | None
     opened_at: str | None
+    shares: float = 0.0
 
 
 def _opened_today(con: sqlite3.Connection, symbol: str) -> bool:
@@ -51,23 +52,27 @@ def _opened_today(con: sqlite3.Connection, symbol: str) -> bool:
 
 def _load_position_state(con: sqlite3.Connection, symbol: str) -> PositionState | None:
     row = con.execute(
-        "SELECT entry_price, high_water_mark, atr_at_entry, opened_at FROM position_state WHERE symbol=?",
+        "SELECT entry_price, high_water_mark, atr_at_entry, opened_at, shares FROM position_state WHERE symbol=?",
         (symbol,),
     ).fetchone()
     if row is None:
         return None
-    return PositionState(entry_price=row[0], high_water_mark=row[1], atr_at_entry=row[2], opened_at=row[3])
+    return PositionState(entry_price=row[0], high_water_mark=row[1], atr_at_entry=row[2], opened_at=row[3],
+                          shares=float(row[4] or 0.0))
 
 
 def _upsert_position_state(con: sqlite3.Connection, symbol: str, entry_price: float,
-                            high_water_mark: float, atr: float) -> None:
+                            high_water_mark: float, atr: float, shares: float) -> None:
+    """`shares` is always overwritten to the passed value (not MAX'd) so trims and
+    partial fills are reflected immediately — unlike high_water_mark, which only ratchets up."""
     con.execute("""
-        INSERT INTO position_state (symbol, entry_price, high_water_mark, atr_at_entry, opened_at)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO position_state (symbol, entry_price, high_water_mark, atr_at_entry, opened_at, shares)
+        VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(symbol) DO UPDATE SET
             high_water_mark = MAX(high_water_mark, excluded.high_water_mark),
-            atr_at_entry    = excluded.atr_at_entry
-    """, (symbol, entry_price, high_water_mark, atr, datetime.now(timezone.utc).isoformat()))
+            atr_at_entry    = excluded.atr_at_entry,
+            shares          = excluded.shares
+    """, (symbol, entry_price, high_water_mark, atr, datetime.now(timezone.utc).isoformat(), shares))
     con.commit()
 
 
@@ -252,8 +257,9 @@ def _reconcile_positions(con: sqlite3.Connection, alpaca_positions: dict,
     for sym, pos in alpaca_positions.items():
         if sym not in db_syms:
             entry = float(getattr(pos, "avg_entry_price", 0) or 0)
+            qty   = float(getattr(pos, "qty", 0) or 0)
             logger.warning(f"Reconcile: {sym} in Alpaca but not DB — seeding position state")
-            _upsert_position_state(con, sym, entry, entry, 0.0)
+            _upsert_position_state(con, sym, entry, entry, 0.0, qty)
 
 
 def _trim_position(con: sqlite3.Connection, client: AlpacaClient, symbol: str, trim_qty: float,
@@ -272,6 +278,11 @@ def _trim_position(con: sqlite3.Connection, client: AlpacaClient, symbol: str, t
         if pool:
             cost_basis = entry_price * trim_qty if entry_price > 0 else trim_notional
             _pool_sell(con, pool.id, cost_basis, trim_notional, symbol=symbol)
+        _pos_state = _load_position_state(con, symbol)
+        if _pos_state is not None:
+            _upsert_position_state(con, symbol, entry_price, _pos_state.high_water_mark,
+                                    _pos_state.atr_at_entry or 0.0,
+                                    max(0.0, _pos_state.shares - trim_qty))
         _trim_freed_pct = trim_notional / portfolio_value * 100 if portfolio_value > 0 else 0.0
         tg.alert_sell(symbol, trim_qty, current_price, pnl_pct,
                       reason="drift-trim", notional=trim_notional,
@@ -404,11 +415,11 @@ def _handle_exits(
 
     if pos_state:
         new_hwm = max(pos_state.high_water_mark, current_price)
-        if new_hwm > pos_state.high_water_mark:
-            _upsert_position_state(con, symbol, entry_price, new_hwm, current_atr)
+        if new_hwm > pos_state.high_water_mark or pos_state.shares != pos_qty:
+            _upsert_position_state(con, symbol, entry_price, new_hwm, current_atr, pos_qty)
         hwm = new_hwm
     else:
-        _upsert_position_state(con, symbol, entry_price, current_price, current_atr)
+        _upsert_position_state(con, symbol, entry_price, current_price, current_atr, pos_qty)
         hwm = current_price
 
     # ① Take-profit: 4×ATR clamped to [6%, 25%]

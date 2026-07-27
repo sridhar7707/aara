@@ -71,11 +71,12 @@ def dash_db(tmp_path, monkeypatch):
     _trade(_ts(11), "ZZZB", "SELL", 1.0, 160.0, 160.0, 101_000.0, 0.05, realized=10.0)
     _trade(_ts(12), "ZZZC", "SELL", 1.0,  90.0,  90.0, 100_500.0, -0.03, realized=-10.0)
 
-    # positions
-    con.execute("INSERT INTO position_state VALUES (?,?,?,?,?)",
-                ("ZZZA", 150.0, 155.0, 2.5, _ts(10)))
-    con.execute("INSERT INTO position_state VALUES (?,?,?,?,?)",
-                ("ZZZD", 200.0, 205.0, 3.0, _ts(10)))
+    # positions — shares is now the source of truth (see position_state.shares),
+    # not reconstructed from the trades ledger, so it's seeded explicitly here.
+    con.execute("INSERT INTO position_state VALUES (?,?,?,?,?,?)",
+                ("ZZZA", 150.0, 155.0, 2.5, _ts(10), 1.0))
+    con.execute("INSERT INTO position_state VALUES (?,?,?,?,?,?)",
+                ("ZZZD", 200.0, 205.0, 3.0, _ts(10), 2.0))
 
     # risk_state
     for k, v in [
@@ -212,12 +213,16 @@ def test_positions_df_has_both_symbols_and_prices(dash_db):
     assert entries["ZZZD"] == pytest.approx(200.0)
 
 
-def test_positions_shares_derived_from_trades(dash_db):
-    # ZZZA has one BUY of 1.0 share; ZZZD has no trades → 0 shares.
+def test_positions_shares_come_from_position_state(dash_db):
+    # shares is read from position_state.shares directly — not reconstructed by
+    # summing the trades ledger, which breaks permanently the first time a
+    # SELL_RECONCILE row turns out to have been wrong (see bot/_main_positions.py).
+    # ZZZD has zero trade-log rows yet is a real seeded position (e.g. found in
+    # Alpaca during reconcile) with 2.0 shares — it must NOT show as 0.
     df = dd.get_positions_df(prices={}, portfolio=102_000.0)
     shares = dict(zip(df["Symbol"], df["Shares"]))
     assert shares["ZZZA"] == pytest.approx(1.0)
-    assert shares["ZZZD"] == pytest.approx(0.0)
+    assert shares["ZZZD"] == pytest.approx(2.0)
 
 
 def test_positions_unrealized_pnl_math(dash_db):

@@ -80,10 +80,13 @@ from bot._main_market import (
 )
 from bot._main_cycle import (
     EntryContext,
-    _fetch_symbol, _handle_exits, _handle_entry, compute_tradeable_capital, prefetch_bars,
+    _fetch_symbol, _handle_exits, _handle_entry, prefetch_bars,
 )
-from bot._main_decisions import create_buy_decision as _create_buy_decision
-from bot.capital.pool import load_active_pool as _load_pool
+from bot._main_decisions import (
+    create_buy_decision as _create_buy_decision,
+    execute_approved_decisions as _execute_approved_decisions,
+)
+from bot.capital.pool import load_active_pool as _load_pool, compute_tradeable_capital
 from bot._main_runner import (
     _do_clean_db, _do_reset_daily_start, end_of_day_summary, run_loop,
 )
@@ -338,6 +341,16 @@ def run(
     # Track remaining profits pool across symbols so aggregate buys can't exceed it.
     _remaining_tradeable = _tradeable_capital
     _capital_pool = _load_pool(con, initial_amount=_tradeable_capital)
+
+    # Supervised-mode resumption — decoupled from the per-symbol loop below since
+    # a decision a human approves can outlive that symbol's current-cycle signal.
+    # A no-op every cycle under AUTONOMOUS mode (nothing is ever left APPROVED
+    # + NOT_EXECUTED there, since that path executes atomically).
+    if not _sanity_blocked:
+        available_cash = _execute_approved_decisions(
+            con, client, positions, available_cash, portfolio_value,
+            buy_order_syms, pool=_capital_pool,
+        )
 
     # ── Per-symbol decision loop ──────────────────────────────────────────────
     for symbol in active_symbols:

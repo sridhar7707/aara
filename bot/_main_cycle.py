@@ -28,9 +28,9 @@ from config import (
     MACD_CONFIRMATION_MIN, MIN_VOLUME_RATIO, XGB_MIN_CONFIDENCE,
     RS_LOOKBACK_BARS, SECTOR_MAP, STOP_LOSS_PCT,
 )
-from database.user_settings import get_setting as _get_setting
 from database.services.decision_service import (
     reject_decision, approve_decision, mark_waiting_approval, mark_executed,
+    has_pending_decision,
 )
 from bot._main_db import log_trade, _save_risk_state
 from database.trade_journal import open_entry as _journal_open
@@ -94,58 +94,6 @@ def _fetch_symbol(symbol: str, client: AlpacaClient, yf_batch: dict) -> tuple[st
             logger.warning(f"Daily bar features failed for {symbol}: {e}")
 
     return symbol, bars_5m, bars_daily
-
-
-def compute_tradeable_capital(con: sqlite3.Connection, portfolio_value: float) -> float:
-    """Capital available for new positions. When reinvest_profits_only=true:
-    tradeable = max(0, portfolio_value - initial_deposit). Computed once per
-    cycle and passed into _handle_entry, avoiding per-symbol DB reads."""
-    if _get_setting("reinvest_profits_only", "false") != "true":
-        return portfolio_value
-
-    dep_str = _get_setting("initial_deposit", None)
-    initial: float | None = None
-    if dep_str:
-        try:
-            initial = float(dep_str)
-        except Exception as exc:
-            logger.debug(f"_get_tradeable_capital: initial_deposit setting parse: {exc}")
-
-    if initial is None:
-        try:
-            row = con.execute(
-                "SELECT portfolio_value FROM portfolio_snapshots "
-                "WHERE portfolio_value > 0 ORDER BY timestamp ASC LIMIT 1"
-            ).fetchone()
-            if row:
-                initial = float(row[0])
-        except Exception as exc:
-            logger.debug(f"_get_tradeable_capital: portfolio_snapshots read: {exc}")
-
-    if initial is None:
-        try:
-            row = con.execute(
-                "SELECT portfolio_value FROM trades "
-                "WHERE portfolio_value > 0 ORDER BY id ASC LIMIT 1"
-            ).fetchone()
-            if row:
-                initial = float(row[0])
-        except Exception as exc:
-            logger.debug(f"_get_tradeable_capital: trades read: {exc}")
-
-    if initial is None:
-        logger.warning(
-            "reinvest_profits_only=true but initial deposit unknown "
-            "(no initial_deposit setting and no portfolio history) — trading full portfolio"
-        )
-        return portfolio_value
-
-    tradeable = max(0.0, portfolio_value - initial)
-    logger.debug(
-        f"reinvest-profits-only: tradeable=${tradeable:.0f} "
-        f"(portfolio=${portfolio_value:.0f}, deposit=${initial:.0f})"
-    )
-    return tradeable
 
 
 @dataclass
@@ -342,11 +290,16 @@ def _handle_entry(
             reject_decision(con, ctx.decision_id, rejected_by="system", reason=_reason)
         return available_cash
 
-    # Gates passed. SUPERVISED holds for a human (no approval UI yet, so it just
-    # never executes — safe, not broken). AUTONOMOUS proceeds as before.
+    # Gates passed. SUPERVISED holds for a human; AUTONOMOUS proceeds as before.
     if DECISION_MODE == "SUPERVISED":
         if ctx.decision_id is not None:
-            mark_waiting_approval(con, ctx.decision_id)
+            if has_pending_decision(con, symbol):  # signal still firing -- don't spam another pending row
+                reject_decision(con, ctx.decision_id, rejected_by="system",
+                               reason="duplicate — already awaiting human approval")
+            else:
+                mark_waiting_approval(con, ctx.decision_id, suggested_notional=notional,
+                                      suggested_stop_loss=stop_pct, suggested_take_profit=tp_target_pct,
+                                      suggested_rr_ratio=rr_ratio)
         return available_cash
     if ctx.decision_id is not None:
         approve_decision(con, ctx.decision_id, approved_by="system")
@@ -437,7 +390,7 @@ def _handle_entry(
                 _pool_buy(con, ctx.pool.id, notional, symbol=symbol)
             _rec_action(con, "buy", symbol, reasoning=_ai_rsn,
                         confidence=int(ctx.xgb_prob * 100), status="executed")
-            _upsert_position_state(con, symbol, fill_price, fill_price, ctx.current_atr)
+            _upsert_position_state(con, symbol, fill_price, fill_price, ctx.current_atr, fill_shares)
             available_cash -= notional
             ctx.buy_order_syms.discard(symbol)  # order is now filled, not pending
         else:

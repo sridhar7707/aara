@@ -6,8 +6,17 @@ import sqlite3
 
 from loguru import logger
 
+import bot.monitor.telegram_bot as tg
+from bot.execution.alpaca_client import AlpacaClient
 from bot.strategy.ensemble import WEIGHTS
-from database.services.decision_service import create_decision
+from bot._main_positions import _TP_FLOOR, _upsert_position_state
+from bot.capital.pool import CapitalPool, update_on_buy as _pool_buy
+from bot._main_db import log_trade
+from config import CASH_USE_FRACTION, STOP_LOSS_PCT
+from database.trade_journal import open_entry as _journal_open
+from database.services.decision_service import (
+    create_decision, mark_executed, list_approved_unexecuted, expire_stale_decisions,
+)
 
 _logger = logger
 
@@ -123,3 +132,87 @@ def _insert_backfilled_decision(
          trade_id, "AI_SIGNAL", reasoning,
          "APPROVED", "EXECUTED", outcome_status, ts, outcome_known_at),
     )
+
+
+def execute_approved_decisions(
+    con: sqlite3.Connection, client: AlpacaClient, positions: dict,
+    available_cash: float, portfolio_value: float,
+    buy_order_syms: set, pool: CapitalPool | None = None,
+) -> float:
+    """Supervised-mode resumption: place the real order for any BUY a human
+    has approved since the entry-gate pipeline last saw that symbol.
+
+    Deliberately decoupled from _handle_entry() and called once per cycle
+    (not per-symbol) — a symbol's live signal can weaken or disappear
+    entirely between when a human clicks approve and the bot's next cycle,
+    so gating this on that cycle's action==1 (as _handle_entry() is) would
+    silently never resume it. Replays the notional/stop/TP/RR values
+    _handle_entry() already computed and stored via mark_waiting_approval()
+    rather than recomputing Kelly sizing or ATR stops against a possibly
+    very different market by the time a human acts — only the cash-reserve
+    check and current price are re-verified, at execution time.
+    """
+    expired = expire_stale_decisions(con)
+    if expired:
+        _logger.info(f"Supervised resumption: expired {expired} stale decision(s) from a prior day")
+
+    for row in list_approved_unexecuted(con):
+        symbol = row["symbol"]
+        if symbol in positions or symbol in buy_order_syms:
+            _logger.info(f"Supervised resumption: {symbol} already held/pending — skipping approved decision")
+            continue
+        notional = row["suggested_notional"]
+        if not notional or notional <= 0:
+            _logger.warning(f"Supervised resumption: {symbol} has no valid suggested_notional — skipping")
+            continue
+        if notional > available_cash * CASH_USE_FRACTION:
+            _logger.info(f"Supervised resumption: {symbol} skipped — cash reserve would be breached "
+                        f"(need ${notional:.2f}, cash ${available_cash:.2f})")
+            continue
+        try:
+            current_price = client.get_latest_price(symbol)
+        except Exception as exc:
+            _logger.warning(f"Supervised resumption: {symbol} price fetch failed: {exc}")
+            continue
+        if not current_price or current_price <= 0:
+            continue
+
+        result = client.buy(symbol, notional, limit_price=current_price)
+        if not result:
+            _logger.warning(f"Supervised resumption: {symbol} buy order not placed")
+            continue
+        filled_qty = client.wait_for_fill(result["order_id"], timeout_secs=15)
+        if filled_qty <= 0:
+            _logger.warning(f"Supervised resumption: {symbol} order did not fill")
+            continue
+
+        fill_price = client.get_fill_price(result["order_id"]) or current_price
+        fill_shares = notional / fill_price
+        stop_pct = row["suggested_stop_loss"] or STOP_LOSS_PCT
+        tp_pct   = row["suggested_take_profit"] or _TP_FLOOR
+        rr_ratio = row["suggested_rr_ratio"] or (tp_pct / stop_pct if stop_pct else 0.0)
+        _ai_rsn = f"Bought {symbol} at ${fill_price:.2f} (human-approved, supervised mode)."
+
+        trade_id = log_trade(con, symbol, "BUY", fill_shares, fill_price, notional,
+                             "SUPERVISED", portfolio_value, 0,
+                             order_id=result.get("order_id"), ai_reasoning=_ai_rsn,
+                             stop_loss=round(fill_price * (1 - stop_pct), 4),
+                             take_profit=round(fill_price * (1 + tp_pct), 4),
+                             risk_reward_ratio=round(rr_ratio, 4))
+        mark_executed(con, row["decision_id"], trade_id=trade_id, quantity_changed=fill_shares)
+        try:
+            _journal_open(con, symbol, trade_id, entry_reason=_ai_rsn,
+                          entry_signals={"mode": "SUPERVISED", "stop_pct": round(stop_pct, 4),
+                                        "tp_pct": round(tp_pct, 4), "rr_ratio": round(rr_ratio, 3)},
+                          entry_confidence=0.0, pattern_tags=["SUPERVISED"])
+        except Exception as exc:
+            _logger.warning(f"Journal open failed for {symbol} (non-fatal): {exc}")
+        if pool:
+            _pool_buy(con, pool.id, notional, symbol=symbol)
+        tg.alert_buy(symbol, fill_shares, fill_price, "SUPERVISED", portfolio_value, 0.0,
+                    notional=notional)
+        _upsert_position_state(con, symbol, fill_price, fill_price, 0.0, fill_shares)
+        available_cash -= notional
+        _logger.info(f"Supervised resumption: {symbol} EXECUTED — decision [{row['decision_id']}] -> trade [{trade_id}]")
+
+    return available_cash

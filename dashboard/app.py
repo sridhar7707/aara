@@ -73,7 +73,7 @@ from dashboard.components.signal_history import render_signal_history
 from dashboard.components.decision import render_decision_center
 from dashboard.components.rebalance import render_rebalance
 from dashboard.components.symbol_detail import render_symbol_detail, _get_symbol_choices
-from dashboard.components.settings import render_settings_summary, render_investor_profile
+from dashboard.components.settings import render_settings_summary, render_investor_profile, do_save_settings
 from dashboard.components.brief import render_morning_brief, render_scheduler_status, render_three_question_summary
 from dashboard.components.thesis import render_thesis_tracker
 from dashboard.components.weekly_summary import render_weekly_summary
@@ -95,9 +95,12 @@ from dashboard.components.attribution import (
 from dashboard.components.decision_quality import render_decision_quality_summary
 from dashboard.components.trade_journal import render_trade_journal
 from dashboard.components.loss_explanation import render_loss_explanation
+from dashboard.components.pending_approvals import (
+    render_pending_approvals, on_approve_click, on_reject_click,
+)
 from dashboard.timers import register_all_timers
 import dashboard.registry as registry
-from database.user_settings import get_all_settings, save_setting, get_setting
+from database.user_settings import get_all_settings, get_setting
 from bot.core.error_logger import safe_render, timed
 from bot.core.recommendation_engine import (
     get_portfolio_action, get_position_sizing,
@@ -262,6 +265,14 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
                 committee_out       = registry.mount("committee_out",       gr.HTML(value=""))
             with gr.Accordion("✅ Decision Center", open=False):
                 decision_center_out = registry.mount("decision_center_out", gr.HTML(value=""))
+            with gr.Accordion("⏳ Pending Approvals", open=False):
+                pending_approvals_out = registry.mount("pending_approvals_out", gr.HTML(value=render_pending_approvals))
+                with gr.Row():
+                    _approval_id_in = gr.Number(label="Decision ID", precision=0, container=True)
+                    _approve_btn = gr.Button("Approve", variant="primary")
+                    _reject_btn  = gr.Button("Reject", variant="secondary")
+                _reject_reason_in    = gr.Textbox(label="Rejection reason (optional)", container=True)
+                _approval_status_out = gr.HTML(value="")
             with gr.Accordion("⚖️ Rebalance", open=False):
                 rebalance_out       = registry.mount("rebalance_out",       gr.HTML(value=""))
             with gr.Accordion("📝 Thesis Tracker", open=False):
@@ -451,29 +462,13 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
     _withdraw_btn.click(fn=lambda v: _cap_action(do_pool_withdraw, v), inputs=[_withdraw_amt], outputs=[_withdraw_status, managed_capital_out])
     _reserve_btn.click(fn=lambda v: _cap_action(do_set_reserve, v, "0"), inputs=[_reserve_amt], outputs=[_reserve_status, managed_capital_out])
 
-    def _save_settings(risk_tol, benchmark, max_pos, max_dd, stop_loss, notif):
-        max_pos   = max(5.0,  min(50.0, max_pos))
-        max_dd    = max(5.0,  min(30.0, max_dd))
-        stop_loss = max(1.0,  min(15.0, stop_loss))
-        results = [
-            save_setting("risk_tolerance",        risk_tol),
-            save_setting("benchmark",             benchmark),
-            save_setting("max_position_pct",      str(round(max_pos   / 100, 4))),
-            save_setting("max_drawdown_pct",      str(round(max_dd    / 100, 4))),
-            save_setting("stop_loss_pct",         str(round(stop_loss / 100, 4))),
-            save_setting("notifications_enabled", "true" if notif else "false"),
-        ]
-        ok = all(results)
-        status = (
-            '<p style="color:#00c853;font-weight:600;margin:8px 0 0">'
-            '&#10003; Saved &mdash; active on next bot cycle</p>'
-            if ok else
-            '<p style="color:#ef4444;font-weight:600;margin:8px 0 0">'
-            '&#9888; Save failed &mdash; check application logs</p>'
-        )
-        return render_settings_summary(), status
+    _approve_btn.click(fn=on_approve_click, inputs=[_approval_id_in],
+                      outputs=[_approval_status_out, pending_approvals_out])
+    _reject_btn.click(fn=on_reject_click, inputs=[_approval_id_in, _reject_reason_in],
+                      outputs=[_approval_status_out, pending_approvals_out])
+
     _save_btn.click(
-        fn=_save_settings,
+        fn=do_save_settings,
         inputs=[_risk_radio, _bench_radio, _max_pos_sl, _max_dd_sl, _stop_sl, _notif_check],
         outputs=[settings_summary_out, _save_status],
     )

@@ -255,26 +255,26 @@ def _refresh_cache() -> dict:
     result["regime_raw"] = (str(last["regime"] or "Unknown")).replace("_", " ")
 
     try:
+        # Sourced from position_state (kept in sync with live Alpaca every bot cycle),
+        # not reconstructed from the trades ledger — a SELL_RECONCILE row (logged when
+        # the bot's local state disagrees with Alpaca) has no way to be "undone" by a
+        # later event, so summing BUY/SELL shares over history silently drops or
+        # undercounts positions once a single bad reconcile has ever fired for them.
         with get_db_conn() as con:
-            pos_rows = con.execute("""
-                SELECT symbol,
-                       SUM(CASE WHEN action='BUY' THEN shares  ELSE 0 END)   AS buy_shares,
-                       SUM(CASE WHEN action='BUY' THEN notional ELSE 0 END)  AS buy_notional,
-                       SUM(CASE WHEN action='BUY' THEN shares ELSE -shares END) AS net_shares
-                FROM trades
-                GROUP BY symbol
-                HAVING net_shares > 0.001
-            """).fetchall()
+            pos_rows = con.execute(
+                "SELECT symbol, entry_price, shares FROM position_state WHERE shares > 0.001"
+            ).fetchall()
         open_pos = {}
-        for sym, buy_shares, buy_notional, net_shares in pos_rows:
-            avg_cost = (buy_notional / buy_shares) if buy_shares > 0 else 0.0
+        for sym, entry_price, shares in pos_rows:
+            shares = float(shares or 0.0)
+            entry_price = float(entry_price or 0.0)
             open_pos[sym] = {
-                "shares":   float(net_shares),
-                "invested": float(avg_cost * net_shares),
+                "shares":   shares,
+                "invested": entry_price * shares,
             }
         result["open_pos"] = open_pos
     except Exception as _pe:
-        logger.warning(f"open_pos SQL aggregation failed, falling back: {_pe}")
+        logger.warning(f"open_pos position_state read failed, falling back: {_pe}")
         result["open_pos"] = {}
 
     recent = df.tail(15).iloc[::-1][

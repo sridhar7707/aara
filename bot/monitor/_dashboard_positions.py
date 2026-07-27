@@ -140,13 +140,11 @@ def get_positions_df(prices: dict | None = None, portfolio: float | None = None)
         return _empty
     try:
         df = pd.read_sql_query(
-            "SELECT symbol, entry_price, high_water_mark, atr_at_entry, opened_at FROM position_state", con
+            "SELECT symbol, entry_price, high_water_mark, atr_at_entry, opened_at, shares FROM position_state", con
         )
-        net = dict(con.execute(
-            "SELECT symbol, "
-            "SUM(CASE WHEN action='BUY' THEN shares WHEN action LIKE 'SELL%' THEN -shares ELSE 0 END) "
-            "FROM trades GROUP BY symbol"
-        ).fetchall())
+        # shares comes straight from position_state (live-synced each bot cycle), not
+        # reconstructed from the trades ledger — see dashboard/data.py's open_pos for why.
+        net = dict(zip(df["symbol"], df["shares"].astype(float)))
         if portfolio is None:
             portfolio = _latest_portfolio_value(con)
     except Exception:

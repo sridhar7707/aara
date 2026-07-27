@@ -4,6 +4,8 @@ from bot._main_db import init_db
 from database.services.decision_service import (
     create_decision, reject_decision, approve_decision, mark_waiting_approval,
     mark_executed, complete_decision, evaluate_decision, find_open_decision_id,
+    has_pending_decision, list_pending_approvals, list_approved_unexecuted,
+    expire_stale_decisions,
 )
 
 
@@ -158,6 +160,119 @@ def test_evaluate_decision_without_completion_returns_error(db):
     # trade exists via mark_executed's trade_id, but outcome_known_at unset (complete_decision not called)
     result = evaluate_decision(db, did)
     assert "error" in result
+
+
+def test_mark_waiting_approval_stores_suggested_values(db):
+    did = _new_decision(db)
+    mark_waiting_approval(db, did, suggested_notional=500.0, suggested_stop_loss=95.0,
+                          suggested_take_profit=115.0, suggested_rr_ratio=2.5)
+    row = db.execute(
+        "SELECT suggested_notional, suggested_stop_loss, suggested_take_profit, suggested_rr_ratio "
+        "FROM decision_log WHERE decision_id=?", (did,),
+    ).fetchone()
+    assert row == (500.0, 95.0, 115.0, 2.5)
+
+
+def test_has_pending_decision_false_when_none(db):
+    assert has_pending_decision(db, "AAPL") is False
+
+
+def test_has_pending_decision_true_when_waiting_approval(db):
+    did = _new_decision(db, symbol="AAPL")
+    mark_waiting_approval(db, did)
+    assert has_pending_decision(db, "AAPL") is True
+
+
+def test_has_pending_decision_true_when_approved_not_executed(db):
+    did = _new_decision(db, symbol="AAPL")
+    approve_decision(db, did, approved_by="user")
+    assert has_pending_decision(db, "AAPL") is True
+
+
+def test_has_pending_decision_false_once_executed(db):
+    did = _new_decision(db, symbol="AAPL")
+    approve_decision(db, did, approved_by="user")
+    mark_executed(db, did, trade_id=1)
+    assert has_pending_decision(db, "AAPL") is False
+
+
+def test_has_pending_decision_false_when_rejected(db):
+    did = _new_decision(db, symbol="AAPL")
+    reject_decision(db, did, rejected_by="user", reason="too expensive")
+    assert has_pending_decision(db, "AAPL") is False
+
+
+def test_list_pending_approvals_returns_waiting_only(db):
+    d1 = _new_decision(db, symbol="AAPL", ai_confidence=70)
+    mark_waiting_approval(db, d1, suggested_notional=500.0)
+    d2 = _new_decision(db, symbol="MSFT")
+    approve_decision(db, d2, approved_by="system")  # not waiting -- must not appear
+    rows = list_pending_approvals(db)
+    assert len(rows) == 1
+    assert rows[0]["decision_id"] == d1
+    assert rows[0]["symbol"] == "AAPL"
+    assert rows[0]["suggested_notional"] == 500.0
+
+
+def test_list_approved_unexecuted_returns_todays_supervised_approvals(db):
+    did = _new_decision(db, symbol="AAPL")
+    mark_waiting_approval(db, did, suggested_notional=500.0, suggested_stop_loss=95.0,
+                          suggested_take_profit=115.0, suggested_rr_ratio=2.5)
+    approve_decision(db, did, approved_by="user")
+    rows = list_approved_unexecuted(db)
+    assert len(rows) == 1
+    assert rows[0]["decision_id"] == did
+    assert rows[0]["suggested_notional"] == 500.0
+
+
+def test_list_approved_unexecuted_excludes_autonomous_since_it_executes_atomically(db):
+    """AUTONOMOUS mode calls approve_decision() then mark_executed() in the
+    same function call — never leaves a gap where execution_status is still
+    NOT_EXECUTED, so this list should never include AUTONOMOUS-mode rows."""
+    did = _new_decision(db, symbol="AAPL")
+    approve_decision(db, did, approved_by="system")
+    mark_executed(db, did, trade_id=1)
+    assert list_approved_unexecuted(db) == []
+
+
+def test_expire_stale_decisions_expires_prior_day_waiting_approval(db):
+    did = _new_decision(db, symbol="AAPL")
+    mark_waiting_approval(db, did)
+    db.execute("UPDATE decision_log SET decision_date='2020-01-01' WHERE decision_id=?", (did,))
+    db.commit()
+    n = expire_stale_decisions(db)
+    assert n == 1
+    status = db.execute("SELECT decision_status FROM decision_log WHERE decision_id=?", (did,)).fetchone()[0]
+    assert status == "EXPIRED"
+
+
+def test_expire_stale_decisions_expires_prior_day_approved_unexecuted(db):
+    did = _new_decision(db, symbol="AAPL")
+    approve_decision(db, did, approved_by="user")
+    db.execute("UPDATE decision_log SET decision_date='2020-01-01' WHERE decision_id=?", (did,))
+    db.commit()
+    n = expire_stale_decisions(db)
+    assert n == 1
+    status = db.execute("SELECT decision_status FROM decision_log WHERE decision_id=?", (did,)).fetchone()[0]
+    assert status == "EXPIRED"
+
+
+def test_expire_stale_decisions_leaves_todays_decisions_alone(db):
+    did = _new_decision(db, symbol="AAPL")
+    mark_waiting_approval(db, did)
+    n = expire_stale_decisions(db)
+    assert n == 0
+    status = db.execute("SELECT decision_status FROM decision_log WHERE decision_id=?", (did,)).fetchone()[0]
+    assert status == "WAITING_APPROVAL"
+
+
+def test_expire_stale_decisions_leaves_executed_decisions_alone(db):
+    did = _new_decision(db, symbol="AAPL")
+    mark_executed(db, did, trade_id=1)
+    db.execute("UPDATE decision_log SET decision_date='2020-01-01' WHERE decision_id=?", (did,))
+    db.commit()
+    n = expire_stale_decisions(db)
+    assert n == 0
 
 
 def test_evaluate_decision_writes_nothing_to_db(db):

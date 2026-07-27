@@ -11,7 +11,7 @@ from bot.main import (
     _upsert_position_state, _delete_position_state, _is_wash_sale_risk,
     _record_snapshot, _anchor_daily_start, _apply_sim_capital, _log_signal,
     _fetch_positions_for_reconcile, _handle_entry, EntryContext,
-    _create_buy_decision, _signal_sell,
+    _create_buy_decision, _signal_sell, _execute_approved_decisions,
 )
 from bot.risk.risk_manager import RiskManager
 
@@ -52,7 +52,8 @@ def db():
             entry_price REAL,
             high_water_mark REAL,
             atr_at_entry REAL,
-            opened_at TEXT
+            opened_at TEXT,
+            shares REAL DEFAULT 0.0
         )
     """)
     con.execute("""
@@ -84,7 +85,9 @@ def db():
             decision_source TEXT, decision_reason TEXT, risk_factors TEXT,
             expected_holding_period INTEGER, thesis TEXT, lesson_learned TEXT,
             decision_status TEXT, execution_status TEXT, outcome_status TEXT,
-            executed_at TEXT, outcome_known_at TEXT
+            executed_at TEXT, outcome_known_at TEXT,
+            suggested_notional REAL, suggested_stop_loss REAL,
+            suggested_take_profit REAL, suggested_rr_ratio REAL
         )
     """)
     con.commit()
@@ -470,7 +473,7 @@ def test_check_time_exit_invalid_date_string():
 
 def test_reconcile_removes_stale_db_entries(db):
     # AAPL is in DB but not in Alpaca → should be removed
-    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0)
+    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0, 5.0)
     _reconcile_positions(db, alpaca_positions={})
     rows = db.execute("SELECT symbol FROM position_state").fetchall()
     assert ("AAPL",) not in rows
@@ -481,7 +484,7 @@ def test_reconcile_completes_linked_decision(db):
     did = create_decision(db, "AAPL", 100.0, 10000.0)
     trade_id = log_trade(db, "AAPL", "BUY", 5.0, 100.0, 500.0, "TRENDING_UP", 10000.0, 0.0)
     mark_executed(db, did, trade_id=trade_id)
-    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0)
+    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0, 5.0)
 
     _reconcile_positions(db, alpaca_positions={})
 
@@ -505,7 +508,7 @@ def test_reconcile_seeds_missing_alpaca_positions(db):
 
 def test_reconcile_leaves_matching_positions(db):
     # TSLA in both DB and Alpaca → untouched
-    _upsert_position_state(db, "TSLA", 300.0, 310.0, 2.0)
+    _upsert_position_state(db, "TSLA", 300.0, 310.0, 2.0, 3.0)
 
     class FakePos:
         avg_entry_price = 300.0
@@ -523,7 +526,7 @@ def test_reconcile_handles_empty_alpaca_and_db(db):
 
 def test_reconcile_records_actual_pnl_when_client_available(db):
     """SELL_RECONCILE should use current market price, not entry price."""
-    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0)
+    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0, 5.0)
     log_trade(db, "AAPL", "BUY", 5.0, 100.0, 500.0, "TRENDING_UP", 10000.0, 0.0)
 
     class FakeClient:
@@ -541,7 +544,7 @@ def test_reconcile_records_actual_pnl_when_client_available(db):
 
 def test_reconcile_falls_back_to_entry_price_on_client_error(db):
     """If market price fetch fails, reconcile should fall back to entry price."""
-    _upsert_position_state(db, "MSFT", 200.0, 200.0, 2.0)
+    _upsert_position_state(db, "MSFT", 200.0, 200.0, 2.0, 2.0)
     log_trade(db, "MSFT", "BUY", 2.0, 200.0, 400.0, "TRENDING_UP", 10000.0, 0.0)
 
     class BadClient:
@@ -587,7 +590,7 @@ def test_fetch_positions_empty_and_db_expects_nothing_skips_reverify(db, monkeyp
 
 def test_fetch_positions_reverifies_and_recovers_from_transient_glitch(db, monkeypatch):
     monkeypatch.setattr("bot._main_reconcile.time.sleep", lambda s: None)
-    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0)
+    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0, 5.0)
     client = _CountingClient([{}, {"AAPL": object()}])
     result = _fetch_positions_for_reconcile(client, db)
     assert "AAPL" in result
@@ -596,7 +599,7 @@ def test_fetch_positions_reverifies_and_recovers_from_transient_glitch(db, monke
 
 def test_fetch_positions_reverifies_and_accepts_genuinely_empty(db, monkeypatch):
     monkeypatch.setattr("bot._main_reconcile.time.sleep", lambda s: None)
-    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0)
+    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0, 5.0)
     client = _CountingClient([{}])  # stays empty on every call
     result = _fetch_positions_for_reconcile(client, db)
     assert result == {}
@@ -1088,6 +1091,188 @@ def test_handle_entry_wrong_regime_blocks_and_persists_decision(db):
     ).fetchone()
     assert row[0] == "SYSTEM_BLOCKED"
     assert "regime=" in row[1]
+
+
+def _gate_passing_ctx(**overrides) -> EntryContext:
+    """An EntryContext tuned to clear every entry gate in _handle_entry(), so
+    tests can reach the SUPERVISED/AUTONOMOUS branch instead of bailing out
+    on an earlier gate."""
+    return _minimal_entry_ctx(
+        current_price=100.0, current_atr=2.0,  # 2% ATR -> comfortably clears TP/RR gates
+        tradeable_capital=5000.0, available_cash=5000.0, portfolio_value=10000.0,
+        **overrides,
+    )
+
+
+class _AlwaysApproveRisk:
+    def approve_buy(self, *args, **kwargs):
+        return True
+
+
+def test_handle_entry_supervised_mode_marks_waiting_approval(db, monkeypatch):
+    import bot._main_cycle as _mc
+    monkeypatch.setattr(_mc, "DECISION_MODE", "SUPERVISED")
+    from database.services.decision_service import create_decision
+    did = create_decision(db, "AAPL", 100.0, 10000.0)
+    ctx = _gate_passing_ctx(decision_id=did)
+    _handle_entry(db, client=None, risk=_AlwaysApproveRisk(), symbol="AAPL", ctx=ctx)
+    row = db.execute(
+        "SELECT decision_status, suggested_notional, suggested_stop_loss, "
+        "suggested_take_profit, suggested_rr_ratio FROM decision_log WHERE decision_id=?",
+        (did,),
+    ).fetchone()
+    assert row[0] == "WAITING_APPROVAL"
+    assert row[1] is not None and row[1] > 0     # suggested_notional
+    assert row[2] is not None and row[2] > 0     # suggested_stop_loss
+    assert row[3] is not None and row[3] > 0     # suggested_take_profit
+    assert row[4] is not None and row[4] > 0     # suggested_rr_ratio
+
+
+def test_handle_entry_supervised_mode_dedup_guard_blocks_duplicate(db, monkeypatch):
+    """A symbol whose signal keeps firing every cycle must not spam a second
+    pending approval on top of one a human hasn't acted on yet."""
+    import bot._main_cycle as _mc
+    monkeypatch.setattr(_mc, "DECISION_MODE", "SUPERVISED")
+    from database.services.decision_service import create_decision
+    first_id = create_decision(db, "AAPL", 100.0, 10000.0)
+    _handle_entry(db, client=None, risk=_AlwaysApproveRisk(), symbol="AAPL",
+                  ctx=_gate_passing_ctx(decision_id=first_id))
+    assert db.execute(
+        "SELECT decision_status FROM decision_log WHERE decision_id=?", (first_id,)
+    ).fetchone()[0] == "WAITING_APPROVAL"
+
+    second_id = create_decision(db, "AAPL", 101.0, 10000.0)
+    _handle_entry(db, client=None, risk=_AlwaysApproveRisk(), symbol="AAPL",
+                  ctx=_gate_passing_ctx(decision_id=second_id))
+    row = db.execute(
+        "SELECT decision_status, gate_reason FROM decision_log WHERE decision_id=?", (second_id,)
+    ).fetchone()
+    assert row[0] == "SYSTEM_BLOCKED"
+    assert "already awaiting" in row[1]
+    # the first decision must be untouched, not silently overwritten
+    assert db.execute(
+        "SELECT decision_status FROM decision_log WHERE decision_id=?", (first_id,)
+    ).fetchone()[0] == "WAITING_APPROVAL"
+
+
+def test_handle_entry_autonomous_mode_still_approves_and_attempts_buy(db):
+    """DECISION_MODE defaults to AUTONOMOUS — confirms the SUPERVISED addition
+    didn't disturb the existing approve-then-buy path (client=None makes the
+    buy attempt itself a no-op; only the pre-buy approval matters here)."""
+    from database.services.decision_service import create_decision
+
+    class _NoBuyClient:
+        def buy(self, symbol, notional, limit_price=None):
+            return None  # simulates an order that never got placed
+
+    did = create_decision(db, "AAPL", 100.0, 10000.0)
+    ctx = _gate_passing_ctx(decision_id=did)
+    _handle_entry(db, client=_NoBuyClient(), risk=_AlwaysApproveRisk(), symbol="AAPL", ctx=ctx)
+    row = db.execute(
+        "SELECT decision_status, execution_status FROM decision_log WHERE decision_id=?", (did,),
+    ).fetchone()
+    assert row[0] == "APPROVED"          # system-approved before the buy attempt
+    assert row[1] == "NOT_EXECUTED"      # buy never filled, so still not executed
+
+
+# --- _execute_approved_decisions (Phase 4 supervised resumption) ---
+
+class _FakeExecClient:
+    def __init__(self, price=105.0):
+        self.price = price
+        self.buy_calls = []
+
+    def get_latest_price(self, symbol):
+        return self.price
+
+    def buy(self, symbol, notional, limit_price=None):
+        self.buy_calls.append((symbol, notional, limit_price))
+        return {"order_id": "exec-1"}
+
+    def wait_for_fill(self, order_id, timeout_secs=15):
+        return 10.0
+
+    def get_fill_price(self, order_id):
+        return self.price
+
+
+def test_execute_approved_decisions_places_order_and_marks_executed(db):
+    from database.services.decision_service import create_decision, mark_waiting_approval, approve_decision
+    did = create_decision(db, "AAPL", 100.0, 10000.0)
+    mark_waiting_approval(db, did, suggested_notional=1000.0, suggested_stop_loss=0.04,
+                          suggested_take_profit=0.08, suggested_rr_ratio=2.0)
+    approve_decision(db, did, approved_by="user")
+
+    client = _FakeExecClient(price=105.0)
+    remaining_cash = _execute_approved_decisions(
+        db, client, positions={}, available_cash=5000.0, portfolio_value=10000.0,
+        buy_order_syms=set(),
+    )
+
+    assert client.buy_calls == [("AAPL", 1000.0, 105.0)]
+    assert remaining_cash == pytest.approx(4000.0)
+    row = db.execute(
+        "SELECT execution_status, trade_id FROM decision_log WHERE decision_id=?", (did,),
+    ).fetchone()
+    assert row[0] == "EXECUTED"
+    assert row[1] is not None
+    trade = db.execute(
+        "SELECT symbol, action, price, notional FROM trades WHERE id=?", (row[1],),
+    ).fetchone()
+    assert trade == ("AAPL", "BUY", 105.0, 1000.0)
+
+
+def test_execute_approved_decisions_skips_symbol_already_held(db):
+    from database.services.decision_service import create_decision, mark_waiting_approval, approve_decision
+    did = create_decision(db, "AAPL", 100.0, 10000.0)
+    mark_waiting_approval(db, did, suggested_notional=1000.0)
+    approve_decision(db, did, approved_by="user")
+
+    client = _FakeExecClient()
+    _execute_approved_decisions(
+        db, client, positions={"AAPL": object()}, available_cash=5000.0,
+        portfolio_value=10000.0, buy_order_syms=set(),
+    )
+    assert client.buy_calls == []
+    status = db.execute(
+        "SELECT execution_status FROM decision_log WHERE decision_id=?", (did,),
+    ).fetchone()[0]
+    assert status == "NOT_EXECUTED"  # left alone, not silently dropped
+
+
+def test_execute_approved_decisions_skips_when_cash_reserve_would_be_breached(db):
+    from database.services.decision_service import create_decision, mark_waiting_approval, approve_decision
+    did = create_decision(db, "AAPL", 100.0, 10000.0)
+    mark_waiting_approval(db, did, suggested_notional=4000.0)
+    approve_decision(db, did, approved_by="user")
+
+    client = _FakeExecClient()
+    remaining_cash = _execute_approved_decisions(
+        db, client, positions={}, available_cash=100.0,  # far too little cash
+        portfolio_value=10000.0, buy_order_syms=set(),
+    )
+    assert client.buy_calls == []
+    assert remaining_cash == 100.0
+
+
+def test_execute_approved_decisions_expires_stale_ones_first(db):
+    from database.services.decision_service import create_decision, mark_waiting_approval, approve_decision
+    did = create_decision(db, "AAPL", 100.0, 10000.0)
+    mark_waiting_approval(db, did, suggested_notional=1000.0)
+    approve_decision(db, did, approved_by="user")
+    db.execute("UPDATE decision_log SET decision_date='2020-01-01' WHERE decision_id=?", (did,))
+    db.commit()
+
+    client = _FakeExecClient()
+    _execute_approved_decisions(
+        db, client, positions={}, available_cash=5000.0,
+        portfolio_value=10000.0, buy_order_syms=set(),
+    )
+    assert client.buy_calls == []  # expired, not executed on a stale price
+    status = db.execute(
+        "SELECT execution_status, decision_status FROM decision_log WHERE decision_id=?", (did,),
+    ).fetchone()
+    assert status == ("NOT_EXECUTED", "EXPIRED")
 
 
 def test_signal_sell_completes_linked_decision(db):

@@ -87,6 +87,10 @@ def init_db(db_path: str = TRADE_DB_PATH) -> sqlite3.Connection:
     con.execute("""CREATE TABLE IF NOT EXISTS position_state (
         symbol TEXT PRIMARY KEY, entry_price REAL,
         high_water_mark REAL, atr_at_entry REAL, opened_at TEXT)""")
+    try:
+        con.execute("ALTER TABLE position_state ADD COLUMN shares REAL DEFAULT 0.0")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     con.execute("""CREATE TABLE IF NOT EXISTS risk_state (
         key TEXT PRIMARY KEY, value TEXT, updated_at TEXT)""")
     con.execute("""CREATE TABLE IF NOT EXISTS earnings_cache (
@@ -170,6 +174,14 @@ def _init_v2_tables(con: sqlite3.Connection) -> None:
         "outcome_status TEXT DEFAULT 'UNKNOWN'",       # WIN/LOSS/NEUTRAL/UNKNOWN — never set at creation time
         "executed_at TEXT DEFAULT NULL",
         "outcome_known_at TEXT DEFAULT NULL",
+        # Phase 4 — Supervised Autonomy: gates already passed once at decision
+        # time, so a later human-approved resumption replays these instead of
+        # recomputing Kelly sizing / ATR stops against whatever the market
+        # looks like by then.
+        "suggested_notional REAL DEFAULT NULL",
+        "suggested_stop_loss REAL DEFAULT NULL",
+        "suggested_take_profit REAL DEFAULT NULL",
+        "suggested_rr_ratio REAL DEFAULT NULL",
     ):
         try:
             con.execute(f"ALTER TABLE decision_log ADD COLUMN {_dl_col}")

@@ -11,13 +11,40 @@ from dashboard.design_system import (
     CARD_PADDING, CARD_RADIUS,
     _section, _wrap,
 )
-from database.user_settings import get_all_settings
+from database.user_settings import get_all_settings, save_setting
 from dashboard.data import get_data, get_db_conn, DB_PATH, safe_query
 from bot.core.error_logger import safe_render, timed, log_exception
 import sqlite3
 
 _logger = logger
 _MIN_TRADES_FOR_INSIGHTS = 20
+
+
+def do_save_settings(
+    risk_tol: str, benchmark: str, max_pos: float, max_dd: float,
+    stop_loss: float, notif: bool,
+) -> tuple[str, str]:
+    """Settings-tab Save button action. Returns (refreshed_summary_html, status_html)."""
+    max_pos   = max(5.0,  min(50.0, max_pos))
+    max_dd    = max(5.0,  min(30.0, max_dd))
+    stop_loss = max(1.0,  min(15.0, stop_loss))
+    results = [
+        save_setting("risk_tolerance",        risk_tol),
+        save_setting("benchmark",             benchmark),
+        save_setting("max_position_pct",      str(round(max_pos   / 100, 4))),
+        save_setting("max_drawdown_pct",      str(round(max_dd    / 100, 4))),
+        save_setting("stop_loss_pct",         str(round(stop_loss / 100, 4))),
+        save_setting("notifications_enabled", "true" if notif else "false"),
+    ]
+    ok = all(results)
+    status = (
+        '<p style="color:#00c853;font-weight:600;margin:8px 0 0">'
+        '&#10003; Saved &mdash; active on next bot cycle</p>'
+        if ok else
+        '<p style="color:#ef4444;font-weight:600;margin:8px 0 0">'
+        '&#9888; Save failed &mdash; check application logs</p>'
+    )
+    return render_settings_summary(), status
 
 
 def render_settings_summary() -> str:
