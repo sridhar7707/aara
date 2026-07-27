@@ -249,9 +249,36 @@ def _refresh_cache() -> dict:
     result["win_count"]    = int((sells_mask & (df["pnl_pct"] > 0)).sum())
 
     last = df.iloc[-1]
-    _pv_known = pd.notna(last["portfolio_value"])
-    result["portfolio"]      = f"${last['portfolio_value']:,.2f}" if _pv_known else "&mdash;"
-    result["portfolio_value_raw"] = float(last["portfolio_value"]) if _pv_known else 0.0
+    _trade_pv = float(last["portfolio_value"]) if pd.notna(last["portfolio_value"]) else None
+    _trade_ts = last["timestamp"] if _trade_pv is not None else None
+
+    _snap_pv, _snap_ts = None, None
+    try:
+        with get_db_conn() as con:
+            snap = con.execute(
+                "SELECT portfolio_value, timestamp FROM portfolio_snapshots "
+                "ORDER BY timestamp DESC LIMIT 1"
+            ).fetchone()
+        if snap and snap[0]:
+            _snap_pv = float(snap[0])
+            _snap_ts = pd.to_datetime(snap[1], utc=True)
+    except Exception as exc:
+        logger.debug(f"_refresh_cache: portfolio_snapshots read: {exc}")
+
+    # Prefer whichever of (last trade, latest heartbeat snapshot) is more recent.
+    # A snapshot fires every ~5 min regardless of trading activity, so relying on
+    # the last trade's portfolio_value alone goes stale for as long as no BUY/SELL
+    # fires (e.g. a multi-day weekend lull shows a week-old figure as "current").
+    if _snap_pv is not None and (_trade_ts is None or _snap_ts > _trade_ts):
+        pv_raw = _snap_pv
+    elif _trade_pv is not None:
+        pv_raw = _trade_pv
+    else:
+        pv_raw = 0.0
+    _pv_known = _trade_pv is not None or _snap_pv is not None
+
+    result["portfolio"]           = f"${pv_raw:,.2f}" if _pv_known else "&mdash;"
+    result["portfolio_value_raw"] = pv_raw
     result["regime_raw"] = (str(last["regime"] or "Unknown")).replace("_", " ")
 
     try:
@@ -291,15 +318,6 @@ def _refresh_cache() -> dict:
     spy_prev = all_prices.get("SPY_prev", 0.0)
     result["spy_pct"] = (spy_cur / spy_prev - 1) * 100 if spy_prev > 0 else 0.0
 
-    try:
-        with get_db_conn() as con:
-            snap = con.execute(
-                "SELECT portfolio_value FROM portfolio_snapshots "
-                "ORDER BY timestamp DESC LIMIT 1"
-            ).fetchone()
-        pv_raw = float(snap[0]) if snap and snap[0] else float(last["portfolio_value"]) if pd.notna(last["portfolio_value"]) else 0.0
-    except Exception:
-        pv_raw = float(last["portfolio_value"]) if pd.notna(last["portfolio_value"]) else 0.0
     equity = sum(
         pos["shares"] * cur if cur > 0 else pos["invested"]
         for sym, pos in result["open_pos"].items()
