@@ -72,7 +72,7 @@ def _capital_stats() -> dict:
     realized = 0.0
     try:
         rows = safe_query(
-            "SELECT SUM(pnl_pct * notional / 100.0) FROM trades WHERE action LIKE 'SELL%' "
+            "SELECT SUM(pnl_pct * notional) FROM trades WHERE action LIKE 'SELL%' "
             "AND action != 'SELL_RECONCILE' AND pnl_pct IS NOT NULL AND notional IS NOT NULL", default=[])
         if rows and rows[0][0] is not None:
             realized = float(rows[0][0])
@@ -82,7 +82,7 @@ def _capital_stats() -> dict:
     best_sym, best_pnl = "&mdash;", 0.0
     worst_sym, worst_pnl = "&mdash;", 0.0
     try:
-        _base = ("SELECT symbol, pnl_pct * notional / 100.0 AS abs_pnl FROM trades WHERE action LIKE 'SELL%' "
+        _base = ("SELECT symbol, pnl_pct * notional AS abs_pnl FROM trades WHERE action LIKE 'SELL%' "
                  "AND action != 'SELL_RECONCILE' AND pnl_pct IS NOT NULL ORDER BY abs_pnl ")
         rows = safe_query(_base + "DESC LIMIT 1", default=[])
         if rows:
