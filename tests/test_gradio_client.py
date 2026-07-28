@@ -192,6 +192,7 @@ _SMOKE: list[tuple[str, str, str, dict]] = [
     ("attribution_by_model",     "dashboard.components.attribution",            "render_attribution_by_model",     {}),
     ("attribution_by_trade",     "dashboard.components.attribution",            "render_attribution_by_trade",     {}),
     ("confidence_calibration",   "dashboard.components.attribution",            "render_confidence_calibration",   {}),
+    ("counterfactual_analysis",  "dashboard.components.counterfactual",         "render_counterfactual_analysis",  {}),
     # Settings tab
     ("settings_summary",         "dashboard.components.settings",               "render_settings_summary",         {}),
     ("investor_profile",         "dashboard.components.settings",               "render_investor_profile",         {}),

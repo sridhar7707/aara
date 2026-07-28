@@ -137,6 +137,7 @@ TAB_SPECS: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("Attribution by holding shown",     "text=By Holding"),
             ("vs SPY column shown",              "text=vs SPY"),
             ("Confidence Calibration rendered",  "text=Confidence Calibration"),
+            ("Counterfactual Analysis rendered", "text=Counterfactual Analysis"),
             ("Investor view rendered",           "text=Investor"),
         ],
         4.0,

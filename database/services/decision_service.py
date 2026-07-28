@@ -289,3 +289,84 @@ def _spy_return_over_window(exit_iso: str, holding_days: int) -> float | None:
     except Exception as exc:
         _logger.debug(f"_spy_return_over_window: {exc}")
         return None
+
+
+_DEFAULT_COUNTERFACTUAL_WINDOW_DAYS = 10
+
+
+def list_rejected_decisions(con: sqlite3.Connection, limit: int = 200) -> list[dict]:
+    """Decisions that never became a trade -- blocked by a gate, rejected by a
+    human, or expired waiting on one. The raw material for counterfactual
+    analysis ("what happened to the ones we passed on?"). Most recent first."""
+    rows = con.execute(
+        "SELECT decision_id, symbol, decision_date, price_at_decision, gate_reason, "
+        "decision_status, ai_confidence, expected_holding_period "
+        "FROM decision_log WHERE decision_status IN ('SYSTEM_BLOCKED', 'USER_REJECTED', 'EXPIRED') "
+        "ORDER BY decision_id DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    keys = ["decision_id", "symbol", "decision_date", "price_at_decision", "gate_reason",
+            "decision_status", "ai_confidence", "expected_holding_period"]
+    return [dict(zip(keys, r)) for r in rows]
+
+
+def evaluate_rejected_decision(con: sqlite3.Connection, decision_id: int) -> dict:
+    """What actually happened to a rejected/blocked decision's symbol afterward --
+    read-only, writes nothing back to decision_log (same pattern as
+    evaluate_decision()). Uses expected_holding_period as the window if the
+    decision recorded one, else a fixed default. Returns forward_return=None
+    with an explanatory 'error' if the window hasn't closed yet or price
+    history isn't available -- never a partial/in-progress return, matching
+    the project's standing rule that outcomes aren't judged before their
+    window closes."""
+    row = con.execute(
+        "SELECT symbol, price_at_decision, decision_date, expected_holding_period, decision_status "
+        "FROM decision_log WHERE decision_id=?", (decision_id,),
+    ).fetchone()
+    if not row:
+        return {"decision_id": decision_id, "forward_return": None, "error": "no such decision"}
+    symbol, price_at_decision, decision_date, holding_period, status = row
+    if status not in ("SYSTEM_BLOCKED", "USER_REJECTED", "EXPIRED"):
+        return {"decision_id": decision_id, "forward_return": None,
+                "error": "decision was not rejected/blocked"}
+    if not price_at_decision or not decision_date:
+        return {"decision_id": decision_id, "forward_return": None,
+                "error": "no price recorded at decision time"}
+
+    window = holding_period or _DEFAULT_COUNTERFACTUAL_WINDOW_DAYS
+    start_date = datetime.datetime.fromisoformat(decision_date[:10]).date()
+    target_end = start_date + datetime.timedelta(days=window)
+    today = datetime.datetime.now(datetime.timezone.utc).date()
+    if target_end > today:
+        return {"decision_id": decision_id, "symbol": symbol, "forward_return": None,
+                "error": "window not yet complete"}
+
+    forward_return = _forward_return(symbol, start_date, target_end)
+    if forward_return is None:
+        return {"decision_id": decision_id, "symbol": symbol, "forward_return": None,
+                "error": "price history unavailable"}
+    return {"decision_id": decision_id, "symbol": symbol, "forward_return": forward_return,
+            "window_days": window, "error": None}
+
+
+def _forward_return(symbol: str, start_date: datetime.date, end_date: datetime.date) -> float | None:
+    """Symbol's price return from start_date to end_date. Self-contained
+    (doesn't import dashboard/), matching _spy_return_over_window()."""
+    try:
+        import yfinance as yf
+        hist = yf.Ticker(symbol).history(
+            start=start_date.isoformat(),
+            end=(end_date + datetime.timedelta(days=1)).isoformat(),
+        )
+        if hist is None or hist.empty or "Close" not in hist.columns:
+            return None
+        dates  = [d.date() if hasattr(d, "date") else d for d in hist.index]
+        closes = list(hist["Close"])
+        entry_px = next((closes[i] for i in range(len(dates)) if dates[i] >= start_date), None)
+        exit_px  = next((closes[i] for i in range(len(dates) - 1, -1, -1) if dates[i] <= end_date), None)
+        if not entry_px or not exit_px or entry_px <= 0:
+            return None
+        return float((exit_px - entry_px) / entry_px)
+    except Exception as exc:
+        _logger.debug(f"_forward_return({symbol}): {exc}")
+        return None

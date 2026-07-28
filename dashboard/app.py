@@ -93,6 +93,7 @@ from dashboard.components.attribution import (
     render_confidence_calibration, render_exit_attribution,
 )
 from dashboard.components.decision_quality import render_decision_quality_summary
+from dashboard.components.counterfactual import render_counterfactual_analysis
 from dashboard.components.trade_journal import render_trade_journal
 from dashboard.components.loss_explanation import render_loss_explanation
 from dashboard.components.pending_approvals import (
@@ -356,6 +357,9 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
         with gr.TabItem("📊 Performance"):
             decision_quality_out = registry.mount(
                 "decision_quality_out", gr.HTML(value=render_decision_quality_summary)
+            )
+            counterfactual_out = registry.mount(
+                "counterfactual_out", gr.HTML(value=render_counterfactual_analysis)
             )
             scorecard_out = registry.mount("scorecard_out", gr.HTML(value=""))
             metrics_out   = registry.mount("metrics_out",   gr.HTML(value=_ci["metrics"]))
