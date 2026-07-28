@@ -19,7 +19,8 @@ from loguru import logger
 
 import bot.monitor.telegram_bot as tg
 from bot.core.error_logger import log_exception
-from bot.execution.alpaca_client import AlpacaClient
+from bot.execution.base import Executor
+from bot.execution.factory import get_executor
 from bot.strategy.features import FEATURE_COLS
 from bot.strategy.regime_classifier import RegimeClassifier
 from bot.strategy.xgb_predictor import XGBPredictor
@@ -83,7 +84,7 @@ def _check_ml_versions() -> None:
         logger.debug(f"ML version check skipped: {_ve}")
 
 
-def end_of_day_summary(client: AlpacaClient | None = None) -> None:
+def end_of_day_summary(client: Executor | None = None) -> None:
     today_str = date.today().isoformat()
     _eod_sentinel     = Path(f"data/.eod_sent_{today_str}")
     _started_sentinel = Path(f"data/.trading_started_{today_str}")
@@ -101,7 +102,7 @@ def end_of_day_summary(client: AlpacaClient | None = None) -> None:
     import zoneinfo
     con    = init_db()
     if client is None:
-        client = AlpacaClient()
+        client = get_executor()
     today  = today_str
 
     trades_count = con.execute(
@@ -355,7 +356,7 @@ def run_loop(mode: str = "paper") -> None:
         except Exception as _ve:
             logger.warning(f"Could not validate model report: {_ve}")
 
-    client = AlpacaClient()
+    client = get_executor()
     if not _is_market_hours(client.api):
         logger.info("Market is closed at session start — nothing to trade.")
         tg._send("⚠️ <b>Trading Bot fired but market is closed</b>. Check cron schedule or holiday calendar.")

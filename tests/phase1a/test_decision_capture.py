@@ -213,13 +213,12 @@ def test_get_todays_candidate_event_id_survives_cache_reset(conn, reference_chai
 
 # ── record_decision_safe: fingerprint dedup deliberately not enforced yet ──
 
-def test_record_decision_safe_does_not_block_second_executed_decision(conn, reference_chain):
-    """Regression test for a real bug caught by code review: check_fingerprint
-    treats any EXECUTED decision as a blocking duplicate while decision_state
-    still reports it OPEN, but nothing writes decision_outcome_events until
-    Sprint 5 -- so calling it from record_decision_safe today would silently
-    block every symbol's second-ever EXECUTED write, forever. Confirms the
-    fix (not calling check_fingerprint yet) actually holds."""
+def test_record_decision_safe_blocks_second_executed_while_still_open(conn, reference_chain):
+    """As of Sprint 5, check_fingerprint IS enabled in record_decision_safe
+    (Sprint 3 deliberately disabled it -- see git history -- since nothing
+    wrote decision_outcome_events yet; Sprint 5 fixed that). A second
+    EXECUTED write for the same still-OPEN decision is now correctly
+    dropped (logged, not raised -- record_decision_safe is best-effort)."""
     from bot._main_trust_decisions import record_decision_safe
 
     kwargs = _decision_kwargs(reference_chain)
@@ -231,6 +230,46 @@ def test_record_decision_safe_does_not_block_second_executed_decision(conn, refe
             kwargs["risk_checks"], kwargs["final_confidence"], kwargs["intent"],
             kwargs["data_completeness"],
         )
+    count = conn.execute(
+        "SELECT COUNT(*) FROM decision_events WHERE asset=? AND event_type='EXECUTED'",
+        (kwargs["asset"],),
+    ).fetchone()[0]
+    assert count == 1
+
+
+def test_record_decision_safe_allows_second_executed_after_close(conn, reference_chain):
+    """The other half of the same guarantee: once the first decision closes
+    (decision_outcome_events written), a second EXECUTED write for the same
+    asset succeeds -- a legitimate re-entry, not a blocked duplicate."""
+    import bot.trust_ledger.outcomes as outcomes
+    from bot._main_trust_decisions import record_decision_safe
+
+    conn.execute(
+        "INSERT INTO cost_models (sequence_number, cost_model_id, spread_assumption, "
+        "slippage_assumption, commission_rules, tax_assumptions, created_at, record_hash, "
+        "previous_record_hash) VALUES (1,'cm1',0.001,0.001,'{}','{}','2026-07-28T00:00:00Z','"
+        + "0" * 64 + "','" + "0" * 64 + "')"
+    )
+    conn.commit()
+
+    kwargs = _decision_kwargs(reference_chain)
+    record_decision_safe(
+        conn, kwargs["candidate_event_id"], kwargs["deployment_manifest_id"],
+        kwargs["asset"], kwargs["action"], kwargs["event_type"],
+        kwargs["portfolio_snapshot"], kwargs["market_context"], kwargs["model_outputs"],
+        kwargs["risk_checks"], kwargs["final_confidence"], kwargs["intent"],
+        kwargs["data_completeness"],
+    )
+    decision_id = outcomes.find_open_buy_decision_id(conn, kwargs["asset"])
+    outcomes.write_decision_outcome_event(conn, kwargs["asset"], decision_id, "2026-07-28T15:00:00Z", 0.02, 5)
+
+    record_decision_safe(
+        conn, kwargs["candidate_event_id"], kwargs["deployment_manifest_id"],
+        kwargs["asset"], kwargs["action"], kwargs["event_type"],
+        kwargs["portfolio_snapshot"], kwargs["market_context"], kwargs["model_outputs"],
+        kwargs["risk_checks"], kwargs["final_confidence"], kwargs["intent"],
+        kwargs["data_completeness"],
+    )
     count = conn.execute(
         "SELECT COUNT(*) FROM decision_events WHERE asset=? AND event_type='EXECUTED'",
         (kwargs["asset"],),

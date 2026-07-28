@@ -79,6 +79,13 @@ class EntryContext:
     deployment_manifest_id: str | None = None
 
 
+def _last_gate_reason(con: sqlite3.Connection, decision_id: int | None) -> str:
+    if decision_id is None:
+        return "correlated with an existing held position"
+    row = con.execute("SELECT gate_reason FROM decision_log WHERE decision_id=?", (decision_id,)).fetchone()
+    return row[0] if row and row[0] else "correlated with an existing held position"
+
+
 def _handle_entry(
     con: sqlite3.Connection, client: AlpacaClient, risk: RiskManager,
     symbol: str, ctx: EntryContext,
@@ -144,10 +151,12 @@ def _handle_entry(
         recorder.reject("earnings_proximity", "earnings proximity")
         return available_cash
 
-    # Gate 7 — Correlation: avoid adding a position highly correlated with existing holdings
-    _corr_detail: dict = {}
-    if not _passes_correlation_gate(symbol, ctx.positions, ctx.bars_map, con, ctx.decision_id, _corr_detail):
-        recorder.reject("correlation", _corr_detail.get("reason", "correlated with an existing held position"))
+    # Gate 7 — Correlation: avoid adding a position highly correlated with existing holdings.
+    # The specific reason (coefficient + held symbol) is already written to
+    # decision_log.gate_reason by _passes_correlation_gate's own reject_decision
+    # call -- read it back rather than adding an out-param just for this one caller.
+    if not _passes_correlation_gate(symbol, ctx.positions, ctx.bars_map, con, ctx.decision_id):
+        recorder.reject("correlation", _last_gate_reason(con, ctx.decision_id))
         return available_cash
 
     # Gate 7.5 — Wash-sale guard (IRS IRC §1091): block re-buy within 30 days of a loss sale

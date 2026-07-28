@@ -17,6 +17,7 @@ from typing import Any
 from loguru import logger
 
 import bot.trust_ledger.decisions as decisions
+import bot.trust_ledger.outcomes as outcomes
 import bot.trust_ledger.risk as risk_ledger
 from bot.risk.risk_manager import RiskManager
 from bot.strategy.ensemble import ensemble_confidence
@@ -56,17 +57,15 @@ def record_decision_safe(
         )
         return
     try:
-        # check_fingerprint is NOT called here yet, deliberately: it treats any
-        # EXECUTED decision as a blocking duplicate while decision_state still
-        # reports it OPEN, and nothing writes decision_outcome_events until
-        # Sprint 5 -- calling it now would silently block every symbol's
-        # second-ever EXECUTED BUY/SELL, forever, not just genuine rapid-fire
-        # duplicates. The existing pipeline already prevents the real-world
-        # duplicate case structurally: _handle_exits() returns True (and its
-        # caller `continue`s) for any symbol still in `positions`, so a second
-        # BUY can't fire while the first is still held, and a second SELL
-        # can't fire once nothing is held. Re-enable this call once Sprint 5
-        # wires decision_outcome_events, so decision_state reflects real closes.
+        # Re-enabled in Sprint 5: ExitDecisionRecorder._record_outcome() now
+        # writes decision_outcome_events right after every successful SELL,
+        # so decision_state actually reflects real closes -- this no longer
+        # blocks every symbol's second-ever EXECUTED BUY/SELL forever, the
+        # way it would have if enabled back in Sprint 3 (see that commit).
+        if event_type == "EXECUTED":
+            decisions.check_fingerprint(
+                trust_conn, asset, action, override_reason=intent.get("override_reason"),
+            )
         decisions.write_decision_event(
             trust_conn, candidate_event_id, asset, action, event_type,
             portfolio_snapshot, market_context, model_outputs, risk_checks,
@@ -205,12 +204,32 @@ class ExitDecisionRecorder:
         self._kwargs = dict(portfolio_value=portfolio_value, current_price=current_price,
                             regime_name=regime_name)
 
-    def sell(self, success: bool, reason: str) -> None:
+    def sell(self, success: bool, reason: str, pnl_pct: float = 0.0, holding_days: int = 0) -> None:
         if success:
             record_exit_decision_safe(*self._args, "SELL", "EXECUTED", reason, **self._kwargs)
+            self._record_outcome(pnl_pct, holding_days)
         else:
             record_exit_decision_safe(*self._args, "REJECT", "QUALIFIED_REJECTION",
                                       f"{reason} sell order failed to fill", **self._kwargs)
+
+    def _record_outcome(self, pnl_pct: float, holding_days: int) -> None:
+        """Completes Transaction B's atomic pair for exits (decision_events
+        SELL + decision_outcome_events) -- this is what actually closes
+        decision_state from OPEN to CLOSED, and is why check_fingerprint
+        can safely be enabled now (Sprint 5), unlike Sprint 3."""
+        ledger_ctx, symbol = self._args
+        if ledger_ctx is None or ledger_ctx.trust_conn is None:
+            return
+        try:
+            decision_id = outcomes.find_open_buy_decision_id(ledger_ctx.trust_conn, symbol)
+            if decision_id is None:
+                logger.warning(f"trust ledger outcome write skipped for {symbol}: no OPEN BUY decision found")
+                return
+            outcomes.write_decision_outcome_event(
+                ledger_ctx.trust_conn, symbol, decision_id, _utc_now(), pnl_pct, holding_days,
+            )
+        except Exception as e:
+            logger.warning(f"trust ledger outcome write failed for {symbol}: {e}")
 
     def reject(self, reason: str) -> None:
         record_exit_decision_safe(*self._args, "REJECT", "QUALIFIED_REJECTION", reason, **self._kwargs)

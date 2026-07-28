@@ -27,7 +27,8 @@ from config import (
     MAX_SECTOR_EXPOSURE_PCT, MAX_POSITION_DRIFT_PCT, MIN_CASH_RESERVE_PCT,
     MAX_POSITION_PCT, SECTOR_MAP,
 )
-from bot.execution.alpaca_client import AlpacaClient
+from bot.execution.base import Executor
+from bot.execution.factory import get_executor
 from bot.strategy.features import compute_features, FEATURE_COLS
 from bot.strategy.regime_classifier import RegimeClassifier
 from bot.strategy.xgb_predictor import XGBPredictor
@@ -114,7 +115,7 @@ def run(
     _regime_clf: RegimeClassifier | None = None,
     _xgb: XGBPredictor | None = None,
     _lstm: LSTMPredictor | None = None,
-    _client: AlpacaClient | None = None,
+    _client: Executor | None = None,
 ) -> None:
     logger.info(f"=== Trading cycle start | mode={mode} ===")
 
@@ -129,7 +130,7 @@ def run(
     if _stop_fired_date != today_str:
         _stop_fired_today = set()
         _stop_fired_date = today_str
-    client = _client if _client is not None else AlpacaClient()
+    client = _client if _client is not None else get_executor()
     if not _is_market_hours(client.api):
         logger.info("Market is closed — cycle skipped (no trades, no DB write). "
                     "Dashboard will keep showing the last synced values.")

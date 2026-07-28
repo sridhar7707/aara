@@ -58,6 +58,12 @@ def chain(ledger_conn):
         "INSERT INTO deployment_manifests VALUES "
         "('mani_v1','{\"xgboost\":\"run1\"}','risk_v1','strat_v1','fp_v1','{}','2026-07-28T00:00:00Z')"
     )
+    ledger_conn.execute(
+        "INSERT INTO cost_models (sequence_number, cost_model_id, spread_assumption, "
+        "slippage_assumption, commission_rules, tax_assumptions, created_at, record_hash, "
+        "previous_record_hash) VALUES (1,'cost_model_v1',0.001,0.001,'{}','{}',"
+        "'2026-07-28T00:00:00Z','" + "0" * 64 + "','" + "0" * 64 + "')"
+    )
     ledger_conn.commit()
     row = candidates.record_candidate_evaluation_if_concluded(
         ledger_conn, "AAPL", "2026-07-28", {}, data_available=True,
@@ -304,3 +310,57 @@ def test_handle_exits_none_ledger_ctx_is_noop(trades_db):
         stop_fired_today=set(),
     )
     assert result is True  # no exception, no ledger write attempted
+
+
+def test_full_buy_then_sell_writes_outcome_event_and_closes_decision_state(
+    trades_db, ledger_conn, chain,
+):
+    """Phase 1A Sprint 5 end-to-end: a real BUY through _handle_entry,
+    followed by a real SELL through _handle_exits, produces a
+    decision_outcome_events row referencing the ORIGINAL BUY's decision_id
+    (not the SELL's) and flips decision_state from OPEN to CLOSED."""
+    from database.services.decision_service import create_decision
+
+    did = create_decision(trades_db, "AAPL", 100.0, 10000.0)
+    entry_ctx = _minimal_entry_ctx(
+        ledger_conn, chain, decision_id=did, current_atr=2.0, xgb=_FakeXgb(),
+        tradeable_capital=5000.0, available_cash=5000.0, portfolio_value=10000.0,
+    )
+    _handle_entry(trades_db, client=_FakeFillClient(), risk=_AlwaysApproveRisk(), symbol="AAPL", ctx=entry_ctx)
+
+    buy_row = ledger_conn.execute(
+        "SELECT decision_id FROM decision_events WHERE asset='AAPL' AND action='BUY' "
+        "ORDER BY sequence_number DESC LIMIT 1"
+    ).fetchone()
+    assert buy_row is not None
+    buy_decision_id = buy_row[0]
+    assert ledger_conn.execute(
+        "SELECT outcome_state FROM decision_state WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == "OPEN"
+
+    class _FakeSellClient:
+        def sell(self, symbol, qty, limit_price=None):
+            return {"order_id": "ord-sell-1"}
+
+        def wait_for_fill(self, order_id, timeout_secs=12):
+            return qty_sold
+
+    qty_sold = 1.0
+    positions = {"AAPL": _FakePosition(avg_entry_price=100.0, qty=qty_sold, unrealized_plpc=0.05)}
+    _handle_exits(
+        trades_db, client=_FakeSellClient(), risk=_NeverExitRisk(), symbol="AAPL", positions=positions,
+        sell_order_syms=set(), current_price=105.0, current_atr=0.0,
+        regime_name="TRENDING_UP", portfolio_value=10000.0, action=2, pdt_exempt=True,
+        stop_fired_today=set(), ledger_ctx=_exit_ledger_ctx(ledger_conn, chain),
+    )
+
+    outcome = ledger_conn.execute(
+        "SELECT decision_id, gross_return FROM decision_outcome_events WHERE decision_id=?",
+        (buy_decision_id,),
+    ).fetchone()
+    assert outcome is not None
+    assert outcome[0] == buy_decision_id
+    assert outcome[1] == 0.05
+    assert ledger_conn.execute(
+        "SELECT outcome_state FROM decision_state WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == "CLOSED"

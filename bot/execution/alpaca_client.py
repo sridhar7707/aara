@@ -1,5 +1,4 @@
 from __future__ import annotations
-import re
 import time
 from typing import Any, Callable, TypeVar
 
@@ -8,12 +7,12 @@ from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest, GetOr
 from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus, OrderStatus
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestBarRequest, StockBarsRequest
-from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 import pandas as pd
 from loguru import logger
 from config import ALPACA_KEY, ALPACA_SECRET, ALPACA_BASE_URL
 from bot.core.api_guard import call_with_retry
+from bot.execution.timeframe import parse_timeframe as _parse_timeframe
 
 _T = TypeVar("_T")
 
@@ -26,25 +25,6 @@ _ENDED_STATUSES = {
     OrderStatus.CANCELED.value, OrderStatus.EXPIRED.value,
     OrderStatus.REJECTED.value, OrderStatus.DONE_FOR_DAY.value,
 }
-
-_TIMEFRAME_UNITS = {
-    "min": TimeFrameUnit.Minute, "minute": TimeFrameUnit.Minute,
-    "hour": TimeFrameUnit.Hour, "day": TimeFrameUnit.Day,
-    "week": TimeFrameUnit.Week, "month": TimeFrameUnit.Month,
-}
-
-
-def _parse_timeframe(spec: str) -> TimeFrame:
-    """Parse strings like '5Min', '1Hour', '1Day' into a TimeFrame."""
-    m = re.match(r"(\d+)([A-Za-z]+)", spec)
-    if not m:
-        raise ValueError(f"Unrecognized timeframe: {spec!r}")
-    amount, unit_str = int(m.group(1)), m.group(2).lower()
-    unit = _TIMEFRAME_UNITS.get(unit_str)
-    if unit is None:
-        raise ValueError(f"Unrecognized timeframe unit: {unit_str!r}")
-    return TimeFrame(amount, unit)
-
 
 class AlpacaClient:
     def __init__(self):

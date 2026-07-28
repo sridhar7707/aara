@@ -94,6 +94,11 @@ def _prefetch_sentiment() -> None:
 
 
 def _verify_broker() -> None:
+    # Deliberately AlpacaClient directly, not get_executor(): this specifically
+    # verifies the real Alpaca connection/credentials at startup. Swapping in
+    # get_executor() would make the check pass under EXECUTION_BACKEND=
+    # paper_ledger even with broken Alpaca credentials, since PaperExecutor's
+    # get_account() never calls Alpaca's trading API at all.
     from bot.execution.alpaca_client import AlpacaClient
     client = AlpacaClient()
     acct = client.get_account()

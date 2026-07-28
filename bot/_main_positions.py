@@ -83,13 +83,8 @@ def _delete_position_state(con: sqlite3.Connection, symbol: str) -> None:
 
 def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, BarData],
                               con: sqlite3.Connection | None = None,
-                              decision_id: int | None = None,
-                              detail_out: dict | None = None) -> bool:
-    """Block buy if any held position has > CORRELATION_THRESHOLD daily-return correlation.
-    detail_out (optional): if given, filled with {"reason": ...} on rejection --
-    lets a caller retrieve the specific reason without changing this
-    function's bool return type (would break existing direct-return-value
-    tests/callers)."""
+                              decision_id: int | None = None) -> bool:
+    """Block buy if any held position has > CORRELATION_THRESHOLD daily-return correlation."""
     def _resolve(bd: BarData | None) -> pd.DataFrame | None:
         if bd is None:
             return None
@@ -120,8 +115,6 @@ def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, B
             if con is not None and decision_id is not None:
                 from database.services.decision_service import reject_decision
                 reject_decision(con, decision_id, rejected_by="system", reason=_reason)
-            if detail_out is not None:
-                detail_out["reason"] = _reason
             return False
     return True
 
@@ -397,9 +390,9 @@ def _handle_exits(
                 _pool_sell(con, pool.id, cost_basis, pos_qty * current_price, symbol=symbol)
             _delete_position_state(con, symbol)
             _maybe_record_day_trade(con, risk, symbol, True, pdt_exempt=pdt_exempt)
-            _rec.sell(True, "gap-down")
+            _rec.sell(True, "gap-down", pnl_pct=pnl_pct, holding_days=holding_days)
         else:
-            _rec.sell(False, "gap-down")
+            _rec.sell(False, "gap-down", pnl_pct=pnl_pct, holding_days=holding_days)
         return True
 
     if pos_state:
@@ -422,7 +415,7 @@ def _handle_exits(
                 holding_days=holding_days, pool=pool,
             )
             _maybe_record_day_trade(con, risk, symbol, success, pdt_exempt=pdt_exempt)
-            _rec.sell(success, "take-profit")
+            _rec.sell(success, "take-profit", pnl_pct=pnl_pct, holding_days=holding_days)
             return True
 
     # ② ATR stop-loss
@@ -439,7 +432,7 @@ def _handle_exits(
         if success:
             stop_fired_today.add(symbol)
         _maybe_record_day_trade(con, risk, symbol, success, pdt_exempt=pdt_exempt)
-        _rec.sell(success, "stop-loss")
+        _rec.sell(success, "stop-loss", pnl_pct=pnl_pct, holding_days=holding_days)
         return True
 
     # ③ Trailing stop (armed after 3% gain)
@@ -454,7 +447,7 @@ def _handle_exits(
         if success:
             stop_fired_today.add(symbol)
         _maybe_record_day_trade(con, risk, symbol, success, pdt_exempt=pdt_exempt)
-        _rec.sell(success, "trailing-stop")
+        _rec.sell(success, "trailing-stop", pnl_pct=pnl_pct, holding_days=holding_days)
         return True
 
     # ④ Drift trim — partial sell if position has grown above MAX_POSITION_DRIFT_PCT
@@ -470,7 +463,7 @@ def _handle_exits(
                 )
                 _trimmed = _trim_position(con, client, symbol, round(trim_qty, 3), current_price,
                                           regime_name, portfolio_value, pnl_pct, entry_price, pool=pool)
-                _rec.sell(_trimmed, "drift-trim")
+                _rec.sell(_trimmed, "drift-trim", pnl_pct=pnl_pct, holding_days=holding_days)
                 return True
 
     # ⑤ Time-based forced exit
@@ -482,7 +475,7 @@ def _handle_exits(
             holding_days=holding_days, pool=pool,
         )
         _maybe_record_day_trade(con, risk, symbol, success, pdt_exempt=pdt_exempt)
-        _rec.sell(success, "time-exit")
+        _rec.sell(success, "time-exit", pnl_pct=pnl_pct, holding_days=holding_days)
         return True
 
     # ⑥ Ensemble sell signal
@@ -501,7 +494,7 @@ def _handle_exits(
             if success and is_day_trade and not pdt_exempt:
                 risk.record_day_trade()
                 _save_risk_state(con, risk)
-            _rec.sell(success, "signal")
+            _rec.sell(success, "signal", pnl_pct=pnl_pct, holding_days=holding_days)
     else:
         _rec.hold()
     return True
