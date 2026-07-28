@@ -469,6 +469,28 @@ def test_decision_events_allows_completed_evaluation(conn, reference_chain):
     assert row["decision_id"] == "DEC-OK"
 
 
+# ── recommended vs actual position size (v1.5) ───────────────────────────────
+
+def test_risk_evaluation_event_records_recommended_and_actual_position_size(conn):
+    """v1.5: recommended_position_size (what the Risk Governor would apply)
+    and actual_position_size (what happened to the account) are independent
+    fields -- Observation Mode graduation (FR-1.10a) depends on comparing
+    them, and they differ by design throughout Observation Mode."""
+    row = ledger.append_ledger_row(conn, "risk_evaluation_events", {
+        "event_id": "RISK-OBS-1", "timestamp": "2026-07-28T00:00:00Z",
+        "from_state": "OBSERVATION", "to_state": "OBSERVATION", "trigger_reason": "scheduled_check",
+        "validation_mode": "NATURAL", "replay_scenario_id": None,
+        "recommended_position_size": 0.02, "actual_position_size": 0.05,
+    })
+    stored = conn.execute(
+        "SELECT recommended_position_size, actual_position_size FROM risk_evaluation_events "
+        "WHERE event_id='RISK-OBS-1'"
+    ).fetchone()
+    assert stored == (0.02, 0.05)
+    assert row["recommended_position_size"] == 0.02
+    assert row["actual_position_size"] == 0.05
+
+
 # ── 6. Reproducibility reconstruction ─────────────────────────────────────────
 
 def test_reproducibility_reconstruction_complete(conn, reference_chain):

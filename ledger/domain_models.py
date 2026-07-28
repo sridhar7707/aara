@@ -76,7 +76,8 @@ class RiskEvaluationEvent:
     trigger_reason: str
     validation_mode: str             # NATURAL / REPLAY_FORCED
     replay_scenario_id: str | None = None
-    position_sizing_applied: float | None = None
+    recommended_position_size: float | None = None   # v1.5: what the Risk Governor would apply
+    actual_position_size: float | None = None         # v1.5: what actually happened to the account
 
 
 @dataclasses.dataclass

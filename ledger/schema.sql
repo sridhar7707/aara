@@ -1,5 +1,10 @@
 -- Phase 0 Decision Intelligence Foundation schema.
--- Implements docs/architecture/phase0_data_model.md v1.4, Section 5.
+-- Implements docs/architecture/phase0_data_model.md v1.5, Section 5.
+--
+-- v1.5 (post-freeze exception, phase0_decisions.md #16): risk_evaluation_events
+-- .position_sizing_applied split into recommended_position_size + actual_position_size --
+-- one field couldn't hold both "what the governor would have done" and "what
+-- actually happened," which differ by design throughout Observation Mode (FR-1.10a).
 --
 -- 15 tables total: 7 Immutable Trust Ledger (Group A, hash-chained,
 -- append-only, zero exceptions as of v1.2) + 5 Versioned Reference Records
@@ -165,7 +170,14 @@ CREATE TABLE IF NOT EXISTS risk_evaluation_events (
     trigger_reason           TEXT NOT NULL,
     validation_mode          TEXT NOT NULL,    -- NATURAL / REPLAY_FORCED
     replay_scenario_id       TEXT,             -- nullable
-    position_sizing_applied  REAL,             -- nullable (null while in OBSERVATION)
+    recommended_position_size REAL,            -- nullable, v1.5: what the Risk Governor
+                                                -- computed it *would* apply -- populated even
+                                                -- in OBSERVATION/NORMAL, since Observation
+                                                -- Mode exists to compare this against
+                                                -- actual_position_size after the fact
+    actual_position_size     REAL,             -- nullable, v1.5: what actually happened to
+                                                -- the account -- typically equals pre-governor
+                                                -- sizing during Observation Mode (FR-1.10a)
     record_hash              TEXT NOT NULL,
     previous_record_hash     TEXT NOT NULL
 );
