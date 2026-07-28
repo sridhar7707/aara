@@ -145,10 +145,9 @@ def _handle_entry(
         return available_cash
 
     # Gate 7 — Correlation: avoid adding a position highly correlated with existing holdings
-    # (reason text stays inside _passes_correlation_gate, which already calls
-    # reject_decision itself -- not duplicated here, just the ledger write)
-    if not _passes_correlation_gate(symbol, ctx.positions, ctx.bars_map, con, ctx.decision_id):
-        recorder.reject("correlation", "correlated with an existing held position")
+    _corr_detail: dict = {}
+    if not _passes_correlation_gate(symbol, ctx.positions, ctx.bars_map, con, ctx.decision_id, _corr_detail):
+        recorder.reject("correlation", _corr_detail.get("reason", "correlated with an existing held position"))
         return available_cash
 
     # Gate 7.5 — Wash-sale guard (IRS IRC §1091): block re-buy within 30 days of a loss sale
@@ -312,8 +311,8 @@ def _handle_entry(
                     f"({slippage_bps:+.1f} bps vs limit ${ctx.current_price:.2f})"
                 )
             fill_shares = notional / fill_price
-            recorder.record_executed(notional, fill_price, fill_shares)
             _drivers = ctx.xgb.explain(ctx.latest)
+            recorder.record_executed(notional, fill_price, fill_shares, xgb_drivers=_drivers)
             _sent_s = ctx.sentiments.get(symbol, 0.0)
             _ens_score = ensemble_confidence(ctx.xgb_prob, ctx.lstm_prob, _sent_s, ctx.macro_score)
             _sym_sector_tg = SECTOR_MAP.get(symbol, "")

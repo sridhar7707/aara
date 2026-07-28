@@ -209,3 +209,30 @@ def test_get_todays_candidate_event_id_survives_cache_reset(conn, reference_chai
     candidates._recorded_today.clear()  # simulate fresh process
     found = candidates.get_todays_candidate_event_id(conn, "AAPL", "2026-07-28")
     assert found == reference_chain["candidate_event_id"]
+
+
+# ── record_decision_safe: fingerprint dedup deliberately not enforced yet ──
+
+def test_record_decision_safe_does_not_block_second_executed_decision(conn, reference_chain):
+    """Regression test for a real bug caught by code review: check_fingerprint
+    treats any EXECUTED decision as a blocking duplicate while decision_state
+    still reports it OPEN, but nothing writes decision_outcome_events until
+    Sprint 5 -- so calling it from record_decision_safe today would silently
+    block every symbol's second-ever EXECUTED write, forever. Confirms the
+    fix (not calling check_fingerprint yet) actually holds."""
+    from bot._main_trust_decisions import record_decision_safe
+
+    kwargs = _decision_kwargs(reference_chain)
+    for _ in range(2):
+        record_decision_safe(
+            conn, kwargs["candidate_event_id"], kwargs["deployment_manifest_id"],
+            kwargs["asset"], kwargs["action"], kwargs["event_type"],
+            kwargs["portfolio_snapshot"], kwargs["market_context"], kwargs["model_outputs"],
+            kwargs["risk_checks"], kwargs["final_confidence"], kwargs["intent"],
+            kwargs["data_completeness"],
+        )
+    count = conn.execute(
+        "SELECT COUNT(*) FROM decision_events WHERE asset=? AND event_type='EXECUTED'",
+        (kwargs["asset"],),
+    ).fetchone()[0]
+    assert count == 2

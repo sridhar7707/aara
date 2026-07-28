@@ -54,10 +54,17 @@ def record_decision_safe(
         )
         return
     try:
-        if event_type == "EXECUTED":
-            decisions.check_fingerprint(
-                trust_conn, asset, action, override_reason=intent.get("override_reason"),
-            )
+        # check_fingerprint is NOT called here yet, deliberately: it treats any
+        # EXECUTED decision as a blocking duplicate while decision_state still
+        # reports it OPEN, and nothing writes decision_outcome_events until
+        # Sprint 5 -- calling it now would silently block every symbol's
+        # second-ever EXECUTED BUY/SELL, forever, not just genuine rapid-fire
+        # duplicates. The existing pipeline already prevents the real-world
+        # duplicate case structurally: _handle_exits() returns True (and its
+        # caller `continue`s) for any symbol still in `positions`, so a second
+        # BUY can't fire while the first is still held, and a second SELL
+        # can't fire once nothing is held. Re-enable this call once Sprint 5
+        # wires decision_outcome_events, so decision_state reflects real closes.
         decisions.write_decision_event(
             trust_conn, candidate_event_id, asset, action, event_type,
             portfolio_snapshot, market_context, model_outputs, risk_checks,
@@ -116,12 +123,25 @@ class EntryDecisionRecorder:
             decisions.build_intent("REJECT"), self.data_completeness,
         )
 
-    def record_executed(self, notional: float, fill_price: float, fill_shares: float) -> None:
+    def record_executed(
+        self, notional: float, fill_price: float, fill_shares: float, xgb_drivers: list | None = None,
+    ) -> None:
+        """xgb_drivers: XGBPredictor.explain()'s SHAP output, if the caller
+        has it available -- rebuilds model_outputs with it rather than
+        reusing the __init__-time version (which never has drivers, since
+        computing them for every rejected gate would be wasted SHAP calls)."""
         self.trace.append({"gate": "all_entry_gates", "passed": True, "detail": "all gates passed"})
+        model_outputs = self.model_outputs
+        if xgb_drivers:
+            model_outputs = dict(self.model_outputs)
+            model_outputs["xgboost"] = dict(model_outputs["xgboost"])
+            model_outputs["xgboost"]["metadata"] = {
+                "shap_drivers": [{"feature": str(f), "shap_value": float(v)} for f, v in xgb_drivers]
+            }
         record_decision_safe(
             self.trust_conn, self.candidate_event_id, self.deployment_manifest_id,
             self.symbol, "BUY", "EXECUTED",
-            self.portfolio_snapshot, self.market_context, self.model_outputs,
+            self.portfolio_snapshot, self.market_context, model_outputs,
             {"gate_trace": self.trace, "notional": notional, "fill_price": fill_price,
              "fill_shares": fill_shares},
             self.final_confidence,

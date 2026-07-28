@@ -142,12 +142,67 @@ def test_handle_entry_executed_buy_writes_executed_decision(trades_db, ledger_co
 
     row = _latest_decision(ledger_conn, "AAPL")
     assert row is not None
-    _, action, event_type, risk_checks, _ = row
+    _, action, event_type, risk_checks, model_outputs = row
     assert action == "BUY"
     assert event_type == "EXECUTED"
     trace_payload = json.loads(risk_checks)
     assert trace_payload["notional"] > 0
     assert trace_payload["fill_price"] == 100.0
+    # Regression: record_executed() used to reuse the __init__-time
+    # model_outputs, which never has SHAP drivers (computing them for
+    # every rejected gate would waste SHAP calls) -- an EXECUTED buy must
+    # carry the real drivers computed just before the fill, not an empty list.
+    outputs = json.loads(model_outputs)
+    assert outputs["xgboost"]["metadata"]["shap_drivers"] == [{"feature": "rsi", "shap_value": 0.1}]
+
+
+def test_handle_entry_correlation_gate_carries_specific_reason(trades_db, ledger_conn, chain):
+    """Regression: the correlation gate used to write a generic placeholder
+    ('correlated with an existing held position') to the ledger instead of
+    the specific coefficient/symbol _passes_correlation_gate already
+    computes -- every other gate carries its real computed detail."""
+    import pandas as pd
+    from database.services.decision_service import create_decision
+    from bot._main_positions import BarData
+
+    dates = pd.date_range("2026-01-01", periods=30, freq="D")
+    aapl_bars = pd.DataFrame({"close": [100 + i for i in range(30)]}, index=dates)
+    msft_bars = pd.DataFrame({"close": [200 + i for i in range(30)]}, index=dates)  # perfectly correlated
+
+    class _FakePosition:
+        market_value = 1000.0
+
+    did = create_decision(trades_db, "AAPL", 100.0, 10000.0)
+    ctx = _minimal_entry_ctx(
+        ledger_conn, chain, decision_id=did,
+        positions={"MSFT": _FakePosition()},
+        bars_map={"AAPL": BarData(pd.DataFrame(), aapl_bars), "MSFT": BarData(pd.DataFrame(), msft_bars)},
+    )
+
+    _handle_entry(trades_db, client=None, risk=None, symbol="AAPL", ctx=ctx)
+
+    row = _latest_decision(ledger_conn, "AAPL")
+    assert row is not None
+    trace = json.loads(row[3])["gate_trace"]
+    assert trace[-1]["gate"] == "correlation"
+    assert "correlation with held MSFT" in trace[-1]["detail"]
+
+
+def test_bot_main_passes_ledger_ctx_to_handle_exits():
+    """Regression test for a real bug caught by code review: bot/main.py's
+    production call to _handle_exits() previously omitted ledger_ctx
+    entirely, so every exit-side write (7 branches, all individually unit-
+    and integration-tested) was silently dead in production. A full
+    bot/main.py::run() mock is disproportionate (needs a mocked Alpaca
+    account and full market-data pipeline) -- this cheap source check
+    guards against the same class of regression recurring."""
+    import inspect
+    import bot.main as main_mod
+
+    source = inspect.getsource(main_mod.run)
+    call_start = source.index("_handle_exits(")
+    call_text = source[call_start:source.index("\n\n", call_start)]
+    assert "ledger_ctx=" in call_text
 
 
 def test_handle_entry_order_never_fills_writes_qualified_rejection(trades_db, ledger_conn, chain):

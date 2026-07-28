@@ -93,6 +93,7 @@ from bot.trust_ledger.connection import get_ledger_conn
 from bot.trust_ledger.candidates import get_todays_candidate_event_id
 from ledger.integrity import get_active_pointer
 from bot._main_candidates import record_candidate_safe
+from bot._main_trust_decisions import ExitLedgerContext
 
 os.makedirs("logs", exist_ok=True)
 if not os.getenv("_BOT_LOG_HANDLER_ADDED"):
@@ -372,9 +373,16 @@ def run(
                         xgb_prob, lstm_prob, _ens_score, macro_score,
                     )
 
+            _exit_ledger_ctx = ExitLedgerContext(
+                trust_conn=trust_conn,
+                candidate_event_id=get_todays_candidate_event_id(trust_conn, symbol, today_str),
+                deployment_manifest_id=_active_manifest_id,
+                xgb_prob=xgb_prob, lstm_prob=lstm_prob, sentiment=sentiment, macro_score=macro_score,
+            )
             if _handle_exits(con, client, risk, symbol, positions, sell_order_syms,
                              current_price, current_atr, regime_name, portfolio_value,
-                             action, pdt_exempt, _stop_fired_today, pool=_capital_pool):
+                             action, pdt_exempt, _stop_fired_today, pool=_capital_pool,
+                             ledger_ctx=_exit_ledger_ctx):
                 continue
 
             # ── Entry gates (applied in order of cheapness) ───────────────────

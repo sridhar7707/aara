@@ -83,8 +83,13 @@ def _delete_position_state(con: sqlite3.Connection, symbol: str) -> None:
 
 def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, BarData],
                               con: sqlite3.Connection | None = None,
-                              decision_id: int | None = None) -> bool:
-    """Block buy if any held position has > CORRELATION_THRESHOLD daily-return correlation."""
+                              decision_id: int | None = None,
+                              detail_out: dict | None = None) -> bool:
+    """Block buy if any held position has > CORRELATION_THRESHOLD daily-return correlation.
+    detail_out (optional): if given, filled with {"reason": ...} on rejection --
+    lets a caller retrieve the specific reason without changing this
+    function's bool return type (would break existing direct-return-value
+    tests/callers)."""
     def _resolve(bd: BarData | None) -> pd.DataFrame | None:
         if bd is None:
             return None
@@ -115,6 +120,8 @@ def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, B
             if con is not None and decision_id is not None:
                 from database.services.decision_service import reject_decision
                 reject_decision(con, decision_id, rejected_by="system", reason=_reason)
+            if detail_out is not None:
+                detail_out["reason"] = _reason
             return False
     return True
 
