@@ -93,7 +93,7 @@ from bot.trust_ledger.connection import get_ledger_conn
 from bot.trust_ledger.candidates import get_todays_candidate_event_id
 from ledger.integrity import get_active_pointer
 from bot._main_candidates import record_candidate_safe
-from bot._main_trust_decisions import ExitLedgerContext
+from bot._main_trust_decisions import ExitLedgerContext, record_risk_evaluation_safe
 
 os.makedirs("logs", exist_ok=True)
 if not os.getenv("_BOT_LOG_HANDLER_ADDED"):
@@ -281,12 +281,17 @@ def run(
     # Supervised-mode resumption — decoupled from the per-symbol loop below since
     # a decision a human approves can outlive that symbol's current-cycle signal.
     # A no-op every cycle under AUTONOMOUS mode (nothing is ever left APPROVED
-    # + NOT_EXECUTED there, since that path executes atomically).
+    # + NOT_EXECUTED there, since that path executes atomically). Its capital
+    # deployment still counts toward _cycle_deployed_notional below, so the
+    # risk governor's actual_position_size stays correct if this path is ever used.
+    _cycle_deployed_notional = 0.0
     if not _sanity_blocked:
+        _cash_before_resume = available_cash
         available_cash = _execute_approved_decisions(
             con, client, positions, available_cash, portfolio_value,
             buy_order_syms, pool=_capital_pool,
         )
+        _cycle_deployed_notional += max(0.0, _cash_before_resume - available_cash)
 
     # ── Per-symbol decision loop ──────────────────────────────────────────────
     for symbol in active_symbols:
@@ -413,13 +418,9 @@ def run(
                     macro_halt=macro_halt, spy_5bar_return=spy_5bar_return,
                     vs_spy_today=vs_spy_today, sentiments=sentiments,
                     ensemble_size=ensemble_size, xgb=xgb,
-                    stop_fired_today=_stop_fired_today,
-                    volume_ratio=volume_ratio,
-                    tradeable_capital=_remaining_tradeable,
-                    pool=_capital_pool,
-                    decision_id=_decision_id,
-                    lstm=lstm,
-                    trust_conn=trust_conn,
+                    stop_fired_today=_stop_fired_today, volume_ratio=volume_ratio,
+                    tradeable_capital=_remaining_tradeable, pool=_capital_pool,
+                    decision_id=_decision_id, lstm=lstm, trust_conn=trust_conn,
                     candidate_event_id=get_todays_candidate_event_id(trust_conn, symbol, today_str),
                     deployment_manifest_id=_active_manifest_id,
                 ),
@@ -427,6 +428,7 @@ def run(
             _deployed = _cash_before - available_cash
             if _deployed > 0.0:
                 _remaining_tradeable = max(0.0, _remaining_tradeable - _deployed)
+                _cycle_deployed_notional += _deployed
 
             _sym_errors.pop(symbol, None)   # reset failure streak on success
 
@@ -455,6 +457,9 @@ def run(
         update_signal_outcomes(con, _live_prices)
     except Exception as _se:
         logger.debug(f"update_signal_outcomes: {_se}")
+
+    _sizing_base = _capital_pool.tradeable_cash if _capital_pool else portfolio_value
+    record_risk_evaluation_safe(con, trust_conn, risk, portfolio_value, _sizing_base, _cycle_deployed_notional)
 
     _log_cycle_summary(con)
     logger.info("=== Trading cycle complete ===")

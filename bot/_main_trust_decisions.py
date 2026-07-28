@@ -17,6 +17,8 @@ from typing import Any
 from loguru import logger
 
 import bot.trust_ledger.decisions as decisions
+import bot.trust_ledger.risk as risk_ledger
+from bot.risk.risk_manager import RiskManager
 from bot.strategy.ensemble import ensemble_confidence
 from bot.strategy.model_output_adapter import build_model_outputs
 
@@ -215,3 +217,18 @@ class ExitDecisionRecorder:
 
     def hold(self, reason: str = "no exit condition met") -> None:
         record_exit_decision_safe(*self._args, "HOLD", "QUALIFIED_REJECTION", reason, **self._kwargs)
+
+
+def record_risk_evaluation_safe(
+    trades_conn: sqlite3.Connection, trust_conn: sqlite3.Connection, risk: RiskManager,
+    portfolio_value: float, sizing_base: float, cycle_deployed_notional: float,
+) -> None:
+    """Best-effort wrapper around bot.trust_ledger.risk.record_risk_evaluation
+    -- keeps bot/main.py's call site to one line, matching the philosophy
+    used everywhere else in this module."""
+    try:
+        risk_ledger.record_risk_evaluation(
+            trades_conn, trust_conn, risk, portfolio_value, sizing_base, cycle_deployed_notional,
+        )
+    except Exception as e:
+        logger.warning(f"trust ledger risk evaluation write failed: {e}")
