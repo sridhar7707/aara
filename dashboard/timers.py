@@ -29,7 +29,6 @@ import gradio as gr
 from loguru import logger
 
 from dashboard.registry import RefreshGroup, by_group, widget, require_widgets
-from dashboard.components.history import render_portfolio_performance, perf_choices, PERF_SEP
 
 require_widgets("sim_sym_dd", "perf_tabs", "perf_out", "symbol_selector", "symbol_detail_out")
 
@@ -102,27 +101,18 @@ def _register_data_tick(timer: gr.Timer) -> None:
     """Batched SLOW tick, plus stateful callbacks for perf and symbol detail."""
     _batch_tick(timer, RefreshGroup.SLOW)
 
-    # Read perf_tabs label directly. Do NOT write back to perf_tabs — writing to
-    # a Radio that has a .change() handler registered causes Gradio 5.9 to fire
-    # that handler (Radio.svelte:39 → handle_change), which then sends both a
-    # trigger value and an input value to a 1-param endpoint → "Too many arguments".
-    def _refresh_perf(current_label: str):
-        current_key = current_label.split(PERF_SEP)[0].strip() if isinstance(current_label, str) and current_label else "1M"
-        choices = perf_choices()
-        matched = next((ch for ch in choices if ch.split(PERF_SEP)[0].strip() == current_key), None)
-        val = matched or (choices[2] if len(choices) > 2 else choices[0] if choices else None)
-        return render_portfolio_performance(val or "1M")
-
-    timer.tick(fn=_refresh_perf, inputs=[widget("perf_tabs")],       outputs=[widget("perf_out")])
-    # symbol_detail_out is NOT refreshed here on purpose: this periodic tick and
-    # symbol_selector.change() (app.py) both write to the same output with no
-    # ordering between them -- whichever response lands last wins, not whichever
-    # user action was most recent. If this tick fires with the pre-change
-    # selection while a slower part of the same batch is still in flight, it can
-    # land AFTER a user's .change() response and silently overwrite the correct
-    # just-selected symbol's panel with the previous symbol's stale render
-    # (confirmed bug: dropdown showing SNOW, panel showing GOOGL). Leaving
-    # symbol_selector.change() as the sole writer removes the race entirely --
-    # a nice-to-have "auto-refresh the open detail panel every 5 min" is not
-    # worth reintroducing a bug that shows one symbol's data under another's
-    # name.
+    # perf_out and symbol_detail_out are NOT refreshed here on purpose. Both
+    # take "which thing is currently selected" as an argument (period label /
+    # symbol), and each has its own .change() handler in app.py writing to the
+    # same output this tick would target. Two independent writers on one
+    # output race — whichever response completes last wins, not whichever
+    # user action was most recent. If this tick's response lands after a
+    # user's own .change() response, it silently overwrites the correct
+    # just-selected period/symbol with the previous selection's stale render
+    # (confirmed bug: dropdown showing SNOW, panel showing GOOGL's AI
+    # analysis). perf_tabs has the identical shape (a stale response could
+    # show the wrong period's chart under a label that says otherwise) and is
+    # fixed the same way. Leaving each .change() handler as the sole writer
+    # removes the race entirely — auto-refreshing an already-open detail view
+    # every few minutes is not worth reintroducing a bug that shows the wrong
+    # thing under the right label.

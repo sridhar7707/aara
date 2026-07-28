@@ -106,14 +106,16 @@ def test_batch_tick_isolates_a_raising_render_fn(monkeypatch):
     assert result == ("", "ok")  # broken fn falls back to "", healthy fn unaffected
 
 
-def test_data_tick_does_not_periodically_refresh_symbol_detail(monkeypatch):
-    """Regression test for a confirmed production bug: symbol_detail_out must
-    have exactly one writer (symbol_selector.change() in app.py). A periodic
-    re-render racing with that .change() handler can complete AFTER it and
-    silently overwrite the correct just-selected symbol's panel with the
-    previous symbol's stale render -- whichever response lands last wins,
-    not whichever user action was most recent (confirmed: dropdown showing
-    SNOW, panel showing GOOGL's full AI analysis)."""
+def test_data_tick_does_not_periodically_refresh_argument_driven_outputs(monkeypatch):
+    """Regression test for a confirmed production bug: perf_out and
+    symbol_detail_out must each have exactly one writer (their respective
+    .change() handler in app.py), not also a periodic tick. Both take "which
+    thing is currently selected" as an argument (period label / symbol) --
+    a periodic re-render racing with the .change() handler can complete
+    AFTER it and silently overwrite the correct just-selected period/symbol
+    with the previous selection's stale render. Whichever response lands
+    last wins, not whichever user action was most recent (confirmed:
+    dropdown showing SNOW, panel showing GOOGL's full AI analysis)."""
     monkeypatch.setattr(timers, "by_group", lambda group: [])
     sentinels = {"perf_tabs": object(), "perf_out": object(),
                  "symbol_selector": object(), "symbol_detail_out": object()}
@@ -123,5 +125,5 @@ def test_data_tick_does_not_periodically_refresh_symbol_detail(monkeypatch):
     timers._register_data_tick(ft)
 
     all_outputs = [o for _, o, _ in ft.registered]
+    assert [sentinels["perf_out"]] not in all_outputs
     assert [sentinels["symbol_detail_out"]] not in all_outputs
-    assert [sentinels["perf_out"]] in all_outputs  # the still-legitimate perf refresh
