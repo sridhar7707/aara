@@ -35,7 +35,7 @@ from bot.strategy.lstm_predictor import LSTMPredictor
 from bot.strategy.sentiment import batch_sentiment_scores
 from bot.strategy.macro import _get_cached as _get_macro_cached
 from bot.strategy.reddit_sentiment import get_wsb_sentiment
-from bot.strategy.ensemble import ensemble_signal, action_to_int, BUY_FRACTION, WEIGHTS
+from bot.strategy.ensemble import ensemble_signal, action_to_int, BUY_FRACTION, ensemble_confidence
 from bot.strategy.signal_gate import check_signal_gate
 from bot.risk.risk_manager import RiskManager, _business_days_between, kelly_fraction as _kelly_fraction
 import bot.monitor.telegram_bot as tg
@@ -90,6 +90,8 @@ from bot._main_runner import (
     _do_clean_db, _do_reset_daily_start, end_of_day_summary, run_loop,
 )
 from bot.trust_ledger.connection import get_ledger_conn
+from bot.trust_ledger.candidates import get_todays_candidate_event_id
+from ledger.integrity import get_active_pointer
 from bot._main_candidates import record_candidate_safe
 
 os.makedirs("logs", exist_ok=True)
@@ -134,6 +136,9 @@ def run(
 
     con = init_db()
     trust_conn = get_ledger_conn()
+    # Fetched once per cycle, not per symbol -- the active manifest changes
+    # only on a deliberate promotion, never mid-cycle.
+    _active_manifest_id = get_active_pointer(trust_conn)
 
     active_symbols, _universe_payload = _load_today_universe()
     _import_screener_picks(con, _universe_payload)
@@ -344,12 +349,7 @@ def run(
             # shows what the bot was thinking even when no trade fires.
             try:
                 from database.services.analytics_service import analytics_service as _as
-                _ens_conf = (
-                    WEIGHTS["xgb"]       * xgb_prob +
-                    WEIGHTS["lstm"]      * lstm_prob +
-                    WEIGHTS["sentiment"] * ((sentiment + 1.0) / 2.0) +
-                    WEIGHTS["macro"]     * macro_score
-                )
+                _ens_conf = ensemble_confidence(xgb_prob, lstm_prob, sentiment, macro_score)
                 _as.save_recommendation(symbol, action_str, float(_ens_conf),
                                         price=current_price)
                 _log_recommendation(con, symbol, action_str, float(_ens_conf),
@@ -366,12 +366,7 @@ def run(
                     bars_daily, volume_ratio, vs_spy_today,
                 )
                 if _sg_passed:
-                    _ens_score = (
-                        WEIGHTS["xgb"]       * xgb_prob +
-                        WEIGHTS["lstm"]      * lstm_prob +
-                        WEIGHTS["sentiment"] * ((sentiment + 1.0) / 2.0) +
-                        WEIGHTS["macro"]     * macro_score
-                    )
+                    _ens_score = ensemble_confidence(xgb_prob, lstm_prob, sentiment, macro_score)
                     record_signal(
                         con, symbol, _sg_meta,
                         xgb_prob, lstm_prob, _ens_score, macro_score,
@@ -415,6 +410,10 @@ def run(
                     tradeable_capital=_remaining_tradeable,
                     pool=_capital_pool,
                     decision_id=_decision_id,
+                    lstm=lstm,
+                    trust_conn=trust_conn,
+                    candidate_event_id=get_todays_candidate_event_id(trust_conn, symbol, today_str),
+                    deployment_manifest_id=_active_manifest_id,
                 ),
             )
             _deployed = _cash_before - available_cash

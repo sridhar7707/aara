@@ -34,6 +34,35 @@ def _lstm_is_indeterminate(lstm_prob: float) -> bool:
     return _LSTM_INDETERMINATE_LO <= lstm_prob <= _LSTM_INDETERMINATE_HI
 
 
+def ensemble_confidence(
+    xgb_prob: float, lstm_prob: float, sentiment_score: float, macro_score: float,
+) -> float:
+    """Plain (non-reweighted) weighted-average confidence, consolidated from
+    5 identical copies previously duplicated across bot/main.py,
+    bot/_main_cycle.py, bot/_main_decisions.py, and bot/db/trade_log.py
+    (Phase 1A Sprint 3). Used for logging/decision-record purposes
+    (signal_log, trades, decision_log, decision_events.final_confidence,
+    Telegram alert text).
+
+    Deliberately distinct from ensemble_signal()'s internal _reweight_score,
+    which additionally transfers LSTM's weight to XGB when LSTM is in its
+    indeterminate band -- that reweighting is specific to the BUY/SELL/HOLD
+    decision itself. All 5 consolidated call sites already used the plain
+    formula before this consolidation; preserved exactly rather than
+    silently changing their behavior as a side effect of deduplication.
+
+    sentiment_score is in [-1, +1] and is normalized to [0, 1] internally,
+    matching every consolidated call site's existing convention.
+    """
+    sentiment_norm = (sentiment_score + 1.0) / 2.0
+    return (
+        WEIGHTS["xgb"]       * xgb_prob +
+        WEIGHTS["lstm"]      * lstm_prob +
+        WEIGHTS["sentiment"] * sentiment_norm +
+        WEIGHTS["macro"]     * macro_score
+    )
+
+
 def _reweight_score(
     xgb_prob: float, lstm_prob: float,
     sentiment_norm: float, macro_score: float,

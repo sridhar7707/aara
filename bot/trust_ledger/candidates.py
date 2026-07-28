@@ -97,3 +97,24 @@ def record_candidate_evaluation_if_concluded(
     })
     _recorded_today[key] = row["candidate_event_id"]
     return row
+
+
+def get_todays_candidate_event_id(conn: sqlite3.Connection, symbol: str, trading_day: str) -> str | None:
+    """Look up the (symbol, trading_day) candidate_event_id regardless of
+    whether this process wrote it or a fresh process wrote it earlier today
+    -- decision-writing code (Sprint 3) needs this every time it creates a
+    decision_events row, decoupled from whether record_candidate_evaluation_
+    if_concluded happened to be called in the same function call."""
+    _reset_if_new_day(trading_day)
+    key = (symbol, trading_day)
+    if key in _recorded_today:
+        return _recorded_today[key]
+    row = conn.execute(
+        "SELECT candidate_event_id FROM candidate_evaluation_events "
+        "WHERE asset=? AND timestamp LIKE ? ORDER BY sequence_number DESC LIMIT 1",
+        (symbol, f"{trading_day}%"),
+    ).fetchone()
+    if row:
+        _recorded_today[key] = row[0]
+        return row[0]
+    return None

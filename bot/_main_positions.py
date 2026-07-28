@@ -24,6 +24,7 @@ from database.trade_journal import close_entry as _journal_close
 from database.services.decision_service import find_open_decision_id, complete_decision
 from bot.decision.daily_actions import record as _rec_action
 from bot.capital.pool import CapitalPool, update_on_sell as _pool_sell
+from bot._main_trust_decisions import ExitDecisionRecorder, ExitLedgerContext
 
 
 class BarData(NamedTuple):
@@ -345,7 +346,7 @@ def _handle_exits(
     con: sqlite3.Connection, client: AlpacaClient, risk: RiskManager, symbol: str, positions: dict,
     sell_order_syms: set, current_price: float, current_atr: float,
     regime_name: str, portfolio_value: float, action: int, pdt_exempt: bool,
-    stop_fired_today: set, pool: CapitalPool | None = None,
+    stop_fired_today: set, pool: CapitalPool | None = None, ledger_ctx: ExitLedgerContext | None = None,
 ) -> bool:
     """Handle exit / management for a held position. Returns True when symbol was processed."""
     if symbol not in positions:
@@ -368,6 +369,8 @@ def _handle_exits(
         except (ValueError, TypeError):
             pass
 
+    _rec = ExitDecisionRecorder(ledger_ctx, symbol, portfolio_value, current_price, regime_name)
+
     # ⓪ Gap-down hard floor — bypass limit/ATR logic, market-sell immediately
     if pnl_pct < -GAP_DOWN_FLOOR_PCT:
         logger.warning(f"Gap-down floor: {symbol} pnl={pnl_pct:.1%} — immediate market sell")
@@ -387,6 +390,9 @@ def _handle_exits(
                 _pool_sell(con, pool.id, cost_basis, pos_qty * current_price, symbol=symbol)
             _delete_position_state(con, symbol)
             _maybe_record_day_trade(con, risk, symbol, True, pdt_exempt=pdt_exempt)
+            _rec.sell(True, "gap-down")
+        else:
+            _rec.sell(False, "gap-down")
         return True
 
     if pos_state:
@@ -409,6 +415,7 @@ def _handle_exits(
                 holding_days=holding_days, pool=pool,
             )
             _maybe_record_day_trade(con, risk, symbol, success, pdt_exempt=pdt_exempt)
+            _rec.sell(success, "take-profit")
             return True
 
     # ② ATR stop-loss
@@ -425,6 +432,7 @@ def _handle_exits(
         if success:
             stop_fired_today.add(symbol)
         _maybe_record_day_trade(con, risk, symbol, success, pdt_exempt=pdt_exempt)
+        _rec.sell(success, "stop-loss")
         return True
 
     # ③ Trailing stop (armed after 3% gain)
@@ -439,6 +447,7 @@ def _handle_exits(
         if success:
             stop_fired_today.add(symbol)
         _maybe_record_day_trade(con, risk, symbol, success, pdt_exempt=pdt_exempt)
+        _rec.sell(success, "trailing-stop")
         return True
 
     # ④ Drift trim — partial sell if position has grown above MAX_POSITION_DRIFT_PCT
@@ -452,9 +461,9 @@ def _handle_exits(
                     f"{symbol} at {position_pct:.1%} of portfolio "
                     f"(max {MAX_POSITION_DRIFT_PCT:.0%}) — trimming ${trim_qty * current_price:.0f}"
                 )
-                _trim_position(con, client, symbol, round(trim_qty, 3),
-                               current_price, regime_name, portfolio_value,
-                               pnl_pct, entry_price, pool=pool)
+                _trimmed = _trim_position(con, client, symbol, round(trim_qty, 3), current_price,
+                                          regime_name, portfolio_value, pnl_pct, entry_price, pool=pool)
+                _rec.sell(_trimmed, "drift-trim")
                 return True
 
     # ⑤ Time-based forced exit
@@ -466,6 +475,7 @@ def _handle_exits(
             holding_days=holding_days, pool=pool,
         )
         _maybe_record_day_trade(con, risk, symbol, success, pdt_exempt=pdt_exempt)
+        _rec.sell(success, "time-exit")
         return True
 
     # ⑥ Ensemble sell signal
@@ -473,6 +483,7 @@ def _handle_exits(
         is_day_trade = _opened_today(con, symbol)
         if is_day_trade and not pdt_exempt and not risk.check_pdt(is_day_trade=True):
             logger.warning(f"PDT limit — skipping signal sell of {symbol}")
+            _rec.reject("signal sell blocked by PDT limit")
         else:
             success = _signal_sell(
                 con, client, symbol, pos_qty, current_price,
@@ -483,4 +494,7 @@ def _handle_exits(
             if success and is_day_trade and not pdt_exempt:
                 risk.record_day_trade()
                 _save_risk_state(con, risk)
+            _rec.sell(success, "signal")
+    else:
+        _rec.hold()
     return True

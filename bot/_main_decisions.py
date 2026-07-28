@@ -8,7 +8,7 @@ from loguru import logger
 
 import bot.monitor.telegram_bot as tg
 from bot.execution.alpaca_client import AlpacaClient
-from bot.strategy.ensemble import WEIGHTS
+from bot.strategy.ensemble import ensemble_confidence
 from bot._main_positions import _TP_FLOOR, _upsert_position_state
 from bot.capital.pool import CapitalPool, update_on_buy as _pool_buy
 from bot._main_db import log_trade
@@ -28,12 +28,7 @@ def create_buy_decision(
 ) -> int:
     """Record a decision the moment a symbol's ensemble signal says BUY, before
     any entry gate runs, so rejected/blocked candidates are captured too."""
-    ens_conf = (
-        WEIGHTS["xgb"]       * xgb_prob +
-        WEIGHTS["lstm"]      * lstm_prob +
-        WEIGHTS["sentiment"] * ((sentiment + 1.0) / 2.0) +
-        WEIGHTS["macro"]     * macro_score
-    )
+    ens_conf = ensemble_confidence(xgb_prob, lstm_prob, sentiment, macro_score)
     return create_decision(
         con, symbol,
         price_at_decision=current_price,

@@ -6,7 +6,7 @@ from datetime import date, datetime, timezone
 
 from loguru import logger
 
-from bot.strategy.ensemble import WEIGHTS
+from bot.strategy.ensemble import ensemble_confidence
 
 
 def log_trade(
@@ -32,9 +32,7 @@ def log_trade(
     take_profit: float | None = None,
     risk_reward_ratio: float | None = None,
 ) -> int | None:
-    sentiment_norm = (sentiment_score + 1.0) / 2.0
-    ensemble_score = (WEIGHTS["xgb"]  * xgb_prob + WEIGHTS["lstm"] * lstm_prob
-                      + WEIGHTS["sentiment"] * sentiment_norm + WEIGHTS["macro"] * macro_score)
+    ensemble_score = ensemble_confidence(xgb_prob, lstm_prob, sentiment_score, macro_score)
     realized_pnl = shares * (price - entry_price) if "SELL" in action and entry_price > 0 else 0.0
     cur = con.execute(
         """INSERT INTO trades
@@ -59,13 +57,7 @@ def log_signal(
     """Record model output for every symbol evaluated each cycle (caller commits).
     Returns the new signal_log row id so callers (e.g. decision_service) can
     link a decision back to the model evidence that produced it."""
-    sent_norm      = (sentiment_score + 1.0) / 2.0
-    ensemble_score = (
-        WEIGHTS["xgb"]       * xgb_prob +
-        WEIGHTS["lstm"]      * lstm_prob +
-        WEIGHTS["sentiment"] * sent_norm +
-        WEIGHTS["macro"]     * macro_score
-    )
+    ensemble_score = ensemble_confidence(xgb_prob, lstm_prob, sentiment_score, macro_score)
     cur = con.execute(
         "INSERT INTO signal_log "
         "(timestamp, symbol, xgb_prob, lstm_prob, sentiment_score, macro_score, "

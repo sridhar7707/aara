@@ -14,7 +14,7 @@ from loguru import logger
 import bot.monitor.telegram_bot as tg
 from bot.execution.alpaca_client import AlpacaClient
 from bot.risk.risk_manager import RiskManager, kelly_fraction as _kelly_fraction
-from bot.strategy.ensemble import WEIGHTS, BUY_FRACTION
+from bot.strategy.ensemble import BUY_FRACTION, ensemble_confidence
 from config import (
     ATR_MAX_STOP_PCT, ATR_MIN_STOP_PCT, ATR_STOP_MULTIPLIER,
     CASH_USE_FRACTION, DECISION_MODE,
@@ -41,6 +41,7 @@ from bot._main_positions import (
     _passes_correlation_gate,
     _upsert_position_state,
 )
+from bot._main_trust_decisions import EntryDecisionRecorder
 
 
 @dataclass
@@ -72,6 +73,10 @@ class EntryContext:
     tradeable_capital: float
     pool: CapitalPool | None = None
     decision_id: int | None = None
+    lstm: Any = None
+    trust_conn: Any = None
+    candidate_event_id: str | None = None
+    deployment_manifest_id: str | None = None
 
 
 def _handle_entry(
@@ -81,55 +86,82 @@ def _handle_entry(
     """Process entry gates and buy execution. Returns updated available_cash."""
     available_cash = ctx.available_cash  # mutable local; all other fields accessed via ctx
 
+    _price_ts = getattr(ctx.latest, "name", None)
+    _price_ts_iso = _price_ts.isoformat() if hasattr(_price_ts, "isoformat") else None
+    recorder = EntryDecisionRecorder(
+        ctx.trust_conn, ctx.candidate_event_id, ctx.deployment_manifest_id, symbol,
+        ctx.xgb_prob, ctx.lstm_prob, ctx.sentiments.get(symbol, 0.0), ctx.macro_score,
+        ctx.regime_name, ctx.portfolio_value, ctx.available_cash, _price_ts_iso,
+        lstm_is_degraded=getattr(ctx.lstm, "is_degraded", False),
+        lstm_val_loss=getattr(ctx.lstm, "val_loss", None),
+    )
+
     # Gate 0 — VIX emergency halt: no new positions when VIX >= 40
     if ctx.macro_halt:
         _log_buy_skip(symbol, "VIX emergency halt", con, ctx.decision_id)
+        recorder.reject("vix_halt", "VIX emergency halt")
         return available_cash
 
     # Gate 1 — Regime: only buy in trending or ranging markets
     if ctx.regime_name not in ENTRY_REGIMES:
-        _log_buy_skip(symbol, f"regime={ctx.regime_name} (allowed: {ENTRY_REGIMES})", con, ctx.decision_id)
+        _detail = f"regime={ctx.regime_name} (allowed: {ENTRY_REGIMES})"
+        _log_buy_skip(symbol, _detail, con, ctx.decision_id)
+        recorder.reject("regime", _detail)
         return available_cash
 
     # Gate 2 — Volume: confirm institutional participation
     if ctx.volume_ratio < MIN_VOLUME_RATIO:
-        _log_buy_skip(symbol, f"volume ratio {ctx.volume_ratio:.2f} < {MIN_VOLUME_RATIO}", con, ctx.decision_id)
+        _detail = f"volume ratio {ctx.volume_ratio:.2f} < {MIN_VOLUME_RATIO}"
+        _log_buy_skip(symbol, _detail, con, ctx.decision_id)
+        recorder.reject("volume", _detail)
         return available_cash
 
     # Gate 3 — XGB minimum confidence: live trades show 62% WR at >=0.55 vs 25% below
     if ctx.xgb_prob < XGB_MIN_CONFIDENCE:
-        _log_buy_skip(symbol, f"xgb_prob {ctx.xgb_prob:.3f} < min {XGB_MIN_CONFIDENCE:.2f}", con, ctx.decision_id)
+        _detail = f"xgb_prob {ctx.xgb_prob:.3f} < min {XGB_MIN_CONFIDENCE:.2f}"
+        _log_buy_skip(symbol, _detail, con, ctx.decision_id)
+        recorder.reject("xgb_confidence", _detail)
         return available_cash
 
     # Gate 4 — Relative strength: stock must be outperforming SPY over last N bars
     if ctx.spy_5bar_return is not None and symbol != "SPY":
         stock_5bar = ctx.sig_bars["close"].pct_change(RS_LOOKBACK_BARS).iloc[-1]
         if not math.isnan(stock_5bar) and float(stock_5bar) < ctx.spy_5bar_return:
-            _log_buy_skip(symbol, f"RS weak ({stock_5bar:.2%} vs SPY {ctx.spy_5bar_return:.2%})", con, ctx.decision_id)
+            _detail = f"RS weak ({stock_5bar:.2%} vs SPY {ctx.spy_5bar_return:.2%})"
+            _log_buy_skip(symbol, _detail, con, ctx.decision_id)
+            recorder.reject("relative_strength", _detail)
             return available_cash
 
     # Gate 5 — Open order: no duplicate limit buy submissions
     if symbol in ctx.buy_order_syms:
         _log_buy_skip(symbol, "open buy order already pending", con, ctx.decision_id)
+        recorder.reject("open_order", "open buy order already pending")
         return available_cash
 
     # Gate 6 — Earnings proximity (prefetched in parallel before loop)
     if ctx.earnings_map.get(symbol, False):
         _log_buy_skip(symbol, "earnings proximity", con, ctx.decision_id)
+        recorder.reject("earnings_proximity", "earnings proximity")
         return available_cash
 
     # Gate 7 — Correlation: avoid adding a position highly correlated with existing holdings
+    # (reason text stays inside _passes_correlation_gate, which already calls
+    # reject_decision itself -- not duplicated here, just the ledger write)
     if not _passes_correlation_gate(symbol, ctx.positions, ctx.bars_map, con, ctx.decision_id):
+        recorder.reject("correlation", "correlated with an existing held position")
         return available_cash
 
     # Gate 7.5 — Wash-sale guard (IRS IRC §1091): block re-buy within 30 days of a loss sale
     if _is_wash_sale_risk(con, symbol):
         _log_buy_skip(symbol, "wash-sale guard active", con, ctx.decision_id)
+        recorder.reject("wash_sale", "wash-sale guard active")
         return available_cash
 
     # Gate 7.7 — Stop re-entry block: don't re-buy a symbol whose stop fired today
     if symbol in ctx.stop_fired_today:
-        _log_buy_skip(symbol, "stop-loss fired earlier today (re-entry blocked)", con, ctx.decision_id)
+        _detail = "stop-loss fired earlier today (re-entry blocked)"
+        _log_buy_skip(symbol, _detail, con, ctx.decision_id)
+        recorder.reject("stop_reentry", _detail)
         return available_cash
 
     # Gate 7.9 — MACD confirmation (daily bars only — intraday MACD oscillates too fast)
@@ -139,11 +171,9 @@ def _handle_entry(
         if not _daily_bars.empty:
             _macd_diff = float(_daily_bars.iloc[-1].get("macd_diff", 0.0))
             if _macd_diff <= MACD_CONFIRMATION_MIN:
-                _log_buy_skip(
-                    symbol,
-                    f"MACD gate: daily macd_diff={_macd_diff:.4f} <= min={MACD_CONFIRMATION_MIN}",
-                    con, ctx.decision_id,
-                )
+                _detail = f"MACD gate: daily macd_diff={_macd_diff:.4f} <= min={MACD_CONFIRMATION_MIN}"
+                _log_buy_skip(symbol, _detail, con, ctx.decision_id)
+                recorder.reject("macd", _detail)
                 return available_cash
 
     # Gate 8 — Cash and risk approval
@@ -155,11 +185,15 @@ def _handle_entry(
     # Reinvestment guard: tradeable_capital is pre-computed once per cycle by main.py
     # using compute_tradeable_capital() so we avoid per-symbol DB reads here.
     if ctx.tradeable_capital <= 0.0:
-        _log_buy_skip(symbol, "no tradeable capital (profits only mode, no profits yet)", con, ctx.decision_id)
+        _detail = "no tradeable capital (profits only mode, no profits yet)"
+        _log_buy_skip(symbol, _detail, con, ctx.decision_id)
+        recorder.reject("tradeable_capital", _detail)
         return available_cash
     notional = ctx.tradeable_capital * pos_fraction
     if notional <= 0.0:
-        _log_buy_skip(symbol, f"zero position size (kelly={kelly_f:.3f}, macro_cap={ctx.macro_cap:.2f})", con, ctx.decision_id)
+        _detail = f"zero position size (kelly={kelly_f:.3f}, macro_cap={ctx.macro_cap:.2f})"
+        _log_buy_skip(symbol, _detail, con, ctx.decision_id)
+        recorder.reject("position_size", _detail)
         return available_cash
 
     # Risk-per-trade cap: size so max dollar loss ≤ MAX_RISK_PER_TRADE_PCT of portfolio.
@@ -175,17 +209,17 @@ def _handle_entry(
 
     # Gate 8a — Minimum absolute profit target: not worth entering if upside < MIN_TP_PCT
     if tp_target_pct < MIN_TP_PCT:
-        _log_buy_skip(symbol, f"TP target {tp_target_pct:.1%} < min {MIN_TP_PCT:.1%}", con, ctx.decision_id)
+        _detail = f"TP target {tp_target_pct:.1%} < min {MIN_TP_PCT:.1%}"
+        _log_buy_skip(symbol, _detail, con, ctx.decision_id)
+        recorder.reject("tp_target", _detail)
         return available_cash
 
     # Gate 8b — Minimum risk/reward: require TP ≥ MIN_RR_RATIO × stop distance
     rr_ratio = tp_target_pct / stop_pct
     if rr_ratio < MIN_RR_RATIO:
-        _log_buy_skip(
-            symbol,
-            f"R:R {rr_ratio:.2f} < min {MIN_RR_RATIO} (TP={tp_target_pct:.1%}, stop={stop_pct:.1%})",
-            con, ctx.decision_id,
-        )
+        _detail = f"R:R {rr_ratio:.2f} < min {MIN_RR_RATIO} (TP={tp_target_pct:.1%}, stop={stop_pct:.1%})"
+        _log_buy_skip(symbol, _detail, con, ctx.decision_id)
+        recorder.reject("risk_reward", _detail)
         return available_cash
 
     max_risk_notional = (ctx.portfolio_value * MAX_RISK_PER_TRADE_PCT) / stop_pct
@@ -206,11 +240,9 @@ def _handle_entry(
         )
         _sector_pct = _sector_val / ctx.portfolio_value if ctx.portfolio_value > 0 else 0
         if _sector_pct >= MAX_SECTOR_EXPOSURE_PCT:
-            _log_buy_skip(
-                symbol,
-                f"{_sym_sector} sector at {_sector_pct:.1%} of portfolio (max {MAX_SECTOR_EXPOSURE_PCT:.0%})",
-                con, ctx.decision_id,
-            )
+            _detail = f"{_sym_sector} sector at {_sector_pct:.1%} of portfolio (max {MAX_SECTOR_EXPOSURE_PCT:.0%})"
+            _log_buy_skip(symbol, _detail, con, ctx.decision_id)
+            recorder.reject("sector_exposure", _detail)
             return available_cash
 
     # Gate 8e — Cash reserve: always keep MIN_CASH_RESERVE_PCT uninvested
@@ -220,6 +252,7 @@ def _handle_entry(
         logger.warning(f"BUY {symbol} skipped — {_reason}")
         if ctx.decision_id is not None:
             reject_decision(con, ctx.decision_id, rejected_by="system", reason=_reason)
+        recorder.reject("cash_use_fraction", _reason)
         return available_cash
     if available_cash - notional < _min_reserve:
         _reason = (f"would breach cash reserve (need ${notional:.0f}, "
@@ -227,6 +260,7 @@ def _handle_entry(
         logger.info(f"BUY {symbol} skipped — {_reason}")
         if ctx.decision_id is not None:
             reject_decision(con, ctx.decision_id, rejected_by="system", reason=_reason)
+        recorder.reject("cash_reserve_min", _reason)
         return available_cash
     _managed = ctx.pool.tradeable_cash if ctx.pool else None
     if not risk.approve_buy(symbol, notional, ctx.portfolio_value,
@@ -235,10 +269,17 @@ def _handle_entry(
         logger.info(f"BUY {symbol} skipped — {_reason}")
         if ctx.decision_id is not None:
             reject_decision(con, ctx.decision_id, rejected_by="system", reason=_reason)
+        recorder.reject("risk_manager_approval", _reason)
         return available_cash
 
     # Gates passed. SUPERVISED holds for a human; AUTONOMOUS proceeds as before.
     if DECISION_MODE == "SUPERVISED":
+        # No ledger write here (deliberately) -- decision_events is a post-hoc
+        # immutable record with no "pending" state, and this outcome isn't
+        # final yet (a human still has to approve/reject). The eventual
+        # resolution belongs to execute_approved_decisions()'s resumption
+        # path, not yet wired to the ledger (out of Sprint 3's scope --
+        # DECISION_MODE=SUPERVISED is dormant in production today).
         if ctx.decision_id is not None:
             if has_pending_decision(con, symbol):  # signal still firing -- don't spam another pending row
                 reject_decision(con, ctx.decision_id, rejected_by="system",
@@ -271,14 +312,10 @@ def _handle_entry(
                     f"({slippage_bps:+.1f} bps vs limit ${ctx.current_price:.2f})"
                 )
             fill_shares = notional / fill_price
+            recorder.record_executed(notional, fill_price, fill_shares)
             _drivers = ctx.xgb.explain(ctx.latest)
             _sent_s = ctx.sentiments.get(symbol, 0.0)
-            _ens_score = (
-                WEIGHTS["xgb"]       * ctx.xgb_prob +
-                WEIGHTS["lstm"]      * ctx.lstm_prob +
-                WEIGHTS["sentiment"] * ((_sent_s + 1.0) / 2.0) +
-                WEIGHTS["macro"]     * ctx.macro_score
-            )
+            _ens_score = ensemble_confidence(ctx.xgb_prob, ctx.lstm_prob, _sent_s, ctx.macro_score)
             _sym_sector_tg = SECTOR_MAP.get(symbol, "")
             _sect_pct_tg = 0.0
             if _sym_sector_tg and _sym_sector_tg not in ("Unknown", "Broad_ETF") and ctx.portfolio_value > 0:
@@ -342,5 +379,8 @@ def _handle_entry(
             ctx.buy_order_syms.discard(symbol)  # order is now filled, not pending
         else:
             logger.warning(f"BUY {symbol} order did not fill — position state NOT recorded")
+            recorder.record_order_not_filled("order submitted but did not fill within timeout")
+    else:
+        recorder.record_order_not_filled("order submission failed (client.buy() returned None)")
 
     return available_cash
