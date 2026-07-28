@@ -89,6 +89,8 @@ from bot.capital.pool import load_active_pool as _load_pool, compute_tradeable_c
 from bot._main_runner import (
     _do_clean_db, _do_reset_daily_start, end_of_day_summary, run_loop,
 )
+from bot.trust_ledger.connection import get_ledger_conn
+from bot._main_candidates import record_candidate_safe
 
 os.makedirs("logs", exist_ok=True)
 if not os.getenv("_BOT_LOG_HANDLER_ADDED"):
@@ -131,6 +133,7 @@ def run(
         return
 
     con = init_db()
+    trust_conn = get_ledger_conn()
 
     active_symbols, _universe_payload = _load_today_universe()
     _import_screener_picks(con, _universe_payload)
@@ -176,6 +179,7 @@ def run(
         logger.error(f"Alpaca get_account() failed — aborting cycle: {_ae}")
         tg._send("🚨 Alpaca get_account() failed — check API credentials. Bot cycle aborted.")
         con.close()
+        trust_conn.close()
         return
     real_portfolio_value = float(acct.portfolio_value)
     real_available_cash  = float(acct.cash)
@@ -186,6 +190,7 @@ def run(
         )
         tg._send("🚨 Alpaca account value is $0.00 — check API credentials. Bot cycle aborted.")
         con.close()
+        trust_conn.close()
         return
 
     # Sanity check: reject any reading that is less than half the last known value.
@@ -233,6 +238,7 @@ def run(
             logger.error(f"Account not tradeable ({status_msg}) — aborting cycle")
             tg._send(f"🚨 Account not tradeable ({status_msg}) — bot halted. Check Alpaca dashboard.")
             con.close()
+            trust_conn.close()
             return
         # ② PDT flag and equity check
         if getattr(acct, "pattern_day_trader", False):
@@ -290,6 +296,17 @@ def run(
             # Fall back to 5-min only when daily fetch fails.
             sig_bars = bars_daily if not bars_daily.empty else bars_5m
             if sig_bars.empty:
+                # No persisted record of this previously (silent continue) --
+                # now counted the same as a processing failure so a symbol
+                # with no data for 5 straight cycles gets a candidate_evaluation_event
+                # (evaluation_completed=False) instead of vanishing with no audit trail.
+                _sym_errors[symbol] = _sym_errors.get(symbol, 0) + 1
+                if _sym_errors[symbol] >= _SYM_ERROR_SKIP_THRESHOLD:
+                    record_candidate_safe(
+                        trust_conn, symbol, today_str, _universe_payload,
+                        data_available=False, required_models_available=False,
+                        evaluation_completed=False,
+                    )
                 continue
 
             latest = sig_bars.iloc[-1]
@@ -310,6 +327,13 @@ def run(
                 xgb_prob, lstm_prob, sentiment, regime_name, macro_score=macro_score
             )
             action = action_to_int(action_str)
+
+            # Decision Intelligence Phase 1A — candidate_evaluation_events, written
+            # once per (symbol, trading day) per phase1a_requirements.md Section 4.1.
+            _models_ok = xgb.model is not None and lstm.model is not None and not lstm.is_degraded
+            record_candidate_safe(trust_conn, symbol, today_str, _universe_payload,
+                                  data_available=True, required_models_available=_models_ok,
+                                  evaluation_completed=True)
 
             # Log every evaluated signal so the dashboard can show live model
             # output even on cycles where no trade fires.
@@ -407,6 +431,12 @@ def run(
                     f"{symbol} has failed {_sym_errors[symbol]} consecutive cycles "
                     f"— possible feed or feature bug"
                 )
+            if _sym_errors[symbol] >= _SYM_ERROR_SKIP_THRESHOLD:
+                record_candidate_safe(
+                    trust_conn, symbol, today_str, _universe_payload,
+                    data_available=False, required_models_available=False,
+                    evaluation_completed=False,
+                )
 
     con.commit()  # flush all batched signal_log inserts in one fsync (was 25 individual commits)
 
@@ -422,6 +452,7 @@ def run(
     _log_cycle_summary(con)
     logger.info("=== Trading cycle complete ===")
     con.close()
+    trust_conn.close()
     _last_hf_sync = _maybe_push_db(_last_hf_sync, _HF_SYNC_INTERVAL)
 
 
