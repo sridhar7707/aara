@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import ledger.db as ledger_db  # noqa: E402
+import ledger.ledger as ledger_svc  # noqa: E402
 import bot.trust_ledger.decisions as decisions  # noqa: E402
 import bot.trust_ledger.candidates as candidates  # noqa: E402
 from bot.strategy.model_output_adapter import build_model_outputs  # noqa: E402
@@ -168,23 +169,16 @@ def test_check_fingerprint_override_bypasses_block(conn, reference_chain):
 def test_check_fingerprint_allows_reentry_after_close(conn, reference_chain):
     """The doc's own example: first BUY closes, a second BUY later the same
     day is a legitimate re-entry, not a blocked duplicate."""
+    import bot.trust_ledger.outcomes as outcomes
+
     first = decisions.write_decision_event(conn, **_decision_kwargs(reference_chain))
-    decisions_svc_conn = conn
-    decisions_svc_conn.execute(
-        "INSERT INTO cost_models (sequence_number, cost_model_id, spread_assumption, "
-        "slippage_assumption, commission_rules, tax_assumptions, created_at, record_hash, "
-        "previous_record_hash) VALUES (1,'cm1',0.001,0.001,'{}','{}','2026-07-28T00:00:00Z',"
-        "'" + "0" * 64 + "','" + "0" * 64 + "')"
+    ledger_svc.append_ledger_row(conn, "cost_models", {
+        "cost_model_id": "cm1", "spread_assumption": 0.001, "slippage_assumption": 0.001,
+        "commission_rules": {}, "tax_assumptions": {}, "created_at": "2026-07-28T00:00:00Z",
+    })
+    outcomes.write_decision_outcome_event(
+        conn, "AAPL", first["decision_id"], "2026-07-28T15:00:00Z", 0.02, 0,
     )
-    conn.commit()
-    conn.execute(
-        "INSERT INTO decision_outcome_events "
-        "(outcome_id, decision_id, exit_timestamp, gross_return, net_return, holding_period_days, "
-        "cost_breakdown, cost_model_id, record_hash, previous_record_hash) "
-        "VALUES ('OUT-1', ?, '2026-07-28T15:00:00Z', 0.02, 0.018, 0, '{}', 'cm1', '" + "1" * 64 + "', '" + "0" * 64 + "')",
-        (first["decision_id"],),
-    )
-    conn.commit()
 
     decisions.check_fingerprint(conn, "AAPL", "BUY")  # must not raise -- position closed
 
@@ -244,13 +238,10 @@ def test_record_decision_safe_allows_second_executed_after_close(conn, reference
     import bot.trust_ledger.outcomes as outcomes
     from bot._main_trust_decisions import record_decision_safe
 
-    conn.execute(
-        "INSERT INTO cost_models (sequence_number, cost_model_id, spread_assumption, "
-        "slippage_assumption, commission_rules, tax_assumptions, created_at, record_hash, "
-        "previous_record_hash) VALUES (1,'cm1',0.001,0.001,'{}','{}','2026-07-28T00:00:00Z','"
-        + "0" * 64 + "','" + "0" * 64 + "')"
-    )
-    conn.commit()
+    ledger_svc.append_ledger_row(conn, "cost_models", {
+        "cost_model_id": "cm1", "spread_assumption": 0.001, "slippage_assumption": 0.001,
+        "commission_rules": {}, "tax_assumptions": {}, "created_at": "2026-07-28T00:00:00Z",
+    })
 
     kwargs = _decision_kwargs(reference_chain)
     record_decision_safe(

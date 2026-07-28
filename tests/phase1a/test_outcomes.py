@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import ledger.db as ledger_db  # noqa: E402
+import ledger.ledger as ledger_svc  # noqa: E402
 import bot.trust_ledger.candidates as candidates  # noqa: E402
 import bot.trust_ledger.decisions as decisions  # noqa: E402
 import bot.trust_ledger.outcomes as outcomes  # noqa: E402
@@ -44,13 +45,11 @@ def reference_chain(conn):
         "INSERT INTO deployment_manifests VALUES "
         "('mani_v1','{\"xgboost\":\"run1\"}','risk_v1','strat_v1','fp_v1','{}','2026-07-28T00:00:00Z')"
     )
-    conn.execute(
-        "INSERT INTO cost_models (sequence_number, cost_model_id, spread_assumption, "
-        "slippage_assumption, commission_rules, tax_assumptions, created_at, record_hash, "
-        "previous_record_hash) VALUES (1,'cost_model_v1',0.001,0.001,'{}','{}',"
-        "'2026-07-28T00:00:00Z','" + "0" * 64 + "','" + "0" * 64 + "')"
-    )
     conn.commit()
+    ledger_svc.append_ledger_row(conn, "cost_models", {
+        "cost_model_id": "cost_model_v1", "spread_assumption": 0.001, "slippage_assumption": 0.001,
+        "commission_rules": {}, "tax_assumptions": {}, "created_at": "2026-07-28T00:00:00Z",
+    })
     row = candidates.record_candidate_evaluation_if_concluded(
         conn, "AAPL", "2026-07-28", {}, data_available=True,
         required_models_available=True, evaluation_completed=True,
