@@ -30,7 +30,6 @@ from loguru import logger
 
 from dashboard.registry import RefreshGroup, by_group, widget, require_widgets
 from dashboard.components.history import render_portfolio_performance, perf_choices, PERF_SEP
-from dashboard.components.symbol_detail import render_symbol_detail
 
 require_widgets("sim_sym_dd", "perf_tabs", "perf_out", "symbol_selector", "symbol_detail_out")
 
@@ -114,8 +113,16 @@ def _register_data_tick(timer: gr.Timer) -> None:
         val = matched or (choices[2] if len(choices) > 2 else choices[0] if choices else None)
         return render_portfolio_performance(val or "1M")
 
-    def _sym_detail(sel: str):
-        return render_symbol_detail(sel)
-
     timer.tick(fn=_refresh_perf, inputs=[widget("perf_tabs")],       outputs=[widget("perf_out")])
-    timer.tick(fn=_sym_detail,   inputs=[widget("symbol_selector")], outputs=[widget("symbol_detail_out")])
+    # symbol_detail_out is NOT refreshed here on purpose: this periodic tick and
+    # symbol_selector.change() (app.py) both write to the same output with no
+    # ordering between them -- whichever response lands last wins, not whichever
+    # user action was most recent. If this tick fires with the pre-change
+    # selection while a slower part of the same batch is still in flight, it can
+    # land AFTER a user's .change() response and silently overwrite the correct
+    # just-selected symbol's panel with the previous symbol's stale render
+    # (confirmed bug: dropdown showing SNOW, panel showing GOOGL). Leaving
+    # symbol_selector.change() as the sole writer removes the race entirely --
+    # a nice-to-have "auto-refresh the open detail panel every 5 min" is not
+    # worth reintroducing a bug that shows one symbol's data under another's
+    # name.
