@@ -282,7 +282,8 @@ def _handle_entry(
                 )
             fill_shares = notional / fill_price
             _drivers = ctx.xgb.explain(ctx.latest)
-            recorder.record_executed(notional, fill_price, fill_shares, xgb_drivers=_drivers)
+            recorder.record_executed(notional, fill_price, fill_shares,
+                                     stop_pct, tp_target_pct, rr_ratio, xgb_drivers=_drivers)
             _sent_s = ctx.sentiments.get(symbol, 0.0)
             _ens_score = ensemble_confidence(ctx.xgb_prob, ctx.lstm_prob, _sent_s, ctx.macro_score)
             _sym_sector_tg = SECTOR_MAP.get(symbol, "")

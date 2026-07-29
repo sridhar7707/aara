@@ -8,10 +8,13 @@ ESCALATED/FAIL results are logged but never block execution -- same
 best-effort philosophy as every other Trust Ledger write (see
 bot/_main_trust_decisions.py's module docstring).
 
-Rule 3 (trade structure) will read ESCALATED for most decisions today:
-decisions.build_intent() does not yet populate thesis/invalidation_point/
-expected_return_basis_points. That is a real, honest signal for Phase 1B
-analysis, not a bug in this checker -- it is not silently suppressed.
+Rule 3 (trade structure) requires thesis/invalidation_point/
+expected_return_basis_points on BUY only -- EntryDecisionRecorder.
+record_executed() (bot/_main_trust_decisions.py) populates these from the
+same stop/target sizing gates _handle_entry already computes before
+placing the order. SELL is a RISK_MANAGEMENT_EXIT, not a fresh position --
+it's the original BUY's invalidation point firing (or target hit), so
+only the confidence floor applies there, not a restated thesis.
 
 Rule 6 (override prevention) is a static ledger-level invariant already
 enforced by schema.sql's append-only triggers, not something that varies
@@ -110,8 +113,19 @@ def _rule_position_sizing_discipline(conn: sqlite3.Connection, decision_row: dic
 
 
 def _rule_trade_structure(decision_row: dict) -> tuple[str, str, str]:
-    if decision_row["action"] not in _TRADE_ACTIONS:
+    """BUY (OPPORTUNITY_ENTRY) must state thesis/invalidation_point/
+    expected_return_basis_points -- TRADING_CONSTITUTION.md Rule 3's own
+    English: "why, when it's wrong, and what you expect." SELL
+    (RISK_MANAGEMENT_EXIT) doesn't get a fresh thesis: it IS the original
+    BUY's invalidation point firing (or its target being hit), not a new
+    position -- so only the confidence floor applies there."""
+    action = decision_row["action"]
+    if action not in _TRADE_ACTIONS:
         return "PASS", "execution_proceeded", "not a trade-committing decision"
+    if decision_row.get("final_confidence", 0.0) < 0.5:
+        return "ESCALATED", "advisory_only", "missing required fields: final_confidence>=0.5"
+    if action != "BUY":
+        return "PASS", "execution_proceeded", "exit decision: confidence floor met, no fresh thesis required"
     intent = decision_row.get("intent") or {}
     missing = []
     if not intent.get("thesis"):
@@ -120,8 +134,6 @@ def _rule_trade_structure(decision_row: dict) -> tuple[str, str, str]:
         missing.append("intent.invalidation_point")
     if intent.get("expected_return_basis_points") is None:
         missing.append("intent.expected_return_basis_points")
-    if decision_row.get("final_confidence", 0.0) < 0.5:
-        missing.append("final_confidence>=0.5")
     if missing:
         return "ESCALATED", "advisory_only", "missing required fields: " + ", ".join(missing)
     return "PASS", "execution_proceeded", "thesis, invalidation point, expected return, and confidence all present"

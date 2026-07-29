@@ -33,14 +33,32 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def build_intent(action: str, contributing_modules: list[str] | None = None,
-                  override_reason: str | None = None) -> dict:
+def build_intent(
+    action: str, contributing_modules: list[str] | None = None,
+    override_reason: str | None = None,
+    thesis: str | None = None, invalidation_point: str | None = None,
+    expected_return_basis_points: float | None = None,
+) -> dict:
+    """thesis/invalidation_point/expected_return_basis_points back
+    TRADING_CONSTITUTION.md Rule 3 (Trade Structure Requirement) -- an
+    OPPORTUNITY_ENTRY (BUY) states why, when it's wrong, and what it
+    expects. Deliberately optional: a RISK_MANAGEMENT_EXIT (SELL) doesn't
+    get a new thesis -- it's the invalidation point of the original BUY's
+    thesis firing, not a fresh position -- and NO_ACTION (HOLD/REJECT)
+    never opens risk at all. See bot/trust_ledger/constitution.py's Rule 3
+    check, which scopes the requirement to BUY accordingly."""
     intent = {
         "primary_intent": _PRIMARY_INTENT.get(action, "NO_ACTION"),
         "contributing_modules": contributing_modules or [],
     }
     if override_reason:
         intent["override_reason"] = override_reason
+    if thesis:
+        intent["thesis"] = thesis
+    if invalidation_point:
+        intent["invalidation_point"] = invalidation_point
+    if expected_return_basis_points is not None:
+        intent["expected_return_basis_points"] = expected_return_basis_points
     return intent
 
 

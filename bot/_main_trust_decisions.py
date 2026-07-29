@@ -134,12 +134,20 @@ class EntryDecisionRecorder:
         )
 
     def record_executed(
-        self, notional: float, fill_price: float, fill_shares: float, xgb_drivers: list | None = None,
+        self, notional: float, fill_price: float, fill_shares: float,
+        stop_pct: float, tp_target_pct: float, rr_ratio: float,
+        xgb_drivers: list | None = None,
     ) -> None:
         """xgb_drivers: XGBPredictor.explain()'s SHAP output, if the caller
         has it available -- rebuilds model_outputs with it rather than
         reusing the __init__-time version (which never has drivers, since
-        computing them for every rejected gate would be wasted SHAP calls)."""
+        computing them for every rejected gate would be wasted SHAP calls).
+
+        stop_pct/tp_target_pct/rr_ratio: the same sizing gates _handle_entry
+        already computed and passed before ever placing the order (Gates
+        8a/8b in bot/_main_cycle.py) -- reused here to populate
+        intent.thesis/invalidation_point/expected_return_basis_points, per
+        TRADING_CONSTITUTION.md Rule 3 (Trade Structure Requirement)."""
         self.trace.append({"gate": "all_entry_gates", "passed": True, "detail": "all gates passed"})
         model_outputs = self.model_outputs
         if xgb_drivers:
@@ -148,14 +156,25 @@ class EntryDecisionRecorder:
             model_outputs["xgboost"]["metadata"] = {
                 "shap_drivers": [{"feature": str(f), "shap_value": float(v)} for f, v in xgb_drivers]
             }
+        thesis = (
+            f"{self.symbol}: XGB {self.model_outputs['xgboost']['confidence']:.0%}, "
+            f"LSTM {self.model_outputs['lstm']['confidence']:.0%}, "
+            f"regime {self.market_context.get('regime', 'unknown')}; "
+            f"stop {stop_pct:.1%}, target {tp_target_pct:.1%}, R:R {rr_ratio:.2f}x"
+        )
+        intent = decisions.build_intent(
+            "BUY", contributing_modules=["xgboost", "lstm", "finbert", "ensemble"],
+            thesis=thesis,
+            invalidation_point=f"price closes below ${fill_price * (1 - stop_pct):.2f} (stop-loss)",
+            expected_return_basis_points=round(tp_target_pct * 10_000),
+        )
         record_decision_safe(
             self.trust_conn, self.candidate_event_id, self.deployment_manifest_id,
             self.symbol, "BUY", "EXECUTED",
             self.portfolio_snapshot, self.market_context, model_outputs,
             {"gate_trace": self.trace, "notional": notional, "fill_price": fill_price,
              "fill_shares": fill_shares},
-            self.final_confidence,
-            decisions.build_intent("BUY", contributing_modules=["xgboost", "lstm", "finbert", "ensemble"]),
+            self.final_confidence, intent,
             self.data_completeness, risk=self.risk,
         )
 

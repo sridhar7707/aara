@@ -108,6 +108,23 @@ def test_build_intent_with_override_reason():
     assert intent["override_reason"] == "manual re-entry approved"
 
 
+def test_build_intent_with_trade_structure_fields():
+    intent = decisions.build_intent(
+        "BUY", thesis="AAPL: strong momentum", invalidation_point="close below $95",
+        expected_return_basis_points=250,
+    )
+    assert intent["thesis"] == "AAPL: strong momentum"
+    assert intent["invalidation_point"] == "close below $95"
+    assert intent["expected_return_basis_points"] == 250
+
+
+def test_build_intent_omits_trade_structure_fields_when_not_given():
+    intent = decisions.build_intent("SELL")
+    assert "thesis" not in intent
+    assert "invalidation_point" not in intent
+    assert "expected_return_basis_points" not in intent
+
+
 def test_build_data_completeness_complete_when_nothing_missing():
     dc = decisions.build_data_completeness()
     assert dc == {"status": "COMPLETE", "missing_inputs": [], "stale_inputs": []}

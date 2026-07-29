@@ -20,6 +20,7 @@ import bot.trust_ledger.candidates as candidates  # noqa: E402
 from bot._main_cycle import _handle_entry, EntryContext  # noqa: E402
 from bot._main_positions import _handle_exits  # noqa: E402
 from bot._main_trust_decisions import ExitLedgerContext  # noqa: E402
+from bot.risk.risk_manager import RiskManager  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -92,6 +93,16 @@ class _AlwaysApproveRisk:
         return True
 
 
+class _AlwaysApproveRealRisk(RiskManager):
+    """Like _AlwaysApproveRisk, but a real RiskManager subclass -- carries
+    the halted/portfolio_high/daily_start_value attributes
+    bot.trust_ledger.constitution reads, unlike the bare fake above (whose
+    AttributeError would be silently swallowed by record_decision_safe's
+    best-effort try/except, meaning zero constitution rows get written)."""
+    def approve_buy(self, *args, **kwargs):
+        return True
+
+
 class _FakeFillClient:
     def buy(self, symbol, notional, limit_price=None):
         return {"order_id": "ord-1"}
@@ -155,6 +166,36 @@ def test_handle_entry_executed_buy_writes_executed_decision(trades_db, ledger_co
     # carry the real drivers computed just before the fill, not an empty list.
     outputs = json.loads(model_outputs)
     assert outputs["xgboost"]["metadata"]["shap_drivers"] == [{"feature": "rsi", "shap_value": 0.1}]
+
+
+def test_handle_entry_executed_buy_passes_constitution_rule_3(trades_db, ledger_conn, chain):
+    """End-to-end proof that the real entry path populates
+    intent.thesis/invalidation_point/expected_return_basis_points (not just
+    a unit test of constitution.py in isolation) -- and that Rule 3 (Trade
+    Structure Requirement) actually reads PASS for a genuine executed BUY,
+    closing the gap noted in CURRENT_ARCHITECTURE.md."""
+    ctx = _minimal_entry_ctx(
+        ledger_conn, chain, current_atr=2.0, xgb=_FakeXgb(),
+        tradeable_capital=5000.0, available_cash=5000.0, portfolio_value=10000.0,
+    )
+
+    _handle_entry(trades_db, client=_FakeFillClient(), risk=_AlwaysApproveRealRisk(), symbol="AAPL", ctx=ctx)
+
+    decision_id, action, event_type, _, _ = _latest_decision(ledger_conn, "AAPL")
+    assert action == "BUY" and event_type == "EXECUTED"
+
+    intent = json.loads(ledger_conn.execute(
+        "SELECT intent FROM decision_events WHERE decision_id=?", (decision_id,),
+    ).fetchone()[0])
+    assert intent["thesis"]
+    assert intent["invalidation_point"]
+    assert intent["expected_return_basis_points"] is not None
+
+    rule3 = ledger_conn.execute(
+        "SELECT check_result FROM constitution_enforcement_events "
+        "WHERE decision_id=? AND rule_id='rule_3'", (decision_id,),
+    ).fetchone()
+    assert rule3 == ("PASS",)
 
 
 def test_handle_entry_correlation_gate_carries_specific_reason(trades_db, ledger_conn, chain):

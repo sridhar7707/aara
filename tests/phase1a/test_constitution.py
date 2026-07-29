@@ -189,6 +189,26 @@ def test_rule_3_not_applicable_to_hold_or_reject(conn, reference_chain):
     assert rule3["check_result"] == "PASS"
 
 
+def test_rule_3_sell_does_not_require_a_fresh_thesis(conn, reference_chain):
+    """A SELL is a RISK_MANAGEMENT_EXIT -- the original BUY's invalidation
+    point firing, not a new position -- so it must not be held to the same
+    thesis/invalidation_point/expected_return bar as a BUY. Only the
+    confidence floor applies."""
+    decision_row = _write_decision(conn, reference_chain, action="SELL", intent=decisions.build_intent("SELL"))
+    rows = constitution.check_and_log(conn, decision_row, risk=None)
+    rule3 = next(r for r in rows if r["rule_id"] == "rule_3")
+    assert rule3["check_result"] == "PASS"
+
+
+def test_rule_3_sell_still_escalates_below_confidence_floor(conn, reference_chain):
+    decision_row = _write_decision(
+        conn, reference_chain, action="SELL", intent=decisions.build_intent("SELL"), final_confidence=0.3,
+    )
+    rows = constitution.check_and_log(conn, decision_row, risk=None)
+    rule3 = next(r for r in rows if r["rule_id"] == "rule_3")
+    assert rule3["check_result"] == "ESCALATED"
+
+
 # ── Rule 4: Portfolio Drawdown Circuit Breaker ──────────────────────────────
 
 def test_rule_4_passes_with_no_drawdown(conn, reference_chain):
