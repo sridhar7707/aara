@@ -1,44 +1,104 @@
 """Counterfactual Analysis — Phase 5 Step 12 of the Decision Intelligence roadmap.
 
-Answers "what happened to the ones we passed on?" for every decision that
-never became a trade (blocked by a gate, rejected by a human, or expired
-waiting on one). Evidence-gated like Decision Quality / Loss Explanation /
-Investor Profile — reports "not enough data" rather than a verdict below
-the threshold, and never judges a rejection before its outcome window has
-actually closed (evaluate_rejected_decision() enforces that itself).
+Answers "what happened to the ones we passed on?" for every gate-blocked
+decision. Reads the Trust Ledger, not the retired decision_log (phase0_
+decisions.md #17/#18). Evidence-gated like Decision Quality / Loss
+Explanation / Investor Profile — reports "not enough data" rather than a
+verdict below the threshold, and never judges a rejection before its
+outcome window has actually closed (_evaluate_rejection() enforces that
+itself).
 """
 from __future__ import annotations
+
+import datetime
+import json
 
 from loguru import logger
 
 from bot.core.error_logger import safe_render, timed
-from dashboard.data import get_db_conn
 from dashboard.design_system import (
     GAIN, LOSS, TEXT2, TEXT3,
     FONT_LABEL, WEIGHT_BOLD,
     _section, _empty_state, _card, _stat_card,
 )
-from database.services.decision_service import list_rejected_decisions, evaluate_rejected_decision
+from database.services.decision_service import _forward_return
 
 _logger = logger
 
 _MIN_EVALUATED_FOR_INSIGHTS = 15  # matches the ~15-20 evidence-gate threshold used elsewhere in Phase 3/5
 _MIN_PER_GATE_REASON        = 3   # a gate needs at least this many evaluated misses to call out its hit rate
 _MAX_CANDIDATES_PER_RENDER  = 30  # bounds yfinance calls per refresh (RefreshGroup.SLOW, every 5 min)
+_DEFAULT_WINDOW_DAYS        = 10  # the ledger doesn't carry an expected_holding_period like decision_log did
+
+
+def _rejected_decisions(limit: int) -> list[dict]:
+    """Gate-blocked entries (action=REJECT, event_type=QUALIFIED_REJECTION),
+    most recent first. Reads the Trust Ledger — decision_log is retired per
+    phase0_decisions.md #17/#18. gate_reason is the last failing gate in the
+    decision's risk_checks.gate_trace (EntryDecisionRecorder.reject() writes
+    exactly one)."""
+    import ledger.db as ledger_db
+    from bot.trust_ledger.connection import DEFAULT_LEDGER_DB_PATH
+    try:
+        conn = ledger_db.get_conn(DEFAULT_LEDGER_DB_PATH)
+    except Exception as exc:
+        _logger.warning(f"counterfactual ledger connect: {exc}")
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT decision_id, asset, timestamp, risk_checks FROM decision_events "
+            "WHERE action='REJECT' AND event_type='QUALIFIED_REJECTION' "
+            "ORDER BY sequence_number DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    except Exception as exc:
+        _logger.warning(f"counterfactual read: {exc}")
+        return []
+    finally:
+        conn.close()
+
+    results = []
+    for decision_id, symbol, timestamp, risk_checks_json in rows:
+        gate_reason = None
+        try:
+            trace = json.loads(risk_checks_json).get("gate_trace") or []
+            failing = [t for t in trace if not t.get("passed", True)]
+            if failing:
+                gate_reason = failing[-1].get("gate")
+        except (TypeError, json.JSONDecodeError) as exc:
+            _logger.debug(f"counterfactual gate_trace parse ({decision_id}): {exc}")
+        results.append({"decision_id": decision_id, "symbol": symbol,
+                         "decision_date": timestamp, "gate_reason": gate_reason})
+    return results
+
+
+def _evaluate_rejection(symbol: str, decision_date: str) -> dict:
+    """What actually happened to the symbol afterward — read-only, fixed
+    default window (see _DEFAULT_WINDOW_DAYS). None if the window hasn't
+    closed yet or price history isn't available — never a partial/
+    in-progress return, matching the project's standing rule that outcomes
+    aren't judged before their window closes."""
+    try:
+        start_date = datetime.datetime.fromisoformat(str(decision_date)[:10]).date()
+    except (TypeError, ValueError):
+        return {"forward_return": None}
+    target_end = start_date + datetime.timedelta(days=_DEFAULT_WINDOW_DAYS)
+    if target_end > datetime.datetime.now(datetime.timezone.utc).date():
+        return {"forward_return": None}
+    return {"forward_return": _forward_return(symbol, start_date, target_end)}
 
 
 def _evaluated_rejections() -> list[dict]:
     """Rejected/blocked decisions whose outcome window has closed, with a
     known forward_return. Still-pending-window and data-unavailable rows are
     silently excluded here (not an error — just not evaluable yet)."""
-    with get_db_conn() as con:
-        candidates = list_rejected_decisions(con, limit=_MAX_CANDIDATES_PER_RENDER)
-        results = []
-        for c in candidates:
-            r = evaluate_rejected_decision(con, c["decision_id"])
-            if r.get("forward_return") is not None:
-                results.append({**c, "forward_return": r["forward_return"]})
-        return results
+    candidates = _rejected_decisions(limit=_MAX_CANDIDATES_PER_RENDER)
+    results = []
+    for c in candidates:
+        r = _evaluate_rejection(c["symbol"], c["decision_date"])
+        if r.get("forward_return") is not None:
+            results.append({**c, "forward_return": r["forward_return"]})
+    return results
 
 
 def _gate_reason_breakdown(rows: list[dict]) -> tuple[str | None, str | None]:

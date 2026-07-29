@@ -117,9 +117,7 @@ def _latest_decision(conn, asset):
 
 
 def test_handle_entry_gate_rejection_writes_qualified_rejection(trades_db, ledger_conn, chain):
-    from database.services.decision_service import create_decision
-    did = create_decision(trades_db, "AAPL", 100.0, 10000.0)
-    ctx = _minimal_entry_ctx(ledger_conn, chain, macro_halt=True, decision_id=did)
+    ctx = _minimal_entry_ctx(ledger_conn, chain, macro_halt=True)
 
     _handle_entry(trades_db, client=None, risk=None, symbol="AAPL", ctx=ctx)
 
@@ -136,10 +134,8 @@ def test_handle_entry_gate_rejection_writes_qualified_rejection(trades_db, ledge
 
 
 def test_handle_entry_executed_buy_writes_executed_decision(trades_db, ledger_conn, chain):
-    from database.services.decision_service import create_decision
-    did = create_decision(trades_db, "AAPL", 100.0, 10000.0)
     ctx = _minimal_entry_ctx(
-        ledger_conn, chain, decision_id=did, current_atr=2.0, xgb=_FakeXgb(),
+        ledger_conn, chain, current_atr=2.0, xgb=_FakeXgb(),
         tradeable_capital=5000.0, available_cash=5000.0, portfolio_value=10000.0,
     )
 
@@ -167,7 +163,6 @@ def test_handle_entry_correlation_gate_carries_specific_reason(trades_db, ledger
     the specific coefficient/symbol _passes_correlation_gate already
     computes -- every other gate carries its real computed detail."""
     import pandas as pd
-    from database.services.decision_service import create_decision
     from bot._main_positions import BarData
 
     dates = pd.date_range("2026-01-01", periods=30, freq="D")
@@ -177,9 +172,8 @@ def test_handle_entry_correlation_gate_carries_specific_reason(trades_db, ledger
     class _FakePosition:
         market_value = 1000.0
 
-    did = create_decision(trades_db, "AAPL", 100.0, 10000.0)
     ctx = _minimal_entry_ctx(
-        ledger_conn, chain, decision_id=did,
+        ledger_conn, chain,
         positions={"MSFT": _FakePosition()},
         bars_map={"AAPL": BarData(pd.DataFrame(), aapl_bars), "MSFT": BarData(pd.DataFrame(), msft_bars)},
     )
@@ -211,15 +205,12 @@ def test_bot_main_passes_ledger_ctx_to_handle_exits():
 
 
 def test_handle_entry_order_never_fills_writes_qualified_rejection(trades_db, ledger_conn, chain):
-    from database.services.decision_service import create_decision
-
     class _NoBuyClient:
         def buy(self, symbol, notional, limit_price=None):
             return None
 
-    did = create_decision(trades_db, "AAPL", 100.0, 10000.0)
     ctx = _minimal_entry_ctx(
-        ledger_conn, chain, decision_id=did, current_atr=2.0,
+        ledger_conn, chain, current_atr=2.0,
         tradeable_capital=5000.0, available_cash=5000.0, portfolio_value=10000.0,
     )
 
@@ -272,19 +263,12 @@ def test_handle_exits_hold_writes_hold_decision(trades_db, ledger_conn, chain):
 
 
 def test_handle_exits_ensemble_sell_writes_executed_sell(trades_db, ledger_conn, chain):
-    from database.services.decision_service import create_decision, mark_executed
-    from bot._main_db import log_trade
-
     class _FakeSellClient:
         def sell(self, symbol, qty, limit_price=None):
             return {"order_id": "ord-2"}
 
         def wait_for_fill(self, order_id, timeout_secs=12):
             return 1.0
-
-    did = create_decision(trades_db, "AAPL", 100.0, 10000.0)
-    trade_id = log_trade(trades_db, "AAPL", "BUY", 1.0, 100.0, 100.0, "TRENDING_UP", 10000.0, 0.0)
-    mark_executed(trades_db, did, trade_id=trade_id)
 
     positions = {"AAPL": _FakePosition(avg_entry_price=100.0, qty=1.0, unrealized_plpc=0.0)}
     _handle_exits(
@@ -318,11 +302,8 @@ def test_full_buy_then_sell_writes_outcome_event_and_closes_decision_state(
     followed by a real SELL through _handle_exits, produces a
     decision_outcome_events row referencing the ORIGINAL BUY's decision_id
     (not the SELL's) and flips decision_state from OPEN to CLOSED."""
-    from database.services.decision_service import create_decision
-
-    did = create_decision(trades_db, "AAPL", 100.0, 10000.0)
     entry_ctx = _minimal_entry_ctx(
-        ledger_conn, chain, decision_id=did, current_atr=2.0, xgb=_FakeXgb(),
+        ledger_conn, chain, current_atr=2.0, xgb=_FakeXgb(),
         tradeable_capital=5000.0, available_cash=5000.0, portfolio_value=10000.0,
     )
     _handle_entry(trades_db, client=_FakeFillClient(), risk=_AlwaysApproveRisk(), symbol="AAPL", ctx=entry_ctx)

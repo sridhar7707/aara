@@ -29,18 +29,34 @@ _MIN_FOR_DIMENSION = 3   # need at least this many decisions in a sector/reason 
 
 def _completed_decisions() -> list[tuple]:
     """(decision_id, symbol, outcome_status, outcome_known_at, created_at) for
-    every decision with a known outcome, oldest first. Deliberately reads
-    only decision_log, not trades — decision_log.trade_id links to the
-    executing BUY (pnl_pct always 0 there), not the eventual closing SELL,
-    so outcome_status (already correctly classified by complete_decision())
-    is the only reliable per-decision win/loss signal without a fragile
-    second join to guess which trades row actually closed it."""
-    return safe_query(
-        "SELECT decision_id, symbol, outcome_status, outcome_known_at, created_at "
-        "FROM decision_log WHERE execution_status='EXECUTED' AND outcome_status != 'UNKNOWN' "
-        "ORDER BY outcome_known_at ASC",
-        default=[],
-    ) or []
+    every EXECUTED BUY decision with a closed outcome, oldest first. Reads
+    the Trust Ledger (decision_events/decision_outcome_events) — decision_log
+    is retired per phase0_decisions.md #17/#18; WIN/LOSS/NEUTRAL is derived
+    from decision_outcome_events.net_return's sign, the same classification
+    complete_decision() used to apply to realized_pnl_pct."""
+    import ledger.db as ledger_db
+    from bot.trust_ledger.connection import DEFAULT_LEDGER_DB_PATH
+    try:
+        conn = ledger_db.get_conn(DEFAULT_LEDGER_DB_PATH)
+    except Exception as exc:
+        _logger.warning(f"decision_quality ledger connect: {exc}")
+        return []
+    try:
+        return conn.execute(
+            "SELECT de.decision_id, de.asset, "
+            "CASE WHEN doe.net_return > 0 THEN 'WIN' "
+            "WHEN doe.net_return < 0 THEN 'LOSS' ELSE 'NEUTRAL' END, "
+            "doe.exit_timestamp, de.timestamp "
+            "FROM decision_events de "
+            "JOIN decision_outcome_events doe ON doe.decision_id = de.decision_id "
+            "WHERE de.action='BUY' AND de.event_type='EXECUTED' "
+            "ORDER BY doe.exit_timestamp ASC"
+        ).fetchall()
+    except Exception as exc:
+        _logger.warning(f"decision_quality read: {exc}")
+        return []
+    finally:
+        conn.close()
 
 
 def _nearest_snapshot_value(cutoff: str, before: bool) -> float | None:

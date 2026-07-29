@@ -1,12 +1,13 @@
 """Pending Approvals — Decision Intelligence Phase 4, Step 9.
 
-Supervised-mode BUY approval queue. The dashboard only ever flips
-decision_log's status column here (approve_decision()/reject_decision()) —
-it never places a broker order directly. The bot's own trading loop (which
-holds the Alpaca credentials) picks up approved-but-unexecuted decisions on
-its next cycle via bot._main_cycle._execute_approved_decisions(). A no-op
-today under the default DECISION_MODE=AUTONOMOUS, since nothing ever
-reaches WAITING_APPROVAL in that mode.
+The SUPERVISED per-trade approval workflow this queue served was fully
+retired per phase0_decisions.md #17/#18 — Phase 1A has no per-trade human
+approval workflow at all, and nothing writes to decision_log anymore.
+Kept as a permanent no-op (decision #18: no action needed) rather than
+removed, since a future live-capital DEFENSIVE-state approval queue is a
+deliberate, deferred design (CURRENT_ARCHITECTURE.md's "Deferred, Not
+Forgotten") that would be a *new* append-only table, not a revival of this
+one. This component will never show a pending row again.
 """
 from __future__ import annotations
 
@@ -42,7 +43,7 @@ def render_pending_approvals() -> str:
         return (
             f'<div class="nt nt-wrap">'
             f'{_section("⏳", "Pending Approvals", "")}'
-            f'{_card(_empty_state("⏳", "No decisions awaiting approval", "Only shows up when DECISION_MODE=SUPERVISED and a BUY signal clears every gate."))}'
+            f'{_card(_empty_state("⏳", "No decisions awaiting approval", "Per-trade approval is retired for Phase 1A — this queue will not populate."))}'
             f'</div>'
         )
 

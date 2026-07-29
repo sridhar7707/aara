@@ -81,10 +81,6 @@ from bot._main_cycle import (
     EntryContext,
     _handle_exits, _handle_entry,
 )
-from bot._main_decisions import (
-    create_buy_decision as _create_buy_decision,
-    execute_approved_decisions as _execute_approved_decisions,
-)
 from bot._main_prep import prepare_cycle_context
 from bot.capital.pool import load_active_pool as _load_pool, compute_tradeable_capital
 from bot._main_runner import (
@@ -279,20 +275,7 @@ def run(
     _remaining_tradeable = _tradeable_capital
     _capital_pool = _load_pool(con, initial_amount=_tradeable_capital)
 
-    # Supervised-mode resumption — decoupled from the per-symbol loop below since
-    # a decision a human approves can outlive that symbol's current-cycle signal.
-    # A no-op every cycle under AUTONOMOUS mode (nothing is ever left APPROVED
-    # + NOT_EXECUTED there, since that path executes atomically). Its capital
-    # deployment still counts toward _cycle_deployed_notional below, so the
-    # risk governor's actual_position_size stays correct if this path is ever used.
     _cycle_deployed_notional = 0.0
-    if not _sanity_blocked:
-        _cash_before_resume = available_cash
-        available_cash = _execute_approved_decisions(
-            con, client, positions, available_cash, portfolio_value,
-            buy_order_syms, pool=_capital_pool,
-        )
-        _cycle_deployed_notional += max(0.0, _cash_before_resume - available_cash)
 
     # ── Per-symbol decision loop ──────────────────────────────────────────────
     for symbol in active_symbols:
@@ -349,8 +332,8 @@ def run(
 
             # Log every evaluated signal so the dashboard can show live model
             # output even on cycles where no trade fires.
-            _signal_log_id = _log_signal(con, symbol, xgb_prob, lstm_prob, sentiment,
-                                         macro_score, regime_name, action_str)
+            _log_signal(con, symbol, xgb_prob, lstm_prob, sentiment,
+                        macro_score, regime_name, action_str)
 
             # Record per-symbol recommendation for every cycle so Rec History widget
             # shows what the bot was thinking even when no trade fires.
@@ -395,15 +378,6 @@ def run(
             if action != 1 or _sanity_blocked:
                 continue
 
-            # Decision Intelligence Phase 1 — every symbol reaching this point is a
-            # genuine AI BUY recommendation, whether or not it survives the gates
-            # below. Created here (not after gates) so a rejected/blocked candidate
-            # is captured too, not just executed trades.
-            _decision_id = _create_buy_decision(
-                con, symbol, current_price, portfolio_value, _signal_log_id,
-                xgb_prob, lstm_prob, sentiment, macro_score, regime_name,
-            )
-
             _cash_before = available_cash
             available_cash = _handle_entry(
                 con, client, risk, symbol,
@@ -421,7 +395,7 @@ def run(
                     ensemble_size=ensemble_size, xgb=xgb,
                     stop_fired_today=_stop_fired_today, volume_ratio=volume_ratio,
                     tradeable_capital=_remaining_tradeable, pool=_capital_pool,
-                    decision_id=_decision_id, lstm=lstm, trust_conn=trust_conn,
+                    lstm=lstm, trust_conn=trust_conn,
                     candidate_event_id=get_todays_candidate_event_id(trust_conn, symbol, today_str),
                     deployment_manifest_id=_active_manifest_id,
                 ),

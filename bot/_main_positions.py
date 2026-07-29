@@ -21,7 +21,6 @@ from config import (
 )
 from bot._main_db import log_trade, _save_risk_state
 from database.trade_journal import close_entry as _journal_close
-from database.services.decision_service import find_open_decision_id, complete_decision
 from bot.decision.daily_actions import record as _rec_action
 from bot.capital.pool import CapitalPool, update_on_sell as _pool_sell
 from bot._main_trust_decisions import ExitDecisionRecorder, ExitLedgerContext
@@ -81,10 +80,10 @@ def _delete_position_state(con: sqlite3.Connection, symbol: str) -> None:
     con.commit()
 
 
-def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, BarData],
-                              con: sqlite3.Connection | None = None,
-                              decision_id: int | None = None) -> bool:
-    """Block buy if any held position has > CORRELATION_THRESHOLD daily-return correlation."""
+def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, BarData]) -> tuple[bool, str]:
+    """Block buy if any held position has > CORRELATION_THRESHOLD daily-return
+    correlation. Returns (passed, reason) -- the caller records the reason
+    itself (Trust Ledger), so this stays a pure calculation with no DB write."""
     def _resolve(bd: BarData | None) -> pd.DataFrame | None:
         if bd is None:
             return None
@@ -95,7 +94,7 @@ def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, B
     entry = bars_map.get(symbol)
     bars_sym = _resolve(entry)
     if bars_sym is None or bars_sym.empty:
-        return True
+        return True, ""
     ret_sym = bars_sym["close"].pct_change().dropna()
     for held in positions:
         if held == symbol:
@@ -112,11 +111,8 @@ def _passes_correlation_gate(symbol: str, positions: dict, bars_map: dict[str, B
         if not math.isnan(corr) and corr > CORRELATION_THRESHOLD:
             _reason = f"{corr:.2f} correlation with held {held}"
             logger.info(f"Correlation gate: {symbol} blocked — {_reason}")
-            if con is not None and decision_id is not None:
-                from database.services.decision_service import reject_decision
-                reject_decision(con, decision_id, rejected_by="system", reason=_reason)
-            return False
-    return True
+            return False, _reason
+    return True, ""
 
 
 def _check_time_exit(pos_state: PositionState | None, pnl_pct: float) -> bool:
@@ -178,14 +174,6 @@ def _maybe_record_day_trade(con: sqlite3.Connection, risk: RiskManager, symbol: 
         _save_risk_state(con, risk)
 
 
-def _complete_linked_decision(con: sqlite3.Connection, symbol: str, pnl_pct: float) -> None:
-    """Complete the decision behind a closing position, if one exists — a safe
-    no-op for positions opened before this wiring existed."""
-    decision_id = find_open_decision_id(con, symbol)
-    if decision_id is not None:
-        complete_decision(con, decision_id, realized_pnl_pct=pnl_pct)
-
-
 def _reconcile_positions(con: sqlite3.Connection, alpaca_positions: dict,
                           portfolio_value: float = 0.0, client=None) -> None:
     """Sync position_state with Alpaca's live positions at startup. Removes
@@ -224,7 +212,6 @@ def _reconcile_positions(con: sqlite3.Connection, alpaca_positions: dict,
                                 notional, "reconcile", portfolio_value, pnl_pct,
                                 entry_price=entry_price, holding_days=holding_days)
             _journal_close(con, sym, _rec_id, "reconcile", pnl_pct, holding_days)
-            _complete_linked_decision(con, sym, pnl_pct)
             logger.warning(
                 f"Reconcile: logged SELL_RECONCILE for {sym} "
                 f"({net_shares:.4f} shares @ ${sell_price:.2f}, entry=${entry_price:.2f}, "
@@ -317,7 +304,6 @@ def _signal_sell(con: sqlite3.Connection, client: AlpacaClient, symbol: str, pos
                                        entry_price=entry_price, order_id=order_id,
                                        holding_days=holding_days)
         _journal_close(con, symbol, _sell_trade_id, reason, pnl_pct, holding_days)
-        _complete_linked_decision(con, symbol, pnl_pct)
         if pool:
             cost_basis = entry_price * pos_qty if entry_price > 0 else pos_qty * current_price
             _pool_sell(con, pool.id, cost_basis, pos_qty * current_price, symbol=symbol)
@@ -384,7 +370,6 @@ def _handle_exits(
                                order_id=sell_result.get("order_id"),
                                holding_days=holding_days)
             _journal_close(con, symbol, _gd_id, "gap-down", pnl_pct, holding_days)
-            _complete_linked_decision(con, symbol, pnl_pct)
             if pool:
                 cost_basis = entry_price * pos_qty if entry_price > 0 else pos_qty * current_price
                 _pool_sell(con, pool.id, cost_basis, pos_qty * current_price, symbol=symbol)
