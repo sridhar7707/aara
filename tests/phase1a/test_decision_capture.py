@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime, timezone
 
 import pytest
 
@@ -200,8 +201,12 @@ def test_get_todays_candidate_event_id_none_when_absent(conn):
 
 
 def test_get_todays_candidate_event_id_survives_cache_reset(conn, reference_chain):
+    """The DB-fallback path matches against the real timestamp reference_chain
+    wrote at insert time, not the literal "2026-07-28" it was labeled with --
+    so the lookup must use the real current date, not that same literal."""
     candidates._recorded_today.clear()  # simulate fresh process
-    found = candidates.get_todays_candidate_event_id(conn, "AAPL", "2026-07-28")
+    today = datetime.now(timezone.utc).date().isoformat()
+    found = candidates.get_todays_candidate_event_id(conn, "AAPL", today)
     assert found == reference_chain["candidate_event_id"]
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -11,6 +12,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 import ledger.db as ledger_db  # noqa: E402
 import ledger.ledger as ledger_svc  # noqa: E402
 import bot.trust_ledger.candidates as candidates  # noqa: E402
+
+
+def _today() -> str:
+    """The candidate write path's DB-fallback dedup check matches against the
+    real timestamp() written at insert time, not the caller-supplied
+    trading_day string -- so a test simulating "today" must use the real
+    current date, not a hardcoded literal that goes stale after midnight."""
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def _tomorrow() -> str:
+    return (datetime.now(timezone.utc).date() + timedelta(days=1)).isoformat()
 
 
 @pytest.fixture(autouse=True)
@@ -67,14 +80,15 @@ def test_write_once_survives_cache_reset_via_db_check(conn):
     """Simulates a process restart: the in-memory cache is cleared but the
     DB already has a row for (symbol, day) -- the DB fallback check must
     still prevent a duplicate write."""
+    today = _today()
     candidates.record_candidate_evaluation_if_concluded(
-        conn, "AAPL", "2026-07-28", _UNIVERSE_PAYLOAD,
+        conn, "AAPL", today, _UNIVERSE_PAYLOAD,
         data_available=True, required_models_available=True, evaluation_completed=True,
     )
     candidates._recorded_today.clear()  # simulate fresh process
 
     result = candidates.record_candidate_evaluation_if_concluded(
-        conn, "AAPL", "2026-07-28", _UNIVERSE_PAYLOAD,
+        conn, "AAPL", today, _UNIVERSE_PAYLOAD,
         data_available=True, required_models_available=True, evaluation_completed=True,
     )
     assert result is None
@@ -86,11 +100,11 @@ def test_write_once_survives_cache_reset_via_db_check(conn):
 
 def test_new_day_allows_a_new_candidate(conn):
     candidates.record_candidate_evaluation_if_concluded(
-        conn, "AAPL", "2026-07-28", _UNIVERSE_PAYLOAD,
+        conn, "AAPL", _today(), _UNIVERSE_PAYLOAD,
         data_available=True, required_models_available=True, evaluation_completed=True,
     )
     second_day = candidates.record_candidate_evaluation_if_concluded(
-        conn, "AAPL", "2026-07-29", _UNIVERSE_PAYLOAD,
+        conn, "AAPL", _tomorrow(), _UNIVERSE_PAYLOAD,
         data_available=True, required_models_available=True, evaluation_completed=True,
     )
     assert second_day is not None

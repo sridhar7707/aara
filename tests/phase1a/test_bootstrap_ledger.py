@@ -13,6 +13,15 @@ import ledger.ledger as ledger_svc  # noqa: E402
 import ledger.integrity as integrity  # noqa: E402
 from scripts import phase1a_bootstrap_ledger as bootstrap_mod  # noqa: E402
 
+# models/saved/*.pkl and *.pt are gitignored (trained binaries, not source) --
+# bootstrap() needs real files on disk to checksum, which only exist after a
+# local training run. CI's checkout never has them, correctly, so this whole
+# file is a local-only regression suite rather than a CI-enforced one.
+pytestmark = pytest.mark.skipif(
+    not (os.path.exists("models/saved/xgb_predictor.pkl") and os.path.exists("models/saved/lstm_predictor.pt")),
+    reason="models/saved/*.pkl and *.pt are gitignored trained artifacts, not present in CI",
+)
+
 
 @pytest.fixture
 def ledger_conn(tmp_path):
