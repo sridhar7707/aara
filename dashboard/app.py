@@ -45,30 +45,23 @@ from dashboard.data import (
     get_data, DB_PATH, HF_TOKEN, HF_REPO_ID,
     _now_ct, _to_ct, _market_status,
 )
-from dashboard.charts import (
-    render_equity_chart, render_allocation_chart,
-    render_pnl_chart, render_feature_importance_chart,
-    render_returns_histogram, render_winloss_chart,
-    _get_sym_hist, _sym_perf, _sparkline, _FI_LABELS,
-)
+from dashboard.charts import _get_sym_hist, _sym_perf, _sparkline, _FI_LABELS
 from dashboard.components.overview import (
     render_portfolio_health_hero,
     render_trade_frequency, render_spy_banner,
 )
-from dashboard.components.market_mood import render_market_mood
 from dashboard.components.ai_panel import render_ai_recommendation, render_ai_committee, _WHY_MAP
 from dashboard.components.risk import render_risk_panel, render_market_intelligence, _risk_level, _SECTOR_MAP
 from dashboard.components.portfolio import render_positions, render_trades
 from dashboard.components.models import (
-    render_validation_report, render_institutional_metrics,
-    render_investor_view, render_paper_trading_scorecard,
+    render_validation_report, render_investor_view, render_paper_trading_scorecard,
 )
 from dashboard.components.signals import render_watchlist, render_timeline
 from dashboard.components.history import render_whats_changed, render_portfolio_performance, perf_choices
 from dashboard.components.recommendation_history import (
     render_recommendation_history, render_buy_candidates, render_top_picks,
 )
-from dashboard.components.news import render_news_feed, render_news_feed_initial
+from dashboard.components.news import render_news_feed
 from dashboard.components.signal_history import render_signal_history
 from dashboard.components.decision import render_decision_center
 from dashboard.components.rebalance import render_rebalance
@@ -79,12 +72,10 @@ from dashboard.components.thesis import render_thesis_tracker
 from dashboard.components.weekly_summary import render_weekly_summary
 from dashboard.components.simulator import render_portfolio_simulator
 from dashboard.components.timeline import render_all_timelines
-from dashboard.components.executive_summary import render_executive_summary
 from dashboard.components.decision_bar import render_decision_bar
 from dashboard.components.capital import (
-    render_capital_overview, render_capital_chart,
+    render_capital_overview,
     render_profit_breakdown, render_managed_capital, save_reinvestment_mode,
-    render_capital_health, render_capital_ledger,
     do_pool_deposit, do_pool_withdraw, do_set_reserve, _load_pool,
 )
 from dashboard.components.attribution import (
@@ -92,14 +83,13 @@ from dashboard.components.attribution import (
     render_attribution_by_model, render_attribution_by_trade,
     render_confidence_calibration, render_exit_attribution,
 )
-from dashboard.components.decision_quality import render_decision_quality_summary
-from dashboard.components.counterfactual import render_counterfactual_analysis
 from dashboard.components.trade_journal import render_trade_journal
 from dashboard.components.loss_explanation import render_loss_explanation
 from dashboard.components.pending_approvals import (
     render_pending_approvals, on_approve_click, on_reject_click,
 )
 from dashboard.timers import register_all_timers
+from dashboard.prerender import prerender_all
 import dashboard.registry as registry
 from database.user_settings import get_all_settings, get_setting
 from bot.core.error_logger import safe_render, timed
@@ -130,97 +120,9 @@ _theme = gr.themes.Base(
 # gr.Plot ignores value=callable in Gradio 5.9 and demo.load() events do not
 # fire reliably, so we render everything upfront and pass static values.
 # market_mood has a 20 s yfinance timeout; its prewarm thread starts at import
-# so by the time this block runs it already has a head start.
-import concurrent.futures as _cf
-import traceback as _tb_init
-
-def _safe_fig(fn):
-    try:
-        return fn()
-    except Exception as exc:
-        import plotly.graph_objects as _go
-        logger.error(f"[startup] chart render failed: {fn.__name__}\n{_tb_init.format_exc()}")
-        fig = _go.Figure()
-        fig.add_annotation(text=f"Chart error: {exc}", xref="paper", yref="paper",
-                           x=0.5, y=0.5, showarrow=False, font=dict(color="#ff5252"))
-        return fig
-
-def _safe_html(fn, fallback=None):
-    try:
-        return fn()
-    except Exception as exc:
-        logger.error(f"[startup] HTML render failed: {fn.__name__}\n{_tb_init.format_exc()}")
-        if fallback is not None:
-            return fallback
-        return (
-            f'<div style="background:#171a21;border:1px solid #ff5252;'
-            f'border-left:3px solid #ff5252;border-radius:8px;padding:16px 20px;margin:8px 0;">'
-            f'<div style="font-size:15px;font-weight:700;color:#ff5252;margin-bottom:6px;">'
-            f'&#9888; {fn.__name__} unavailable</div>'
-            f'<div style="font-size:11px;color:#b0b7c3;line-height:1.7;">'
-            f'{type(exc).__name__}: {str(exc)[:120]}<br>Full details in logs/errors.log</div></div>'
-        )
-
-logger.info("[startup] pre-rendering all components...")
-_executor = _cf.ThreadPoolExecutor(max_workers=13)
-_chart_futs = {
-    "equity":       _executor.submit(_safe_fig,  render_equity_chart),
-    "alloc":        _executor.submit(_safe_fig,  render_allocation_chart),
-    "pnl":          _executor.submit(_safe_fig,  render_pnl_chart),
-    "capital":      _executor.submit(_safe_fig,  render_capital_chart),
-    "ret_hist":     _executor.submit(_safe_fig,  render_returns_histogram),
-    "winloss":      _executor.submit(_safe_fig,  render_winloss_chart),
-    "fi":           _executor.submit(_safe_fig,  render_feature_importance_chart),
-    "news":         _executor.submit(_safe_html, render_news_feed_initial),
-    "market_mood":  _executor.submit(_safe_html, render_market_mood),
-    # These call get_data() which triggers a yfinance fetch on first run;
-    # running them in the pool means they run in parallel with charts
-    # instead of blocking the main thread after chart pre-rendering completes.
-    "exec_summary":   _executor.submit(_safe_html, render_executive_summary),
-    "metrics":        _executor.submit(_safe_html, render_institutional_metrics),
-    "cap_health":     _executor.submit(_safe_html, render_capital_health),
-    "cap_ledger":     _executor.submit(_safe_html, render_capital_ledger),
-    # trust_ledger.db is pulled from HF at startup (refresh_db_from_hf) and can
-    # be slow/stalled the same way trades.db can -- these two read it directly,
-    # so they need the same timeout guard as the other network-touching panels
-    # above (unguarded gr.HTML(value=fn) previously hung the whole Space launch).
-    "decision_quality": _executor.submit(_safe_html, render_decision_quality_summary),
-    "counterfactual":   _executor.submit(_safe_html, render_counterfactual_analysis),
-}
-
-def _wait(key, timeout):
-    try:
-        return _chart_futs[key].result(timeout=timeout)
-    except Exception as exc:
-        logger.warning(f"[startup] {key} timed out or failed after {timeout}s")
-        if key in ("news", "market_mood", "decision_quality", "counterfactual"):
-            return (f'<div style="color:#ff5252;font-size:12px;padding:8px;">'
-                    f'&#9888; {key} unavailable: timed out after {timeout}s</div>')
-        fig = _go.Figure()
-        fig.add_annotation(text=f"Timed out after {timeout}s: {exc}", xref="paper", yref="paper",
-                           x=0.5, y=0.5, showarrow=False, font=dict(color="#ff5252"))
-        return fig
-
-import plotly.graph_objects as _go
-_ci = {
-    "equity":       _wait("equity",       15),
-    "alloc":        _wait("alloc",        15),
-    "pnl":          _wait("pnl",          15),
-    "capital":      _wait("capital",      15),
-    "ret_hist":     _wait("ret_hist",     15),
-    "winloss":      _wait("winloss",      15),
-    "fi":           _wait("fi",           15),
-    "news":         _wait("news",         15),
-    "market_mood":  _wait("market_mood",  25),  # 20 s yfinance + buffer
-    "exec_summary": _wait("exec_summary", 20),
-    "metrics":      _wait("metrics",      20),
-    "cap_health":   _wait("cap_health",   15),
-    "cap_ledger":   _wait("cap_ledger",   15),
-    "decision_quality": _wait("decision_quality", 15),
-    "counterfactual":   _wait("counterfactual",   15),
-}
-_executor.shutdown(wait=False)
-logger.info("[startup] pre-render complete")
+# so by the time this block runs it already has a head start. Extracted to
+# dashboard/prerender.py (kept app.py under the 500-line limit).
+_ci = prerender_all()
 
 with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_JS) as _demo:
     gr.HTML(HEADER_HTML)
