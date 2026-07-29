@@ -90,7 +90,7 @@ from bot.trust_ledger.connection import get_ledger_conn
 from bot.trust_ledger.candidates import get_todays_candidate_event_id
 from ledger.integrity import get_active_pointer
 from bot._main_candidates import record_candidate_safe
-from bot._main_trust_decisions import ExitLedgerContext, record_risk_evaluation_safe
+from bot._main_trust_decisions import ExitLedgerContext, record_data_quality_safe, record_risk_evaluation_safe
 
 os.makedirs("logs", exist_ok=True)
 if not os.getenv("_BOT_LOG_HANDLER_ADDED"):
@@ -239,6 +239,7 @@ def run(
             status_msg = (f"status={acct_status}, trading_blocked={trading_blocked}, "
                           f"account_blocked={account_blocked}")
             logger.error(f"Account not tradeable ({status_msg}) — aborting cycle")
+            record_data_quality_safe(trust_conn, "alpaca_account", "DOWN", status_msg)
             tg._send(f"🚨 Account not tradeable ({status_msg}) — bot halted. Check Alpaca dashboard.")
             con.close()
             trust_conn.close()
@@ -257,9 +258,10 @@ def run(
         logger.info(f"Account standing verified — status=ACTIVE, equity=${pdt_equity:,.2f}")
     except Exception as e:
         logger.warning(f"Account compliance check failed: {e}")
+        record_data_quality_safe(trust_conn, "alpaca_account", "DEGRADED", f"compliance check raised: {e}")
         pdt_exempt = False
 
-    positions       = _fetch_positions_for_reconcile(client, con)
+    positions       = _fetch_positions_for_reconcile(client, con, trust_conn)
     if not _sanity_blocked:
         _reconcile_positions(con, positions, portfolio_value=portfolio_value, client=client)
 

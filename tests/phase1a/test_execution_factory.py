@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspa
 from bot.execution.factory import get_executor  # noqa: E402
 from bot.execution.alpaca_client import AlpacaClient  # noqa: E402
 from bot.execution.paper_executor import PaperExecutor  # noqa: E402
+from bot.execution.supervised import SupervisedExecutor  # noqa: E402
 
 
 def test_default_backend_is_alpaca_client(monkeypatch):
@@ -31,6 +32,12 @@ def test_paper_ledger_backend_returns_paper_executor(monkeypatch, tmp_path):
     (tmp_path / "data").mkdir()
     executor = get_executor()
     assert isinstance(executor, PaperExecutor)
+
+
+def test_supervised_backend_returns_supervised_executor(monkeypatch):
+    monkeypatch.setenv("EXECUTION_BACKEND", "supervised")
+    executor = get_executor()
+    assert isinstance(executor, SupervisedExecutor)
 
 
 def test_live_backend_raises_if_base_url_still_paper(monkeypatch):

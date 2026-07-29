@@ -17,6 +17,7 @@ from typing import Any
 from loguru import logger
 
 import bot.trust_ledger.constitution as constitution
+import bot.trust_ledger.data_quality as data_quality
 import bot.trust_ledger.decisions as decisions
 import bot.trust_ledger.outcomes as outcomes
 import bot.trust_ledger.risk as risk_ledger
@@ -282,3 +283,15 @@ def record_risk_evaluation_safe(
         )
     except Exception as e:
         logger.warning(f"trust ledger risk evaluation write failed: {e}")
+
+
+def record_data_quality_safe(
+    trust_conn: sqlite3.Connection, source: str, status: str, detail: str | None = None,
+) -> None:
+    """Best-effort wrapper around bot.trust_ledger.data_quality.record_data_quality_event
+    -- same philosophy as record_risk_evaluation_safe above: a health-log write
+    failure must never affect the caller it's reporting on."""
+    try:
+        data_quality.record_data_quality_event(trust_conn, source, status, detail)
+    except Exception as e:
+        logger.warning(f"trust ledger data quality write failed: {e}")

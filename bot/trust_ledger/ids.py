@@ -54,3 +54,8 @@ def new_cost_model_id(label: str) -> str:
 def new_constitution_event_id() -> str:
     """For constitution_enforcement_events -- one per rule check, several per decision."""
     return _new_id("CONST")
+
+
+def new_data_quality_event_id() -> str:
+    """For data_quality_events -- portfolio-level, no symbol."""
+    return _new_id("DQ")
