@@ -198,6 +198,26 @@ def test_handle_entry_executed_buy_passes_constitution_rule_3(trades_db, ledger_
     assert rule3 == ("PASS",)
 
 
+def test_handle_entry_executed_buy_carries_news_data_timestamp(trades_db, ledger_conn, chain):
+    """Phase 1A prerequisite #1 (CURRENT_ARCHITECTURE.md): market_context
+    must carry news_data_timestamp when available. bot/main.py threads it
+    from _load_premarket_sentiment()'s saved_at through EntryContext."""
+    ctx = _minimal_entry_ctx(
+        ledger_conn, chain, current_atr=2.0, xgb=_FakeXgb(),
+        tradeable_capital=5000.0, available_cash=5000.0, portfolio_value=10000.0,
+        news_data_timestamp="2026-07-29T12:00:00+00:00",
+    )
+
+    _handle_entry(trades_db, client=_FakeFillClient(), risk=_AlwaysApproveRealRisk(), symbol="AAPL", ctx=ctx)
+
+    decision_id, action, event_type, _, _ = _latest_decision(ledger_conn, "AAPL")
+    assert action == "BUY" and event_type == "EXECUTED"
+    market_context = json.loads(ledger_conn.execute(
+        "SELECT market_context FROM decision_events WHERE decision_id=?", (decision_id,),
+    ).fetchone()[0])
+    assert market_context["news_data_timestamp"] == "2026-07-29T12:00:00+00:00"
+
+
 def test_handle_entry_correlation_gate_carries_specific_reason(trades_db, ledger_conn, chain):
     """Regression: the correlation gate used to write a generic placeholder
     ('correlated with an existing held position') to the ledger instead of
@@ -281,12 +301,14 @@ class _FakePosition:
         self.unrealized_plpc = unrealized_plpc
 
 
-def _exit_ledger_ctx(ledger_conn, chain):
-    return ExitLedgerContext(
+def _exit_ledger_ctx(ledger_conn, chain, **overrides):
+    defaults = dict(
         trust_conn=ledger_conn, candidate_event_id=chain["candidate_event_id"],
         deployment_manifest_id=chain["manifest_id"], xgb_prob=0.6, lstm_prob=0.55,
         sentiment=0.1, macro_score=0.5,
     )
+    defaults.update(overrides)
+    return ExitLedgerContext(**defaults)
 
 
 def test_handle_exits_hold_writes_hold_decision(trades_db, ledger_conn, chain):
@@ -301,6 +323,24 @@ def test_handle_exits_hold_writes_hold_decision(trades_db, ledger_conn, chain):
     assert row is not None
     assert row[1] == "HOLD"
     assert row[2] == "QUALIFIED_REJECTION"
+
+
+def test_handle_exits_carries_news_data_timestamp(trades_db, ledger_conn, chain):
+    """Same Phase 1A prerequisite as the entry-path test, on the exit path:
+    ExitLedgerContext.news_data_timestamp -> market_context.news_data_timestamp."""
+    positions = {"AAPL": _FakePosition(avg_entry_price=100.0, qty=1.0, unrealized_plpc=0.0)}
+    _handle_exits(
+        trades_db, client=None, risk=_NeverExitRisk(), symbol="AAPL", positions=positions,
+        sell_order_syms=set(), current_price=100.0, current_atr=0.0,
+        regime_name="TRENDING_UP", portfolio_value=10000.0, action=0, pdt_exempt=True,
+        stop_fired_today=set(),
+        ledger_ctx=_exit_ledger_ctx(ledger_conn, chain, news_data_timestamp="2026-07-29T12:00:00+00:00"),
+    )
+    decision_id = _latest_decision(ledger_conn, "AAPL")[0]
+    market_context = json.loads(ledger_conn.execute(
+        "SELECT market_context FROM decision_events WHERE decision_id=?", (decision_id,),
+    ).fetchone()[0])
+    assert market_context["news_data_timestamp"] == "2026-07-29T12:00:00+00:00"
 
 
 def test_handle_exits_ensemble_sell_writes_executed_sell(trades_db, ledger_conn, chain):

@@ -26,14 +26,15 @@ def prepare_cycle_context(
     con: sqlite3.Connection, client: AlpacaClient, risk: RiskManager, mode: str,
     daily_start: float | None, real_portfolio_value: float, real_available_cash: float,
     portfolio_value: float, positions: dict, active_symbols: list[str],
-) -> tuple[set, set, float, float, bool, dict, dict, float | None, float, dict]:
+) -> tuple[set, set, float, float, bool, dict, dict, float | None, float, dict, str | None]:
     """Halt-state restore, first-cycle-of-day alert, daily risk reset, connection
     telemetry, heartbeat snapshot, loss-limit alerts, macro state, and market
     data prefetch (bars/sentiment/earnings/SPY context) — everything the
     per-symbol loop needs but that only needs to run once per cycle.
 
     Returns (buy_order_syms, sell_order_syms, macro_score, macro_cap, macro_halt,
-    bars_map, sentiments, spy_5bar_return, vs_spy_today, earnings_map).
+    bars_map, sentiments, spy_5bar_return, vs_spy_today, earnings_map,
+    news_data_timestamp).
     """
     buy_order_syms, sell_order_syms = client.get_open_order_symbols()
 
@@ -90,7 +91,7 @@ def prepare_cycle_context(
         risk.weekly_halt_alerted = True
         _save_risk_state(con, risk)
 
-    premarket_sentiment = _load_premarket_sentiment()
+    premarket_sentiment, news_data_timestamp = _load_premarket_sentiment()
     if not premarket_sentiment:
         _logger.warning(
             "Pre-market sentiment unavailable — sentiment defaults to neutral (0.0) this cycle. "
@@ -120,4 +121,5 @@ def prepare_cycle_context(
     earnings_map = _prefetch_earnings_parallel(con, active_symbols)
 
     return (buy_order_syms, sell_order_syms, macro_score, macro_cap, macro_halt,
-            bars_map, sentiments, spy_5bar_return, vs_spy_today, earnings_map)
+            bars_map, sentiments, spy_5bar_return, vs_spy_today, earnings_map,
+            news_data_timestamp)

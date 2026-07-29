@@ -39,6 +39,7 @@ class ExitLedgerContext:
     sentiment: float = 0.0
     macro_score: float = 0.5
     risk: RiskManager | None = None
+    news_data_timestamp: str | None = None
 
 
 def _utc_now() -> str:
@@ -97,7 +98,7 @@ class EntryDecisionRecorder:
         regime_name: str, portfolio_value: float, available_cash: float,
         price_data_timestamp: str | None,
         lstm_is_degraded: bool = False, lstm_val_loss: float | None = None,
-        risk: RiskManager | None = None,
+        risk: RiskManager | None = None, news_data_timestamp: str | None = None,
     ):
         self.trust_conn = trust_conn
         self.candidate_event_id = candidate_event_id
@@ -115,6 +116,7 @@ class EntryDecisionRecorder:
             "macro_score": macro_score,
             "decision_timestamp": _utc_now(),
             "price_data_timestamp": price_data_timestamp,
+            "news_data_timestamp": news_data_timestamp,
         }
         self.portfolio_snapshot = {"portfolio_value": portfolio_value, "available_cash": available_cash}
         self.data_completeness = decisions.build_data_completeness(lstm_is_degraded=lstm_is_degraded)
@@ -210,6 +212,7 @@ def record_exit_decision_safe(
     market_context = {
         "regime": regime_name, "macro_score": ledger_ctx.macro_score,
         "decision_timestamp": _utc_now(),
+        "news_data_timestamp": ledger_ctx.news_data_timestamp,
     }
     record_decision_safe(
         ledger_ctx.trust_conn, ledger_ctx.candidate_event_id, ledger_ctx.deployment_manifest_id,

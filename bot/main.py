@@ -264,7 +264,8 @@ def run(
         _reconcile_positions(con, positions, portfolio_value=portfolio_value, client=client)
 
     (buy_order_syms, sell_order_syms, macro_score, macro_cap, macro_halt,
-     bars_map, sentiments, spy_5bar_return, vs_spy_today, earnings_map) = prepare_cycle_context(
+     bars_map, sentiments, spy_5bar_return, vs_spy_today, earnings_map,
+     news_data_timestamp) = prepare_cycle_context(
         con, client, risk, mode, daily_start, real_portfolio_value,
         real_available_cash, portfolio_value, positions, active_symbols,
     )
@@ -367,7 +368,7 @@ def run(
                 candidate_event_id=get_todays_candidate_event_id(trust_conn, symbol, today_str),
                 deployment_manifest_id=_active_manifest_id,
                 xgb_prob=xgb_prob, lstm_prob=lstm_prob, sentiment=sentiment, macro_score=macro_score,
-                risk=risk,
+                risk=risk, news_data_timestamp=news_data_timestamp,
             )
             if _handle_exits(con, client, risk, symbol, positions, sell_order_syms,
                              current_price, current_atr, regime_name, portfolio_value,
@@ -399,6 +400,7 @@ def run(
                     lstm=lstm, trust_conn=trust_conn,
                     candidate_event_id=get_todays_candidate_event_id(trust_conn, symbol, today_str),
                     deployment_manifest_id=_active_manifest_id,
+                    news_data_timestamp=news_data_timestamp,
                 ),
             )
             _deployed = _cash_before - available_cash

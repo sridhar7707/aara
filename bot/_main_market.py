@@ -254,8 +254,17 @@ def _wsb(symbol: str) -> tuple[str, dict]:
     return symbol, result
 
 
-def _load_premarket_sentiment() -> dict[str, float]:
-    """Load pre-computed FinBERT scores from today's prefetch run, if available."""
+def _load_premarket_sentiment() -> tuple[dict[str, float], str | None]:
+    """Load pre-computed FinBERT scores from today's prefetch run, if available.
+
+    Returns (scores, saved_at) -- saved_at is scripts/prefetch_sentiment.py's
+    own UTC ISO-8601 generation timestamp, threaded through as
+    decision_events.market_context.news_data_timestamp (Phase 1A prerequisite
+    #1, CURRENT_ARCHITECTURE.md). ({}, None) when no premarket snapshot was
+    used this cycle -- the real-time WSB blend in _compute_sentiments still
+    runs either way, but it has no meaningful separate timestamp of its own
+    (it's concurrent with the decision), so news_data_timestamp is left null
+    rather than fabricated."""
     path = "data/sentiment_today.json"
     try:
         if os.path.exists(path):
@@ -265,10 +274,10 @@ def _load_premarket_sentiment() -> dict[str, float]:
                 scores = payload.get("scores", {})
                 if scores:
                     logger.info(f"Loaded pre-market sentiment: {len(scores)} symbols")
-                    return scores
+                    return scores, payload.get("saved_at")
     except Exception as e:
         logger.warning(f"Failed to load pre-market sentiment: {e}")
-    return {}
+    return {}, None
 
 
 def _compute_sentiments(
