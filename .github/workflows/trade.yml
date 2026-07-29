@@ -139,6 +139,20 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: python scripts/load_model_hf.py
 
+      - name: Bootstrap Trust Ledger deployment manifest (idempotent)
+        # decision_events.deployment_manifest_id is NOT NULL, so the first
+        # decision of the day fails to record unless active_deployment_pointer
+        # already has a row. Needs the model files on disk (checksums them),
+        # so this runs after "Pull model from HuggingFace" above. Runs every
+        # trade -- bootstrap() no-ops immediately if already bootstrapped --
+        # so a run that pulls a not-yet-bootstrapped ledger (e.g. after a
+        # manual pull/push race) self-heals instead of silently dropping
+        # decision_events until someone notices.
+        continue-on-error: true
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: python scripts/phase1a_bootstrap_ledger.py
+
       - name: Get today's date (cache key)
         id: date
         run: echo "today=$(date -u '+%Y-%m-%d')" >> $GITHUB_OUTPUT

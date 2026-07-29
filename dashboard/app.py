@@ -180,6 +180,12 @@ _chart_futs = {
     "metrics":        _executor.submit(_safe_html, render_institutional_metrics),
     "cap_health":     _executor.submit(_safe_html, render_capital_health),
     "cap_ledger":     _executor.submit(_safe_html, render_capital_ledger),
+    # trust_ledger.db is pulled from HF at startup (refresh_db_from_hf) and can
+    # be slow/stalled the same way trades.db can -- these two read it directly,
+    # so they need the same timeout guard as the other network-touching panels
+    # above (unguarded gr.HTML(value=fn) previously hung the whole Space launch).
+    "decision_quality": _executor.submit(_safe_html, render_decision_quality_summary),
+    "counterfactual":   _executor.submit(_safe_html, render_counterfactual_analysis),
 }
 
 def _wait(key, timeout):
@@ -187,7 +193,7 @@ def _wait(key, timeout):
         return _chart_futs[key].result(timeout=timeout)
     except Exception as exc:
         logger.warning(f"[startup] {key} timed out or failed after {timeout}s")
-        if key in ("news", "market_mood"):
+        if key in ("news", "market_mood", "decision_quality", "counterfactual"):
             return (f'<div style="color:#ff5252;font-size:12px;padding:8px;">'
                     f'&#9888; {key} unavailable: timed out after {timeout}s</div>')
         fig = _go.Figure()
@@ -210,6 +216,8 @@ _ci = {
     "metrics":      _wait("metrics",      20),
     "cap_health":   _wait("cap_health",   15),
     "cap_ledger":   _wait("cap_ledger",   15),
+    "decision_quality": _wait("decision_quality", 15),
+    "counterfactual":   _wait("counterfactual",   15),
 }
 _executor.shutdown(wait=False)
 logger.info("[startup] pre-render complete")
@@ -356,10 +364,10 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
         # ── Tab 6: Performance ────────────────────────────────────────────────
         with gr.TabItem("📊 Performance"):
             decision_quality_out = registry.mount(
-                "decision_quality_out", gr.HTML(value=render_decision_quality_summary)
+                "decision_quality_out", gr.HTML(value=_ci["decision_quality"])
             )
             counterfactual_out = registry.mount(
-                "counterfactual_out", gr.HTML(value=render_counterfactual_analysis)
+                "counterfactual_out", gr.HTML(value=_ci["counterfactual"])
             )
             scorecard_out = registry.mount("scorecard_out", gr.HTML(value=""))
             metrics_out   = registry.mount("metrics_out",   gr.HTML(value=_ci["metrics"]))
