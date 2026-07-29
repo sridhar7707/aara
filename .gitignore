@@ -37,6 +37,3 @@ models/hf_fresh/
 
 # Local-only planning doc (user's working plan — not for GitHub)
 docs/PHASE_PLAN_decision_intelligence.md
-
-# Local-only architecture design docs (not for GitHub)
-docs/architecture/
