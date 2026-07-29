@@ -38,7 +38,13 @@ def _rejected_decisions(limit: int) -> list[dict]:
     decision's risk_checks.gate_trace (EntryDecisionRecorder.reject() writes
     exactly one)."""
     import ledger.db as ledger_db
+    from bot.monitor.dashboard_data import refresh_db_from_hf
     from bot.trust_ledger.connection import DEFAULT_LEDGER_DB_PATH
+    # Unlike trades.db (pulled by every _con() call), nothing else guarantees
+    # trust_ledger.db exists locally before this runs -- on the Space it's
+    # only pulled here, on demand (Space-only no-op locally/in CI, see
+    # refresh_db_from_hf's SPACE_ID gate).
+    refresh_db_from_hf()
     try:
         conn = ledger_db.get_conn(DEFAULT_LEDGER_DB_PATH)
     except Exception as exc:
