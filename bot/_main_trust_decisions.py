@@ -16,6 +16,7 @@ from typing import Any
 
 from loguru import logger
 
+import bot.trust_ledger.constitution as constitution
 import bot.trust_ledger.decisions as decisions
 import bot.trust_ledger.outcomes as outcomes
 import bot.trust_ledger.risk as risk_ledger
@@ -37,6 +38,7 @@ class ExitLedgerContext:
     lstm_prob: float = 0.0
     sentiment: float = 0.0
     macro_score: float = 0.5
+    risk: RiskManager | None = None
 
 
 def _utc_now() -> str:
@@ -49,6 +51,7 @@ def record_decision_safe(
     asset: str, action: str, event_type: str,
     portfolio_snapshot: dict, market_context: dict, model_outputs: dict,
     risk_checks: dict, final_confidence: float, intent: dict, data_completeness: dict,
+    risk: RiskManager | None = None,
 ) -> None:
     if candidate_event_id is None or deployment_manifest_id is None:
         logger.warning(
@@ -66,11 +69,15 @@ def record_decision_safe(
             decisions.check_fingerprint(
                 trust_conn, asset, action, override_reason=intent.get("override_reason"),
             )
-        decisions.write_decision_event(
+        decision_row = decisions.write_decision_event(
             trust_conn, candidate_event_id, asset, action, event_type,
             portfolio_snapshot, market_context, model_outputs, risk_checks,
             final_confidence, deployment_manifest_id, intent, data_completeness,
         )
+        try:
+            constitution.check_and_log(trust_conn, decision_row, risk)
+        except Exception as e:
+            logger.warning(f"trust ledger constitution check failed for {asset}: {e}")
     except decisions.DuplicateDecisionError as e:
         logger.warning(f"trust ledger duplicate decision blocked for {asset}: {e}")
     except Exception as e:
@@ -90,11 +97,13 @@ class EntryDecisionRecorder:
         regime_name: str, portfolio_value: float, available_cash: float,
         price_data_timestamp: str | None,
         lstm_is_degraded: bool = False, lstm_val_loss: float | None = None,
+        risk: RiskManager | None = None,
     ):
         self.trust_conn = trust_conn
         self.candidate_event_id = candidate_event_id
         self.deployment_manifest_id = deployment_manifest_id
         self.symbol = symbol
+        self.risk = risk
         self.trace: list[dict] = []
         self.final_confidence = ensemble_confidence(xgb_prob, lstm_prob, sentiment, macro_score)
         self.model_outputs = build_model_outputs(
@@ -121,7 +130,7 @@ class EntryDecisionRecorder:
             self.symbol, "REJECT", "QUALIFIED_REJECTION",
             self.portfolio_snapshot, self.market_context, self.model_outputs,
             {"gate_trace": self.trace}, self.final_confidence,
-            decisions.build_intent("REJECT"), self.data_completeness,
+            decisions.build_intent("REJECT"), self.data_completeness, risk=self.risk,
         )
 
     def record_executed(
@@ -147,7 +156,7 @@ class EntryDecisionRecorder:
              "fill_shares": fill_shares},
             self.final_confidence,
             decisions.build_intent("BUY", contributing_modules=["xgboost", "lstm", "finbert", "ensemble"]),
-            self.data_completeness,
+            self.data_completeness, risk=self.risk,
         )
 
     def record_order_not_filled(self, reason: str) -> None:
@@ -160,7 +169,7 @@ class EntryDecisionRecorder:
             self.symbol, "REJECT", "QUALIFIED_REJECTION",
             self.portfolio_snapshot, self.market_context, self.model_outputs,
             {"gate_trace": self.trace}, self.final_confidence,
-            decisions.build_intent("REJECT"), self.data_completeness,
+            decisions.build_intent("REJECT"), self.data_completeness, risk=self.risk,
         )
 
 
@@ -188,7 +197,7 @@ def record_exit_decision_safe(
         symbol, action, event_type,
         {"portfolio_value": portfolio_value, "current_price": current_price},
         market_context, model_outputs, {"exit_reason": reason}, final_confidence,
-        decisions.build_intent(action), decisions.build_data_completeness(),
+        decisions.build_intent(action), decisions.build_data_completeness(), risk=ledger_ctx.risk,
     )
 
 

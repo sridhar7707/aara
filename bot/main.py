@@ -367,6 +367,7 @@ def run(
                 candidate_event_id=get_todays_candidate_event_id(trust_conn, symbol, today_str),
                 deployment_manifest_id=_active_manifest_id,
                 xgb_prob=xgb_prob, lstm_prob=lstm_prob, sentiment=sentiment, macro_score=macro_score,
+                risk=risk,
             )
             if _handle_exits(con, client, risk, symbol, positions, sell_order_syms,
                              current_price, current_atr, regime_name, portfolio_value,

@@ -6,7 +6,7 @@
 -- one field couldn't hold both "what the governor would have done" and "what
 -- actually happened," which differ by design throughout Observation Mode (FR-1.10a).
 --
--- 15 tables total: 7 Immutable Trust Ledger (Group A, hash-chained,
+-- 16 tables total: 8 Immutable Trust Ledger (Group A, hash-chained,
 -- append-only, zero exceptions as of v1.2) + 5 Versioned Reference Records
 -- (Group B, append-only by trigger, no hash chain) + 3 Operational Tables
 -- (Group C, mutable) -- plus the decision_state VIEW (Section 5.1a),
@@ -21,6 +21,11 @@
 --
 -- v1.4: candidate provenance (FR-0.1a/FR-0.13) is now DB-enforced, not just a
 -- code comment -- see trg_decision_events_requires_completed_evaluation below.
+--
+-- v1.5.1 (Phase 1A addition, phase1a_requirements.md Section 13a):
+-- constitution_enforcement_events added as an 8th Group A table -- it did not
+-- exist in the Phase 0 freeze, added per the same "genuine, documented
+-- exception" process as v1.5's risk_evaluation_events split.
 
 PRAGMA foreign_keys = ON;
 
@@ -182,6 +187,28 @@ CREATE TABLE IF NOT EXISTS risk_evaluation_events (
     previous_record_hash     TEXT NOT NULL
 );
 
+-- v1.5.1 (Phase 1A requirement, phase1a_requirements.md Section 13a): tracks
+-- every TRADING_CONSTITUTION.md rule check against every decision_events row.
+-- Part of the immutable ledger (append-only, hash-chained) though it did not
+-- exist in Phase 0. Phase 1A has no per-trade human approval workflow
+-- (phase0_decisions.md #17), so ESCALATED/FAIL results here are advisory --
+-- logged for Phase 1B compliance analysis, never blocking execution. See
+-- bot/trust_ledger/constitution.py for the six rule checks that write here.
+CREATE TABLE IF NOT EXISTS constitution_enforcement_events (
+    sequence_number       INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id              TEXT NOT NULL UNIQUE,
+    decision_id           TEXT NOT NULL REFERENCES decision_events(decision_id),
+    rule_id               TEXT NOT NULL,
+    rule_name             TEXT NOT NULL,
+    check_timestamp       TEXT NOT NULL,
+    check_result          TEXT NOT NULL,   -- PASS / FAIL / ESCALATED
+    action_taken          TEXT NOT NULL,   -- execution_proceeded / advisory_only
+    reason                TEXT,
+    record_hash           TEXT NOT NULL,
+    previous_record_hash  TEXT NOT NULL,
+    CHECK (check_result IN ('PASS', 'FAIL', 'ESCALATED'))
+);
+
 CREATE TABLE IF NOT EXISTS deployment_manifest_events (
     sequence_number      INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id             TEXT NOT NULL UNIQUE,   -- v1.3, e.g. MFE-20260728-001 -- the one ledger
@@ -254,6 +281,7 @@ CREATE INDEX IF NOT EXISTS idx_decision_outcome_decision_id ON decision_outcome_
 CREATE INDEX IF NOT EXISTS idx_candidate_events_asset       ON candidate_evaluation_events(asset);
 CREATE INDEX IF NOT EXISTS idx_manifest_events_manifest_id  ON deployment_manifest_events(manifest_id);
 CREATE INDEX IF NOT EXISTS idx_training_runs_artifact       ON model_training_runs(artifact_id);
+CREATE INDEX IF NOT EXISTS idx_constitution_enforcement_decision_id ON constitution_enforcement_events(decision_id);
 
 -- ============================================================================
 -- Append-only enforcement triggers (Section 3): blanket no-update/no-delete
@@ -346,6 +374,13 @@ CREATE TRIGGER IF NOT EXISTS trg_deployment_manifest_events_no_delete
 BEFORE DELETE ON deployment_manifest_events
 BEGIN SELECT RAISE(ABORT, 'deployment_manifest_events is append-only'); END;
 
+CREATE TRIGGER IF NOT EXISTS trg_constitution_enforcement_events_no_update
+BEFORE UPDATE ON constitution_enforcement_events
+BEGIN SELECT RAISE(ABORT, 'constitution_enforcement_events is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS trg_constitution_enforcement_events_no_delete
+BEFORE DELETE ON constitution_enforcement_events
+BEGIN SELECT RAISE(ABORT, 'constitution_enforcement_events is append-only'); END;
+
 -- ============================================================================
 -- Chain-integrity triggers (new in v1.2, Section 3 item 3): a BEFORE INSERT
 -- trigger on every Group A table rejects any row whose previous_record_hash
@@ -412,6 +447,14 @@ WHEN NEW.previous_record_hash != COALESCE(
     '0000000000000000000000000000000000000000000000000000000000000000'
 )
 BEGIN SELECT RAISE(ABORT, 'deployment_manifest_events: previous_record_hash does not match current chain head'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_constitution_enforcement_events_chain_integrity
+BEFORE INSERT ON constitution_enforcement_events
+WHEN NEW.previous_record_hash != COALESCE(
+    (SELECT record_hash FROM constitution_enforcement_events ORDER BY sequence_number DESC LIMIT 1),
+    '0000000000000000000000000000000000000000000000000000000000000000'
+)
+BEGIN SELECT RAISE(ABORT, 'constitution_enforcement_events: previous_record_hash does not match current chain head'); END;
 
 -- ============================================================================
 -- Candidate provenance enforcement (new in v1.4): a decision_events row must

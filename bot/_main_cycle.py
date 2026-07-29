@@ -89,6 +89,7 @@ def _handle_entry(
         ctx.regime_name, ctx.portfolio_value, ctx.available_cash, _price_ts_iso,
         lstm_is_degraded=getattr(ctx.lstm, "is_degraded", False),
         lstm_val_loss=getattr(ctx.lstm, "val_loss", None),
+        risk=risk,
     )
 
     # Gate 0 — VIX emergency halt: no new positions when VIX >= 40

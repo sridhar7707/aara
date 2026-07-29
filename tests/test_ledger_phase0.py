@@ -129,6 +129,11 @@ _MINIMAL_PAYLOADS = {
         "cost_model_id": "cost_v2", "spread_assumption": 0.001, "slippage_assumption": 0.0005,
         "commission_rules": {}, "tax_assumptions": {}, "created_at": "2026-01-01T00:00:00Z",
     },
+    "constitution_enforcement_events": lambda: {
+        "event_id": "CONST-EXTRA", "decision_id": "DEC-1", "rule_id": "rule_1",
+        "rule_name": "Risk Governor Authority", "check_timestamp": "2026-07-28T00:00:00Z",
+        "check_result": "PASS", "action_taken": "execution_proceeded", "reason": "test",
+    },
 }
 
 

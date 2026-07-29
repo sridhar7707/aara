@@ -49,3 +49,8 @@ def new_approval_id() -> str:
 
 def new_cost_model_id(label: str) -> str:
     return f"cost_model_{label}"
+
+
+def new_constitution_event_id() -> str:
+    """For constitution_enforcement_events -- one per rule check, several per decision."""
+    return _new_id("CONST")
