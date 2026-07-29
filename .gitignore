@@ -12,6 +12,7 @@ logs/*
 !logs/.gitkeep
 trades*.db
 trading_bot.db
+data/trust_ledger.db
 data/raw/
 data/processed/
 data/features/
