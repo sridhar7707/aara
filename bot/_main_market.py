@@ -326,15 +326,24 @@ def _log_cycle_summary(con) -> None:
 
 
 def _maybe_push_db(last_sync: float, interval: float) -> float:
-    """Push trades.db to HuggingFace if interval has elapsed. Returns updated timestamp."""
+    """Push trades.db and data/trust_ledger.db to HuggingFace if interval has
+    elapsed. Returns updated timestamp. Both sync on the same interval since
+    a GitHub Actions runner is ephemeral either way -- whatever isn't pushed
+    before the job ends is gone, ledger included."""
     import time
     try:
-        from bot.monitor.sync_db import push_db
+        from bot.monitor.sync_db import push_db, push_ledger_db
         now = time.time()
         if now - last_sync > interval:
-            if push_db():
+            trades_ok = push_db()
+            if not trades_ok:
+                logger.warning("trades.db sync to HuggingFace FAILED — dashboard will show stale data")
+            ledger_ok = push_ledger_db()
+            if not ledger_ok:
+                logger.warning("trust_ledger.db sync to HuggingFace FAILED — ledger data since last "
+                                "successful push will be lost when this runner is torn down")
+            if trades_ok or ledger_ok:
                 return now
-            logger.warning("trades.db sync to HuggingFace FAILED — dashboard will show stale data")
         else:
             logger.debug(f"HF sync skipped — last push {time.time() - last_sync:.0f}s ago")
     except Exception as _e:

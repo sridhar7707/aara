@@ -60,6 +60,13 @@ jobs:
           key: trades-db-${{ github.run_id }}
           restore-keys: trades-db-
 
+      - name: Restore trust ledger database
+        uses: actions/cache@v4
+        with:
+          path: data/trust_ledger.db
+          key: trust-ledger-db-${{ github.run_id }}
+          restore-keys: trust-ledger-db-
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -90,6 +97,32 @@ jobs:
                   print(f'trades.db synced from {db_repo} — {count} records')
               except Exception as e:
                   print(f'trades.db not found in {db_repo} ({e}) — starting fresh')
+          "
+
+      - name: Sync trust ledger database from HuggingFace
+        # Without this, data/trust_ledger.db starts empty on every run (the
+        # cache restore above is a same-day fast path, not cross-day
+        # persistence) and Phase 1A's 30-day accumulation window resets daily.
+        continue-on-error: true
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python -c "
+          import os, shutil
+          token = os.environ.get('HF_TOKEN', '')
+          db_repo = 'ksri77/ai-trading-bot-db'
+          os.makedirs('data', exist_ok=True)
+          if not token:
+              print('HF_TOKEN not set — keeping cached trust_ledger.db')
+          else:
+              from huggingface_hub import hf_hub_download
+              try:
+                  cached = hf_hub_download(repo_id=db_repo, filename='trust_ledger.db', repo_type='dataset', token=token, force_download=True)
+                  shutil.copy(cached, 'data/trust_ledger.db')
+                  size_kb = os.path.getsize('data/trust_ledger.db') / 1024
+                  print(f'trust_ledger.db synced from {db_repo} — {size_kb:.0f} KB')
+              except Exception as e:
+                  print(f'trust_ledger.db not found in {db_repo} ({e}) — starting fresh (expected on day 1)')
           "
 
       - name: Cache HuggingFace models

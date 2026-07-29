@@ -1,7 +1,12 @@
-"""Sync trades.db to/from a HuggingFace dataset repo.
+"""Sync trades.db and data/trust_ledger.db to/from a HuggingFace dataset repo.
 
-Bot side:  call push_db() at the end of each trading cycle.
-Space side: _con() in dashboard_data.py calls pull_db() automatically.
+Bot side:  call push_db()/push_ledger_db() at the end of each trading cycle.
+Space side: _con() in dashboard_data.py calls pull_db() automatically;
+            refresh_db_from_hf() also pulls the ledger.
+
+Both files live in the same dataset repo (two files, one repo) — trades.db
+and trust_ledger.db are logically related but structurally independent
+SQLite files, so sharing a repo is just storage convenience, not a coupling.
 
 Default dataset repo: ksri77/ai-trading-bot-db
 Set HF_DB_REPO_ID in .env or environment to override.
@@ -24,17 +29,27 @@ def _get_cfg() -> tuple[str, str, str]:
     return TRADE_DB_PATH, HF_DB_REPO_ID, token
 
 
-def push_db() -> bool:
-    """Upload trades.db to HF dataset. Creates the repo if it doesn't exist."""
-    db_path, repo_id, token = _get_cfg()
+def _get_ledger_cfg() -> tuple[str, str, str]:
+    """Return (ledger_db_path, repo_id, token) from config/env. Same HF
+    dataset repo as trades.db (see module docstring)."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    from config import HF_DB_REPO_ID, HF_TOKEN
+    from bot.trust_ledger.connection import DEFAULT_LEDGER_DB_PATH
+    token = HF_TOKEN or os.environ.get("HF_TOKEN", "")
+    return DEFAULT_LEDGER_DB_PATH, HF_DB_REPO_ID, token
+
+
+def _upload(db_path: str, repo_id: str, token: str, repo_filename: str, label: str) -> bool:
+    """Shared upload body for push_db()/push_ledger_db()."""
     if not token:
-        logger.warning("push_db: HF_TOKEN is not set — skipping sync")
+        logger.warning(f"{label}: HF_TOKEN is not set — skipping sync")
         return False
     if not repo_id:
-        logger.warning("push_db: HF_DB_REPO_ID is not set — skipping sync")
+        logger.warning(f"{label}: HF_DB_REPO_ID is not set — skipping sync")
         return False
     if not Path(db_path).exists():
-        logger.warning(f"push_db: {db_path} does not exist — skipping sync")
+        logger.warning(f"{label}: {db_path} does not exist — skipping sync")
         return False
     size_kb = Path(db_path).stat().st_size / 1024
     try:
@@ -45,17 +60,32 @@ def push_db() -> bool:
         try:
             api.repo_info(repo_id=repo_id, repo_type="dataset")
         except Exception:
-            logger.info(f"push_db: creating dataset repo {repo_id}")
+            logger.info(f"{label}: creating dataset repo {repo_id}")
             api.create_repo(repo_id=repo_id, repo_type="dataset", private=True, exist_ok=True)
         api.upload_file(
             path_or_fileobj=db_path,
-            path_in_repo="trades.db",
+            path_in_repo=repo_filename,
             repo_id=repo_id,
             repo_type="dataset",
-            commit_message="bot: sync trades.db",
+            commit_message=f"bot: sync {repo_filename}",
         )
-        logger.info(f"push_db: uploaded {db_path} ({size_kb:.0f} KB) → {repo_id}")
-        # Push model validation artifacts if present so the dashboard can display them
+        logger.info(f"{label}: uploaded {db_path} ({size_kb:.0f} KB) → {repo_id}")
+        return True
+    except Exception as exc:
+        logger.error(f"{label}: upload failed — {exc}\n{traceback.format_exc()}")
+        return False
+
+
+def push_db() -> bool:
+    """Upload trades.db to HF dataset. Creates the repo if it doesn't exist."""
+    db_path, repo_id, token = _get_cfg()
+    ok = _upload(db_path, repo_id, token, "trades.db", "push_db")
+    if not ok:
+        return False
+    # Push model validation artifacts if present so the dashboard can display them
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi(token=token)
         _root = Path(__file__).parent.parent.parent
         for artifact in ("models/validation_report.json", "models/feature_importance.json",
                          "models/runtime_versions.json"):
@@ -72,10 +102,19 @@ def push_db() -> bool:
                     logger.debug(f"push_db: synced {artifact_path.name}")
                 except Exception as _ae:
                     logger.debug(f"push_db: artifact sync skipped ({artifact_path.name}): {_ae}")
-        return True
     except Exception as exc:
-        logger.error(f"push_db: upload failed — {exc}\n{traceback.format_exc()}")
-        return False
+        logger.debug(f"push_db: artifact sync setup skipped: {exc}")
+    return True
+
+
+def push_ledger_db() -> bool:
+    """Upload data/trust_ledger.db to HF dataset. This is the Trust Ledger's
+    only persistence across ephemeral GitHub Actions runners -- without it,
+    every workflow run starts from an empty ledger and Phase 1A's 30-day
+    accumulation window (phase1a_requirements.md Section 14) silently resets
+    every day instead of accumulating."""
+    db_path, repo_id, token = _get_ledger_cfg()
+    return _upload(db_path, repo_id, token, "trust_ledger.db", "push_ledger_db")
 
 
 def backup_database(backup_dir: str | None = None) -> str | None:
@@ -119,25 +158,25 @@ def backup_database(backup_dir: str | None = None) -> str | None:
         return None
 
 
-def pull_db(force: bool = False) -> bool:
-    """Download trades.db from HF dataset. Returns True on success."""
-    db_path, repo_id, token = _get_cfg()
+def _download(db_path: str, repo_id: str, token: str, repo_filename: str,
+               force: bool, label: str) -> bool:
+    """Shared download body for pull_db()/pull_ledger_db()."""
     if not repo_id:
-        logger.warning("pull_db: HF_DB_REPO_ID is not set — cannot pull")
+        logger.warning(f"{label}: HF_DB_REPO_ID is not set — cannot pull")
         return False
     local = Path(db_path)
     if not force and local.exists():
         import time
         age_s = time.time() - local.stat().st_mtime
         if age_s < 300:  # fresher than 5 min — skip download
-            logger.debug(f"pull_db: {db_path} is {age_s:.0f}s old — skipping (use force=True to override)")
+            logger.debug(f"{label}: {db_path} is {age_s:.0f}s old — skipping (use force=True to override)")
             return True
     # Run the download in a thread with a hard timeout so it never hangs the app
     import threading
     result: list[bool] = [False]
     error:  list[str]  = [""]
 
-    def _download():
+    def _dl():
         try:
             from huggingface_hub import hf_hub_download
             tok = os.environ.get("HF_TOKEN") or token or None
@@ -146,7 +185,7 @@ def pull_db(force: bool = False) -> bool:
                 return
             cached = hf_hub_download(
                 repo_id=repo_id,
-                filename="trades.db",
+                filename=repo_filename,
                 repo_type="dataset",
                 token=tok,
                 force_download=True,
@@ -154,7 +193,7 @@ def pull_db(force: bool = False) -> bool:
             local.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(cached, local)
             size_kb = local.stat().st_size / 1024
-            logger.info(f"pull_db: downloaded trades.db ({size_kb:.0f} KB) from {repo_id}")
+            logger.info(f"{label}: downloaded {repo_filename} ({size_kb:.0f} KB) from {repo_id}")
             result[0] = True
         except Exception as exc:
             error[0] = str(exc)
@@ -162,15 +201,27 @@ def pull_db(force: bool = False) -> bool:
             if any(x in msg for x in ("404", "not found", "entry", "does not exist")):
                 if local.exists():
                     local.unlink()
-                    logger.info(f"pull_db: trades.db deleted from HF — removed local copy at {local}")
-            logger.error(f"pull_db: download failed — {exc}\n{traceback.format_exc()}")
+                    logger.info(f"{label}: {repo_filename} deleted from HF — removed local copy at {local}")
+            logger.error(f"{label}: download failed — {exc}\n{traceback.format_exc()}")
 
-    t = threading.Thread(target=_download, daemon=True)
+    t = threading.Thread(target=_dl, daemon=True)
     t.start()
     t.join(timeout=20)  # give up after 20 s — never block app startup
     if not t.is_alive() and not result[0]:
         if error[0]:
-            logger.error(f"pull_db: failed — {error[0]}")
+            logger.error(f"{label}: failed — {error[0]}")
         else:
-            logger.error("pull_db: timed out after 20 s")
+            logger.error(f"{label}: timed out after 20 s")
     return result[0]
+
+
+def pull_db(force: bool = False) -> bool:
+    """Download trades.db from HF dataset. Returns True on success."""
+    db_path, repo_id, token = _get_cfg()
+    return _download(db_path, repo_id, token, "trades.db", force, "pull_db")
+
+
+def pull_ledger_db(force: bool = False) -> bool:
+    """Download data/trust_ledger.db from HF dataset. Returns True on success."""
+    db_path, repo_id, token = _get_ledger_cfg()
+    return _download(db_path, repo_id, token, "trust_ledger.db", force, "pull_ledger_db")

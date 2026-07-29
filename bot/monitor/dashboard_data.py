@@ -180,6 +180,22 @@ def refresh_db_from_hf(force: bool = False) -> None:
         _last_sync["ts"] = datetime.now(timezone.utc)
         _last_sync["err"] = str(exc)
         logger.error(f"refresh_db_from_hf: exception — {exc}")
+    _refresh_ledger_db_from_hf(force=force)
+
+
+def _refresh_ledger_db_from_hf(force: bool = False) -> None:
+    """Pull a fresh data/trust_ledger.db from HF dataset (Space-only).
+
+    Kept separate from _last_sync (that dict is the trades.db status the
+    Overview tab already renders) -- decision_quality.py/counterfactual.py
+    read the ledger directly and degrade to an empty result on failure, so
+    a missing ledger pull fails quiet, not loud, same as before this existed."""
+    try:
+        from bot.monitor.sync_db import pull_ledger_db
+        with _pull_lock:
+            pull_ledger_db(force=force)
+    except Exception as exc:
+        logger.error(f"_refresh_ledger_db_from_hf: exception — {exc}")
 
 
 def _fmt_age(seconds: float | None) -> str:
