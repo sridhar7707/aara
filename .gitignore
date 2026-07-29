@@ -16,6 +16,7 @@ data/trust_ledger.db
 data/raw/
 data/processed/
 data/features/
+data/.lstm_degraded_*
 models/saved/*.zip
 models/saved/*.pkl
 models/saved/*.pt
