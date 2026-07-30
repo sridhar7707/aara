@@ -98,7 +98,7 @@ TAB_SPECS: list[tuple[str, str, list[tuple[str, str]], float]] = [
             ("Risk panel rendered",              "text=Risk"),
             ("News rendered",                    "text=News"),
         ],
-        5.0,
+        10.0,  # News section makes live yfinance HTTP calls per watchlist symbol -- 5s wasn't enough
     ),
     (
         "Capital",

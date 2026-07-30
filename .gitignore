@@ -4,6 +4,7 @@ __pycache__/
 *.pyo
 .venv/
 venv/
+.venv_playwright/
 *.egg-info/
 dist/
 build/
@@ -38,3 +39,6 @@ models/hf_fresh/
 
 # Local-only planning doc (user's working plan — not for GitHub)
 docs/PHASE_PLAN_decision_intelligence.md
+
+# Architecture docs — kept local only, stripped from GitHub history 2026-07-29
+docs/architecture/
