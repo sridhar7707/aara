@@ -289,7 +289,9 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
             calibration_buckets_out = registry.mount(
                 "calibration_buckets_out", gr.HTML(value=_ci["calibration_buckets"])
             )
-            scorecard_out = registry.mount("scorecard_out", gr.HTML(value=""))
+            scorecard_out = registry.mount(
+                "scorecard_out", gr.HTML(value=_ci["paper_trading_scorecard"])
+            )
             metrics_out   = registry.mount("metrics_out",   gr.HTML(value=_ci["metrics"]))
             # Full width, stacked — both tables grew a "vs SPY" column and no longer
             # fit two-up without truncating dollar amounts with an ellipsis.
