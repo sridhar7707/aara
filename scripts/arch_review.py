@@ -132,13 +132,9 @@ def check_secrets(path: Path, content: str, result: ReviewResult):
                 result.add(path, i, "HARDCODED_SECRET", f"{desc} detected", "BLOCK")
 
 
-def check_print_statements(path: Path, content: str, result: ReviewResult):
+def check_print_statements(path: Path, tree: Optional[ast.AST], result: ReviewResult):
     top = _posix(path).split("/")[0]
-    if top not in PRODUCTION_DIRS:
-        return
-    try:
-        tree = ast.parse(content)
-    except SyntaxError:
+    if top not in PRODUCTION_DIRS or tree is None:
         return
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -175,24 +171,140 @@ def check_risk_constants(path: Path, content: str, result: ReviewResult):
                        f"{msg} — default appears changed, verify intentional", "ERROR")
 
 
-def check_missing_tests(path: Path, project_root: Path, result: ReviewResult):
+_TEST_IMPORT_EDGES_CACHE: dict[Path, tuple[set[tuple[str, str]], set[str]]] = {}
+
+
+def _test_import_edges(project_root: Path) -> tuple[set[tuple[str, str]], set[str]]:
+    """({(module, name)} for `from module import name`, {module} for `import module`)
+    across every tests/**/test_*.py file.
+
+    AST-based rather than regex-on-raw-text: a regex scan can't distinguish a
+    real import from the same text inside a comment, and `[^\\n]*` can't span
+    the multi-line parenthesized imports this repo's facades commonly use
+    (e.g. bot/_main_db.py's `from bot.db.X import (\\n    name,\\n)` blocks) —
+    both would silently break the facade-tracing this exists to support.
+
+    Cached per project_root: arch_review calls this once per bot/ file
+    checked (147+ times per run) but the test tree doesn't change mid-run.
+    """
+    cached = _TEST_IMPORT_EDGES_CACHE.get(project_root)
+    if cached is not None:
+        return cached
+    from_edges: set[tuple[str, str]] = set()
+    plain_imports: set[str] = set()
+    tests_dir = project_root / "tests"
+    if tests_dir.is_dir():
+        for f in tests_dir.rglob("test_*.py"):
+            if "__pycache__" in f.parts:
+                continue
+            try:
+                tree = ast.parse(f.read_text(encoding="utf-8", errors="ignore"))
+            except (SyntaxError, OSError):
+                continue
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    for alias in node.names:
+                        from_edges.add((node.module, alias.name))
+                elif isinstance(node, ast.Import):
+                    for alias in node.names:
+                        plain_imports.add(alias.name)
+    edges = (from_edges, plain_imports)
+    _TEST_IMPORT_EDGES_CACHE[project_root] = edges
+    return edges
+
+
+_REEXPORT_EDGES_CACHE: dict[Path, list[tuple[str, str, str, str]]] = {}
+
+
+def _reexport_edges(project_root: Path) -> list[tuple[str, str, str, str]]:
+    """(source_module, orig_name, bound_name, importer_module) for every
+    `from source_module import orig_name [as bound_name]` in production code.
+
+    Used to follow this repo's facade pattern (e.g. bot/_main_db.py
+    re-exporting bot/db/*.py helpers under a renamed alias for bot/main.py
+    to import) so coverage of the alias counts as coverage of the leaf.
+    """
+    cached = _REEXPORT_EDGES_CACHE.get(project_root)
+    if cached is not None:
+        return cached
+    edges: list[tuple[str, str, str, str]] = []
+    for subdir in PRODUCTION_DIRS:
+        d = project_root / subdir
+        if not d.is_dir():
+            continue
+        for f in d.rglob("*.py"):
+            if "__pycache__" in f.parts:
+                continue
+            try:
+                tree = ast.parse(f.read_text(encoding="utf-8", errors="ignore"))
+            except (SyntaxError, OSError):
+                continue
+            importer_dotted = ".".join(f.relative_to(project_root).with_suffix("").parts)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    for alias in node.names:
+                        if alias.name == "*":
+                            continue
+                        edges.append((node.module, alias.name, alias.asname or alias.name, importer_dotted))
+    _REEXPORT_EDGES_CACHE[project_root] = edges
+    return edges
+
+
+def _facade_covered(project_root: Path, dotted: str, symbols: set[str]) -> set[tuple[str, str]]:
+    """BFS the re-export graph: every (module, name) pair a test could
+    plausibly import that still traces back to `dotted`'s own symbols."""
+    edges = _reexport_edges(project_root)
+    frontier = {(dotted, name) for name in symbols}
+    covered = set(frontier)
+    for _ in range(4):  # bounded depth — facades in this repo are 1-2 hops
+        new = {
+            (importer, bound)
+            for (mod, name) in frontier
+            for (src, orig, bound, importer) in edges
+            if src == mod and orig == name and (importer, bound) not in covered
+        }
+        if not new:
+            break
+        covered |= new
+        frontier = new
+    return covered
+
+
+def check_missing_tests(path: Path, tree: Optional[ast.AST], project_root: Path, result: ReviewResult):
     s = _posix(path)
     if not s.startswith("bot/") or "__init__" in s:
         return
     module = path.stem
-    test_file = project_root / "tests" / f"test_{module}.py"
-    if not test_file.exists():
+    dotted = ".".join(path.with_suffix("").parts)
+    parent_dotted = ".".join(path.parent.parts)
+    from_edges, plain_imports = _test_import_edges(project_root)
+
+    # Module is covered if any test file (anywhere under tests/, not just
+    # tests/test_<module>.py) imports it directly, via its parent package,
+    # or via a re-exported alias reachable through the facade pattern.
+    covered = (
+        dotted in plain_imports
+        or any(mod == dotted for mod, _name in from_edges)
+        or (parent_dotted, module) in from_edges
+    )
+    if not covered:
+        symbols = {
+            n.name for n in ast.iter_child_nodes(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        } if tree is not None else set()
+        covered = any(
+            (mod, name) in from_edges
+            for mod, name in _facade_covered(project_root, dotted, symbols)
+        )
+    if not covered:
         result.add(path, 0, "MISSING_TESTS",
-                   f"No test file: tests/test_{module}.py", "WARN")
+                   f"No test file imports {dotted} directly or via a re-export "
+                   f"(checked tests/**/test_*.py)", "WARN")
 
 
-def check_type_hints(path: Path, content: str, result: ReviewResult):
+def check_type_hints(path: Path, tree: Optional[ast.AST], result: ReviewResult):
     top = _posix(path).split("/")[0]
-    if top not in PRODUCTION_DIRS:
-        return
-    try:
-        tree = ast.parse(content)
-    except SyntaxError:
+    if top not in PRODUCTION_DIRS or tree is None:
         return
     for node in ast.walk(tree):
         if not isinstance(node, ast.FunctionDef):
@@ -242,13 +354,18 @@ def review_file(path: Path, project_root: Path, result: ReviewResult):
     except OSError:
         return
 
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        tree = None
+
     check_file_size(rel, result)
     check_secrets(rel, content, result)
-    check_print_statements(rel, content, result)
+    check_print_statements(rel, tree, result)
     check_risk_bypass(rel, content, result)
     check_risk_constants(rel, content, result)
-    check_missing_tests(rel, project_root, result)
-    check_type_hints(rel, content, result)
+    check_missing_tests(rel, tree, project_root, result)
+    check_type_hints(rel, tree, result)
     check_env_var_usage(rel, content, result)
 
 
