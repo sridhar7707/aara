@@ -1,6 +1,6 @@
 # TradeGenius AI — Technical Debt
 
-Last updated: 2026-06-27
+Last updated: 2026-07-29
 
 Items are rated by effort (S/M/L/XL) and urgency (High/Medium/Low).
 High-urgency items should be resolved before any real-money deployment.
@@ -10,7 +10,6 @@ High-urgency items should be resolved before any real-money deployment.
 | ID | Item | Effort | Urgency | Notes |
 |----|------|--------|---------|-------|
 | TD-001 | `bot/main.py` is 556 lines (over 500-line limit) | S | Medium | SPY pre-fetch setup could move to `_main_market.py`; deferred due to risk of breaking the trading loop |
-| TD-002 | Missing unit test files for 8 bot modules | L | High | `_main_cycle.py`, `_main_db.py`, `_main_market.py`, `_main_positions.py`, `_main_runner.py`, `_main_signals.py`, `api_guard.py`, `signal_gate.py` all lack `tests/test_<module>.py`. Stubs without coverage are disingenuous — needs meaningful integration tests |
 | TD-003 | `bot/monitor/` has 8 legacy private modules (`_dashboard_*.py`) | M | Low | Pre-refactor modules kept for backward compatibility. Should be deleted once confirmed not imported anywhere |
 | TD-004 | DuckDB analytics not yet surfaced in dashboard | M | Low | `AnalyticsService.get_sharpe_ratio()` and `get_max_drawdown()` compute from DuckDB but the scorecard panel reads directly from SQLite. Should switch to analytics service for consistency |
 | TD-005 | `bot/strategy/rl_agent.py` PPO model rarely invoked | M | Low | RL agent used for position sizing but Kelly criterion is primary sizer. Unclear if RL adds value — needs ablation study |
@@ -27,6 +26,7 @@ High-urgency items should be resolved before any real-money deployment.
 | TD-011 | Silent exceptions (`except: pass`) in 5 bot files | 2026-06-14 | SPEC 51: all upgraded to `log_exception()` or `logger.debug()` |
 | TD-012 | `log_exception()` called with wrong signature in 5 places | 2026-06-14 | SPEC 55: corrected to 3-arg form; test coverage added |
 | TD-013 | All render functions lacked error handling | 2026-06-14 | `@safe_render` decorator wraps all render_* functions |
+| TD-002 | Missing unit test files for 8 bot modules | 2026-07-29 | Verified via `scripts/arch_review.py`'s rewritten (AST-based, facade-aware) `MISSING_TESTS` check + manual grep confirmation that each import is a real integration test, not incidental: `_main_signals.py` and `api_guard.py` got new direct test files this session (`tests/test__main_signals.py`, `tests/test_api_guard.py`); `_main_market.py` (`tests/test__main_market.py`) and `signal_gate.py` (`tests/test_signal_gate.py`) already had dedicated files predating this session; `_main_cycle.py`, `_main_db.py`, `_main_positions.py`, `_main_runner.py` are exercised directly by `tests/phase1a/*` integration tests. This item was stale — most of the underlying gap had already closed since 2026-06-27, the doc just wasn't updated to reflect it. |
 
 ## Debt Acceptance Policy
 
@@ -34,6 +34,3 @@ Debt is accepted when:
 - Risk is explicitly documented here
 - An owner and target resolution date are agreed
 - The item does not affect financial safety (risk limits, PDT, stop-loss)
-
-Items that affect real-money safety (TD-002 in particular) must be resolved before
-any real-money deployment, regardless of timeline.
