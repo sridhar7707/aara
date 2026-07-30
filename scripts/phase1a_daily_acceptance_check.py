@@ -130,7 +130,11 @@ def sample_reproducibility(conn, sample_size: int = REPRODUCIBILITY_SAMPLE_SIZE)
 
 
 def run_check(db_path: str = DEFAULT_LEDGER_DB_PATH, lookback_days: int = LOOKBACK_DAYS) -> dict:
-    conn = ledger_db.get_conn(db_path)
+    # init_db (not get_conn) so a DB snapshot pulled before the latest
+    # schema.sql change (e.g. constitution_enforcement_events, added
+    # post-Phase-0-freeze) gets migrated in place rather than crashing on
+    # a missing table -- CREATE TABLE IF NOT EXISTS is a no-op once current.
+    conn = ledger_db.init_db(db_path)
     try:
         since = _since(lookback_days)
         integrity_result = integrity.run_integrity_check(conn)

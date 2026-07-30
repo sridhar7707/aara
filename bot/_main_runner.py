@@ -360,6 +360,18 @@ def run_loop(mode: str = "paper") -> None:
     if not _is_market_hours(client.api):
         logger.info("Market is closed at session start — nothing to trade.")
         tg._send("⚠️ <b>Trading Bot fired but market is closed</b>. Check cron schedule or holiday calendar.")
+        # The Trust Ledger bootstrap step (a separate process, runs before this
+        # one every dispatch) may have just written a fresh manifest promotion
+        # to disk. If we return here without pushing, that mutation is silently
+        # discarded when the ephemeral runner tears down -- no trading cycle
+        # ever reaches _maybe_push_db to persist it.
+        try:
+            from bot.monitor.sync_db import push_ledger_db
+            if not push_ledger_db():
+                logger.warning("trust_ledger.db sync to HuggingFace FAILED on early exit — "
+                                "any local-only ledger mutations (e.g. bootstrap) are lost")
+        except Exception as _pe:
+            logger.warning(f"push_ledger_db on early exit skipped: {_pe}")
         return
 
     try:
