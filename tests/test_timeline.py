@@ -158,3 +158,31 @@ def test_all_timelines_excludes_qualified_rejections(ledger_conn):
     _reject(ledger_conn, "TSLA", "2026-07-01")
     html = timeline.render_all_timelines()
     assert "No decisions logged yet" in html
+
+
+def test_malformed_row_json_is_skipped_not_crashed(ledger_conn, monkeypatch):
+    """A decision_events row with unparseable JSON in one of the three
+    columns _load_timeline reads must degrade to skipping that row, not
+    propagate a JSONDecodeError/TypeError out of the (undecorated)
+    render_decision_timeline call."""
+    _buy(ledger_conn, "AAPL", "2026-07-01", 150.0, 10.0)
+    real_loads = timeline.json.loads
+    calls = {"n": 0}
+
+    def _flaky_loads(s):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise timeline.json.JSONDecodeError("simulated malformed JSON", "", 0)
+        return real_loads(s)
+
+    monkeypatch.setattr(timeline.json, "loads", _flaky_loads)
+    html = timeline.render_decision_timeline("AAPL")
+    assert "No history for AAPL" in html
+
+
+def test_zero_percent_confidence_still_shown(ledger_conn):
+    """0% confidence is a real recorded value, not \"no confidence" --
+    it must not be conflated with a missing value and hidden."""
+    _sell(ledger_conn, "AAPL", "2026-07-05", 150.0, confidence=0.0)
+    html = timeline.render_decision_timeline("AAPL")
+    assert "0% confidence" in html

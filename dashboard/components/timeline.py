@@ -61,9 +61,13 @@ def _load_timeline(symbol: str) -> list[dict]:
 
     entries = []
     for timestamp, action, portfolio_snapshot, risk_checks, final_confidence, intent in rows:
-        ps = json.loads(portfolio_snapshot)
-        rc = json.loads(risk_checks)
-        it = json.loads(intent)
+        try:
+            ps = json.loads(portfolio_snapshot)
+            rc = json.loads(risk_checks)
+            it = json.loads(intent)
+        except (TypeError, json.JSONDecodeError) as exc:
+            _logger.warning(f"timeline row parse ({symbol}, {timestamp}): {exc}")
+            continue
         if action == "BUY":
             price, qty = rc.get("fill_price"), rc.get("fill_shares")
             reasoning = it.get("thesis") or "—"
@@ -83,6 +87,8 @@ def _load_timeline(symbol: str) -> list[dict]:
     return entries
 
 
+@timed(_logger)
+@safe_render("Decision Timeline")
 def render_decision_timeline(symbol: str | None = None) -> str:
     """Render decision timeline for a single symbol."""
     if not symbol:
@@ -146,7 +152,7 @@ def render_decision_timeline(symbol: str | None = None) -> str:
 
         price_str = f"@ ${price:.2f}" if price else ""
         qty_str   = f"  {qty:+.2f} shares" if qty else ""
-        conf_str  = f"  · {conf}% confidence" if conf else ""
+        conf_str  = f"  · {conf}% confidence" if conf is not None else ""
         by_str    = f"  · {by_who}" if by_who not in ("ai", "") else ""
 
         items_html += (
