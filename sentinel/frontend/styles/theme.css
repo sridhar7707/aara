@@ -1,0 +1,11 @@
+/* Sentinel theme tokens (SENTINEL_DESIGN_SYSTEM_FINAL.md v2.0).
+   Scaffolding placeholder -- populate from the design system's token
+   table (colors, typography, spacing) before Phase 2A UI work begins.
+   Risk Governor states are 3-state (NORMAL/WARNING/DEFENSIVE); no
+   --risk-critical token should be added. */
+
+:root {
+  --sentinel-color-normal: var(--slate-blue, #3b5b92);
+  --sentinel-color-warning: var(--light-gold, #d4af37);
+  --sentinel-color-defensive: var(--clean-crimson, #a52834);
+}

@@ -1,0 +1,14 @@
+# Sentinel Intelligence -- Phase 2A dependencies
+# API Layer Technology Decision (IMPLEMENTATION_HANDOFF.md): FastAPI only,
+# no Flask/Django/Starlette introduced alongside it.
+fastapi
+uvicorn
+pydantic
+
+# Frontend: Gradio only (IMPLEMENTATION_HANDOFF.md principle 8 -- no
+# React/Vue/Angular). Pinned to match the root requirements.txt so this
+# installs into the same environment without version conflicts.
+gradio>=5.0.0,<6.0.0
+
+# Testing
+pytest
