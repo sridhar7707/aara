@@ -23,6 +23,10 @@ from dashboard.components.executive_summary import render_executive_summary
 from dashboard.components.market_mood import render_market_mood
 from dashboard.components.models import render_institutional_metrics
 from dashboard.components.news import render_news_feed_initial
+from dashboard.components.trust_scorecard import (
+    render_trust_scorecard, render_constitution_compliance, render_calibration_buckets,
+)
+from dashboard.components.phase2_preview import render_regime_performance
 
 
 def _safe_fig(fn):
@@ -82,6 +86,10 @@ def prerender_all() -> dict:
         # above (unguarded gr.HTML(value=fn) previously hung the whole Space launch).
         "decision_quality": executor.submit(_safe_html, render_decision_quality_summary),
         "counterfactual":   executor.submit(_safe_html, render_counterfactual_analysis),
+        "trust_scorecard":        executor.submit(_safe_html, render_trust_scorecard),
+        "constitution_compliance": executor.submit(_safe_html, render_constitution_compliance),
+        "calibration_buckets":    executor.submit(_safe_html, render_calibration_buckets),
+        "regime_performance":     executor.submit(_safe_html, render_regime_performance),
     }
 
     def _wait(key, timeout):
@@ -89,7 +97,9 @@ def prerender_all() -> dict:
             return chart_futs[key].result(timeout=timeout)
         except Exception as exc:
             logger.warning(f"[startup] {key} timed out or failed after {timeout}s")
-            if key in ("news", "market_mood", "decision_quality", "counterfactual"):
+            if key in ("news", "market_mood", "decision_quality", "counterfactual",
+                       "trust_scorecard", "constitution_compliance", "calibration_buckets",
+                       "regime_performance"):
                 return (f'<div style="color:#ff5252;font-size:12px;padding:8px;">'
                         f'&#9888; {key} unavailable: timed out after {timeout}s</div>')
             fig = _go.Figure()
@@ -113,6 +123,10 @@ def prerender_all() -> dict:
         "cap_ledger":   _wait("cap_ledger",   15),
         "decision_quality": _wait("decision_quality", 15),
         "counterfactual":   _wait("counterfactual",   15),
+        "trust_scorecard":         _wait("trust_scorecard",         15),
+        "constitution_compliance": _wait("constitution_compliance", 15),
+        "calibration_buckets":     _wait("calibration_buckets",     15),
+        "regime_performance":      _wait("regime_performance",      15),
     }
     executor.shutdown(wait=False)
     logger.info("[startup] pre-render complete")

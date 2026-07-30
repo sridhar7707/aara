@@ -233,6 +233,21 @@ def _empty_state(icon: str, title: str, subtitle: str) -> str:
         f'max-width:260px;margin:0 auto;">{subtitle}</div></div>'
     )
 
+def _illustrative_banner(note: str) -> str:
+    """Dashed-border banner marking the content directly below it as a
+    fabricated example, not real data -- for panels whose real query is
+    correct but legitimately returns nothing yet (e.g. Phase 1B calibration
+    before any decision has a closed outcome). Never used inside the
+    analytics layer itself, only at the dashboard rendering boundary, so the
+    swap to real data needs no code change once it exists."""
+    return (
+        f'<div style="border:1px dashed {NEURAL};border-radius:6px;'
+        f'padding:8px 14px;margin-bottom:8px;background:{NEURAL}11;">'
+        f'<span style="font-size:{FONT_LABEL};color:{NEURAL};font-weight:{WEIGHT_BOLD};'
+        f'text-transform:uppercase;letter-spacing:.5px;">&#9888; Illustrative example</span> '
+        f'<span style="font-size:{FONT_LABEL};color:{TEXT2};">{note}</span></div>'
+    )
+
 def _action_row(symbol: str, action: str, reason: str,
                 detail: str = "", number: int = None) -> str:
     """Single action row with correct visual hierarchy."""

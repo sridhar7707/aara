@@ -156,6 +156,11 @@ _SMOKE: list[tuple[str, str, str, dict]] = [
     ("news_feed_initial",        "dashboard.components.news",                   "render_news_feed_initial",        {}),
     ("all_timelines",            "dashboard.components.timeline",               "render_all_timelines",            {}),
     ("decision_timeline",        "dashboard.components.timeline",               "render_decision_timeline",        {"symbol": None}),
+    ("trust_scorecard",          "dashboard.components.trust_scorecard",         "render_trust_scorecard",          {}),
+    ("constitution_compliance",  "dashboard.components.trust_scorecard",         "render_constitution_compliance",  {}),
+    ("calibration_buckets",      "dashboard.components.trust_scorecard",         "render_calibration_buckets",      {}),
+    ("regime_performance",       "dashboard.components.phase2_preview",          "render_regime_performance",       {}),
+    ("improvement_proposals",    "dashboard.components.phase2_preview",          "render_improvement_proposals",    {}),
     # Portfolio tab
     ("weekly_summary",           "dashboard.components.weekly_summary",         "render_weekly_summary",           {}),
     ("portfolio_health_hero",    "dashboard.components.overview",               "render_portfolio_health_hero",    {}),

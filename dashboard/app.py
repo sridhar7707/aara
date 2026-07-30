@@ -88,6 +88,7 @@ from dashboard.components.loss_explanation import render_loss_explanation
 from dashboard.components.pending_approvals import (
     render_pending_approvals, on_approve_click, on_reject_click,
 )
+from dashboard.components.phase2_preview import render_improvement_proposals
 from dashboard.timers import register_all_timers
 from dashboard.prerender import prerender_all
 import dashboard.registry as registry
@@ -206,6 +207,14 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
                 news_out           = registry.mount("news_out",           gr.HTML(value=_ci["news"]))
             with gr.Accordion("🕐 Decision Timeline", open=False):
                 timeline_brief_out = registry.mount("timeline_brief_out", gr.HTML(value=render_all_timelines))
+            with gr.Accordion("🌡️ Regime Performance (Phase 2 preview)", open=False):
+                regime_performance_out = registry.mount(
+                    "regime_performance_out", gr.HTML(value=_ci["regime_performance"])
+                )
+            with gr.Accordion("📋 Improvement Proposals (Phase 2 preview)", open=False):
+                improvement_proposals_out = registry.mount(
+                    "improvement_proposals_out", gr.HTML(value=render_improvement_proposals)
+                )
 
         # ── Tab 4: Capital ────────────────────────────────────────────────────
         with gr.TabItem("💰 Capital"):
@@ -270,6 +279,15 @@ with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_
             )
             counterfactual_out = registry.mount(
                 "counterfactual_out", gr.HTML(value=_ci["counterfactual"])
+            )
+            trust_scorecard_out = registry.mount(
+                "trust_scorecard_out", gr.HTML(value=_ci["trust_scorecard"])
+            )
+            constitution_compliance_out = registry.mount(
+                "constitution_compliance_out", gr.HTML(value=_ci["constitution_compliance"])
+            )
+            calibration_buckets_out = registry.mount(
+                "calibration_buckets_out", gr.HTML(value=_ci["calibration_buckets"])
             )
             scorecard_out = registry.mount("scorecard_out", gr.HTML(value=""))
             metrics_out   = registry.mount("metrics_out",   gr.HTML(value=_ci["metrics"]))

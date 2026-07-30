@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 import analytics.improvement_proposals as improvement_proposals
-from analytics.improvement_proposals import approve_proposal, create_proposal
+from analytics.improvement_proposals import approve_proposal, create_proposal, list_proposals
 
 
 @pytest.fixture(autouse=True)
@@ -33,3 +33,14 @@ def test_approve_proposal_records_signoff():
 def test_approve_proposal_missing_id_raises():
     with pytest.raises(FileNotFoundError):
         approve_proposal("PROP-does-not-exist", approved_by="ksri77")
+
+
+def test_list_proposals_empty_when_no_proposals_created():
+    assert list_proposals() == []
+
+
+def test_list_proposals_returns_every_created_proposal():
+    p1 = create_proposal(what_changes="a", evidence="b", risk="c")
+    p2 = create_proposal(what_changes="d", evidence="e", risk="f")
+    ids = {p.proposal_id for p in list_proposals()}
+    assert ids == {p1.proposal_id, p2.proposal_id}

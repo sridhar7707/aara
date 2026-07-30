@@ -58,6 +58,19 @@ def _read(proposal_id: str) -> ImprovementProposal:
     return ImprovementProposal(**data)
 
 
+def list_proposals() -> list[ImprovementProposal]:
+    """Every proposal artifact on disk, newest first. Empty list (not an
+    error) if PROPOSALS_DIR doesn't exist yet -- no proposal has ever
+    been created."""
+    if not PROPOSALS_DIR.is_dir():
+        return []
+    proposals = [
+        ImprovementProposal(**json.loads(p.read_text()))
+        for p in PROPOSALS_DIR.glob("*.json")
+    ]
+    return sorted(proposals, key=lambda p: p.created_at, reverse=True)
+
+
 def create_proposal(what_changes: str, evidence: str, risk: str) -> ImprovementProposal:
     """OBSERVE/MEASURE/RECOMMEND steps: write a proposal artifact to disk.
     Does not touch any ledger table."""
