@@ -185,9 +185,9 @@ def render_validation_report() -> str:
         return (
             f'<tr>'
             f'<td style="padding:9px 14px;border-bottom:1px solid {BORDER};background:{SURFACE};'
-            f'color:{TEXT2};font-size:{FONT_LABEL};font-weight:600;">{label}</td>'
+            f'color:{TEXT2} !important;font-size:{FONT_LABEL};font-weight:600;">{label}</td>'
             f'<td style="padding:9px 14px;border-bottom:1px solid {BORDER};background:{SURFACE};'
-            f'font-family:-apple-system,monospace;color:{color};font-weight:700;">{val}</td>'
+            f'font-family:-apple-system,monospace;color:{color} !important;font-weight:700;">{val}</td>'
             f'</tr>'
         )
 
@@ -291,12 +291,12 @@ def render_institutional_metrics() -> str:
     def _row(label, val_str, color, desc):
         return (
             f'<tr><td style="padding:10px 14px;border-bottom:1px solid {BORDER};'
-            f'background:{SURFACE};color:{TEXT2};font-size:{FONT_LABEL};font-weight:600;">{label}</td>'
+            f'background:{SURFACE};color:{TEXT2} !important;font-size:{FONT_LABEL};font-weight:600;">{label}</td>'
             f'<td style="padding:10px 14px;border-bottom:1px solid {BORDER};'
             f'background:{SURFACE};font-family:-apple-system,monospace;'
-            f'color:{color};font-weight:700;">{val_str}</td>'
+            f'color:{color} !important;font-weight:700;">{val_str}</td>'
             f'<td style="padding:10px 14px;border-bottom:1px solid {BORDER};'
-            f'background:{SURFACE};color:{TEXT2};font-size:{FONT_LABEL};">{desc}</td></tr>'
+            f'background:{SURFACE};color:{TEXT2} !important;font-size:{FONT_LABEL};">{desc}</td></tr>'
         )
 
     sh_c = GAIN if sharpe > 1 else (NEURAL if sharpe > 0.5 else LOSS)
