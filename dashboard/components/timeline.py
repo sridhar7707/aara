@@ -1,6 +1,7 @@
 """Decision Timeline — chronological log of every decision per position (req 11.6)."""
 from __future__ import annotations
 import datetime
+import json
 from loguru import logger
 from dashboard.design_system import (
     SURFACE, SURFACE2, BORDER, TEXT1, TEXT2, TEXT3,
@@ -10,9 +11,7 @@ from dashboard.design_system import (
     _section, _wrap, _card, _empty_state,
     _sym,
 )
-from dashboard.data import get_data, get_db_conn, DB_PATH, safe_query
-from bot.core.error_logger import safe_render, timed, log_exception
-import os
+from bot.core.error_logger import safe_render, timed
 
 _logger = logger
 
@@ -31,54 +30,57 @@ _TYPE_ICONS = {
 }
 
 
-def log_decision(symbol: str, decision_type: str, price: float,
-                 quantity: float, reasoning: str, confidence: int | None = None,
-                 portfolio_value: float | None = None,
-                 triggered_by: str = "ai") -> bool:
-    """Insert a decision_log entry. Safe to call from trading engine."""
-    if not symbol or not str(symbol).strip():
-        return False
-    if confidence is not None:
-        confidence = max(0, min(100, int(confidence)))
-    if not os.path.exists(DB_PATH):
-        return False
-    today = datetime.date.today().isoformat()
-    try:
-        with get_db_conn() as con:
-            con.execute(
-                "INSERT INTO decision_log "
-                "(symbol, decision_date, decision_type, price_at_decision,"
-                "quantity_changed, reasoning, ai_confidence, portfolio_value_at_time, triggered_by)"
-                "VALUES (?,?,?,?,?,?,?,?,?)",
-                (symbol, today, decision_type.lower(), price,
-                 quantity, reasoning, confidence, portfolio_value, triggered_by)
-            )
-            con.commit()
-        return True
-    except Exception as exc:
-        log_exception(_logger, "log_decision", exc, {"symbol": symbol})
-        return False
-
-
 def _load_timeline(symbol: str) -> list[dict]:
-    if not os.path.exists(DB_PATH):
+    """Reads the Trust Ledger (decision_events) -- decision_log is retired
+    per phase0_decisions.md #17/#18, same migration already applied to
+    decision_quality.py/counterfactual.py. Only EXECUTED BUY/SELL rows are
+    shown: QUALIFIED_REJECTION doesn't change the position, and would flood
+    a single symbol's timeline every cycle it's evaluated but not acted on."""
+    import ledger.db as ledger_db
+    from bot.monitor.dashboard_data import refresh_db_from_hf
+    from bot.trust_ledger.connection import DEFAULT_LEDGER_DB_PATH
+    refresh_db_from_hf()
+    try:
+        conn = ledger_db.get_conn(DEFAULT_LEDGER_DB_PATH)
+    except Exception as exc:
+        _logger.warning(f"timeline ledger connect: {exc}")
         return []
     try:
-        with get_db_conn() as con:
-            rows = con.execute(
-                "SELECT decision_date, decision_type, price_at_decision,"
-                "quantity_changed, reasoning, ai_confidence, portfolio_value_at_time,"
-                "triggered_by FROM decision_log WHERE symbol=? ORDER BY decision_date ASC,"
-                "decision_id ASC",
-                (symbol,)
-            ).fetchall()
-        cols = ["decision_date", "decision_type", "price_at_decision",
-                "quantity_changed", "reasoning", "ai_confidence",
-                "portfolio_value_at_time", "triggered_by"]
-        return [dict(zip(cols, r)) for r in rows]
+        rows = conn.execute(
+            "SELECT timestamp, action, portfolio_snapshot, risk_checks, "
+            "final_confidence, intent FROM decision_events "
+            "WHERE asset=? AND event_type='EXECUTED' AND action IN ('BUY','SELL') "
+            "ORDER BY timestamp ASC",
+            (symbol,)
+        ).fetchall()
     except Exception as exc:
-        log_exception(_logger, "_load_timeline", exc, {"symbol": symbol})
+        _logger.warning(f"timeline read: {exc}")
         return []
+    finally:
+        conn.close()
+
+    entries = []
+    for timestamp, action, portfolio_snapshot, risk_checks, final_confidence, intent in rows:
+        ps = json.loads(portfolio_snapshot)
+        rc = json.loads(risk_checks)
+        it = json.loads(intent)
+        if action == "BUY":
+            price, qty = rc.get("fill_price"), rc.get("fill_shares")
+            reasoning = it.get("thesis") or "—"
+        else:  # SELL -- share count isn't recorded on the exit event today
+            price, qty = ps.get("current_price"), None
+            reasoning = rc.get("exit_reason") or "—"
+        entries.append({
+            "decision_date": str(timestamp)[:10],
+            "decision_type": action.lower(),
+            "price_at_decision": price,
+            "quantity_changed": qty,
+            "reasoning": reasoning,
+            "ai_confidence": round(final_confidence * 100) if final_confidence is not None else None,
+            "portfolio_value_at_time": ps.get("portfolio_value"),
+            "triggered_by": "ai",
+        })
+    return entries
 
 
 def render_decision_timeline(symbol: str | None = None) -> str:
@@ -177,21 +179,32 @@ def render_decision_timeline(symbol: str | None = None) -> str:
 @timed(_logger)
 @safe_render("Decision Timeline")
 def render_all_timelines() -> str:
-    """Overview: all symbols with decision history, most recent first."""
-    if not os.path.exists(DB_PATH):
-        return (f'<div class="nt nt-wrap">'
-                f'{_section("⏱", "Decision Timeline", "All positions")}'
-                f'{_card(_empty_state("⏱", "No trade history", "History appears after trades are logged."))}'
-                f'</div>')
+    """Overview: all symbols with decision history, most recent first.
+
+    Reads the Trust Ledger (decision_events) -- see _load_timeline's
+    docstring for why decision_log is retired and EXECUTED-only is correct."""
+    import ledger.db as ledger_db
+    from bot.monitor.dashboard_data import refresh_db_from_hf
+    from bot.trust_ledger.connection import DEFAULT_LEDGER_DB_PATH
+    refresh_db_from_hf()
     try:
-        with get_db_conn() as con:
-            rows = con.execute(
-                "SELECT DISTINCT symbol, MAX(decision_date) AS last_date,"
-                "COUNT(*) AS n_decisions FROM decision_log GROUP BY symbol "
-                "ORDER BY last_date DESC LIMIT 20"
+        conn = ledger_db.get_conn(DEFAULT_LEDGER_DB_PATH)
+    except Exception as exc:
+        _logger.warning(f"timeline ledger connect: {exc}")
+        conn = None
+    rows = []
+    if conn is not None:
+        try:
+            rows = conn.execute(
+                "SELECT asset, MAX(timestamp) AS last_ts, COUNT(*) AS n_decisions "
+                "FROM decision_events WHERE event_type='EXECUTED' AND action IN ('BUY','SELL') "
+                "GROUP BY asset ORDER BY last_ts DESC LIMIT 20"
             ).fetchall()
-    except Exception:
-        rows = []
+        except Exception as exc:
+            _logger.warning(f"timeline read: {exc}")
+        finally:
+            conn.close()
+    rows = [(sym, str(last_ts)[:10], n) for sym, last_ts, n in rows]
 
     if not rows:
         return (f'<div class="nt nt-wrap">'
