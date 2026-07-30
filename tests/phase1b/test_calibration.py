@@ -1,10 +1,13 @@
 """Tests for analytics/calibration.py (Phase 1B scaffolding)."""
 from __future__ import annotations
 
+import json
+
 import bot.trust_ledger.decisions as decisions
 import bot.trust_ledger.outcomes as outcomes
 from bot.strategy.model_output_adapter import build_model_outputs
 
+import analytics.calibration as calibration
 from analytics.calibration import (
     confidence_calibration, data_quality_impact, return_by_model_agreement,
 )
@@ -105,3 +108,41 @@ def test_data_quality_impact_buckets_by_status(conn, reference_chain):
     assert buckets["COMPLETE"].win_rate == 1.0
     assert buckets["DEGRADED"].decisions == 1
     assert buckets["DEGRADED"].win_rate == 0.0
+
+
+def test_return_by_model_agreement_skips_row_with_unparseable_model_outputs(conn, reference_chain, monkeypatch):
+    """A single row with malformed JSON must be skipped, not crash the
+    whole bucketing pass -- the other, well-formed row must still appear."""
+    _write_executed(conn, reference_chain, "AAPL", 0.7, 0.6, 0.2, final_confidence=0.8, net_return=0.05)
+    _write_executed(conn, reference_chain, "MSFT", 0.7, 0.6, 0.2, final_confidence=0.8, net_return=0.02)
+
+    real_loads = json.loads
+    calls = {"n": 0}
+
+    def _flaky_loads(s):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise json.JSONDecodeError("simulated malformed JSON", "", 0)
+        return real_loads(s)
+
+    monkeypatch.setattr(calibration.json, "loads", _flaky_loads)
+    buckets = return_by_model_agreement(conn)
+    assert sum(b.decisions for b in buckets) == 1
+
+
+def test_data_quality_impact_skips_row_with_unparseable_data_completeness(conn, reference_chain, monkeypatch):
+    _write_executed(conn, reference_chain, "AAPL", 0.7, 0.6, 0.2, final_confidence=0.8, net_return=0.05)
+    _write_executed(conn, reference_chain, "MSFT", 0.7, 0.6, 0.2, final_confidence=0.8, net_return=0.02)
+
+    real_loads = json.loads
+    calls = {"n": 0}
+
+    def _flaky_loads(s):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise json.JSONDecodeError("simulated malformed JSON", "", 0)
+        return real_loads(s)
+
+    monkeypatch.setattr(calibration.json, "loads", _flaky_loads)
+    buckets = data_quality_impact(conn)
+    assert sum(b.decisions for b in buckets) == 1

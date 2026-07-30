@@ -24,8 +24,11 @@ same-named-but-wrong metric.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from dataclasses import dataclass
+
+_log = logging.getLogger("tradegenie.analytics.calibration")
 
 _EXECUTED_WITH_OUTCOME = (
     "SELECT d.final_confidence, d.model_outputs, d.data_completeness, o.net_return "
@@ -105,7 +108,11 @@ def return_by_model_agreement(conn: sqlite3.Connection) -> list[ModelAgreementBu
     (XGBoost/LSTM/FinBERT) agreed on the same signal for that decision."""
     by_bucket: dict[str, list[float]] = {}
     for _confidence, model_outputs_json, _data_completeness, net_return in conn.execute(_EXECUTED_WITH_OUTCOME):
-        model_outputs = json.loads(model_outputs_json)
+        try:
+            model_outputs = json.loads(model_outputs_json)
+        except (TypeError, json.JSONDecodeError) as exc:
+            _log.warning("return_by_model_agreement: skipping row with unparseable model_outputs: %s", exc)
+            continue
         by_bucket.setdefault(_agreement_label(model_outputs), []).append(net_return)
 
     return [
@@ -118,7 +125,11 @@ def data_quality_impact(conn: sqlite3.Connection) -> list[DataQualityBucket]:
     """Section 4.3: win rate and average return, bucketed by data_completeness.status."""
     by_bucket: dict[str, list[float]] = {}
     for _confidence, _model_outputs, data_completeness_json, net_return in conn.execute(_EXECUTED_WITH_OUTCOME):
-        status = json.loads(data_completeness_json)["status"]
+        try:
+            status = json.loads(data_completeness_json)["status"]
+        except (TypeError, json.JSONDecodeError, KeyError) as exc:
+            _log.warning("data_quality_impact: skipping row with unparseable data_completeness: %s", exc)
+            continue
         by_bucket.setdefault(status, []).append(net_return)
 
     return [

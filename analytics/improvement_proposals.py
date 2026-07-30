@@ -61,14 +61,19 @@ def _read(proposal_id: str) -> ImprovementProposal:
 def list_proposals() -> list[ImprovementProposal]:
     """Every proposal artifact on disk, newest first. Empty list (not an
     error) if PROPOSALS_DIR doesn't exist yet -- no proposal has ever
-    been created."""
+    been created.
+
+    Sorts by parsed datetime, not the raw created_at string -- isoformat()
+    omits the fractional-seconds component whenever microsecond==0, so two
+    timestamps of different string lengths can compare incorrectly across
+    that boundary under plain string comparison."""
     if not PROPOSALS_DIR.is_dir():
         return []
     proposals = [
         ImprovementProposal(**json.loads(p.read_text()))
         for p in PROPOSALS_DIR.glob("*.json")
     ]
-    return sorted(proposals, key=lambda p: p.created_at, reverse=True)
+    return sorted(proposals, key=lambda p: datetime.fromisoformat(p.created_at), reverse=True)
 
 
 def create_proposal(what_changes: str, evidence: str, risk: str) -> ImprovementProposal:

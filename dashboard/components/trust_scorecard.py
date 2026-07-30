@@ -26,24 +26,11 @@ from dashboard.design_system import (
     _section, _card, _wrap, _stat_card, _illustrative_banner,
     th_style, td_style,
 )
+from dashboard.components._ledger_analytics import connect_ledger_or_none, rate_color, ret_color
 from bot.core.error_logger import safe_render, timed
 
 _logger = logger
-
-
-def _connect():
-    """Shared connect-and-refresh for this module's three panels. Returns
-    None on failure -- callers render an empty/awaiting state, same
-    best-effort philosophy as decision_quality.py."""
-    import ledger.db as ledger_db
-    from bot.monitor.dashboard_data import refresh_db_from_hf
-    from bot.trust_ledger.connection import DEFAULT_LEDGER_DB_PATH
-    refresh_db_from_hf()
-    try:
-        return ledger_db.get_conn(DEFAULT_LEDGER_DB_PATH)
-    except Exception as exc:
-        _logger.warning(f"trust_scorecard ledger connect: {exc}")
-        return None
+_connect = connect_ledger_or_none
 
 
 def _gate_badge(label: str, passed: bool, awaiting: bool = False) -> str:
@@ -82,11 +69,19 @@ def render_trust_scorecard() -> str:
                      GAIN if sc.evidence.hash_chain_broken_count == 0 else LOSS, "should always be 0", 0.12)
         + f'</div>'
     )
+    # Gate 1/4 have no real "FAIL" state distinct from "no evidence yet" --
+    # constitution_compliance_pass is False whenever total_checks==0 (0/0 pass
+    # rate), and risk_controls_active is literally an EXISTS() check, so
+    # False can only mean zero risk_evaluation_events, never a genuine
+    # failure. Gate 3 (ledger integrity) is the one gate that's meaningfully
+    # PASS on an empty ledger, so it's excluded from this treatment.
     gates_html = (
-        _gate_badge("Constitution Compliance (Gate 1)", sc.gates.constitution_compliance_pass)
+        _gate_badge("Constitution Compliance (Gate 1)", sc.gates.constitution_compliance_pass,
+                    awaiting=sc.compliance.total_checks == 0)
         + _gate_badge("Reproducibility (Gate 2)", sc.gates.reproducibility_pass, awaiting=no_trades_yet)
         + _gate_badge("Ledger Integrity (Gate 3)", sc.gates.ledger_integrity_pass)
-        + _gate_badge("Risk Controls Active (Gate 4)", sc.gates.risk_controls_active)
+        + _gate_badge("Risk Controls Active (Gate 4)", sc.gates.risk_controls_active,
+                      awaiting=not sc.gates.risk_controls_active)
     )
     overall = sc.all_governance_gates_pass and not no_trades_yet
     overall_html = (
@@ -154,12 +149,8 @@ def render_constitution_compliance() -> str:
     )
 
 
-def _rate_color(rate: float) -> str:
-    return GAIN if rate >= 0.6 else (LOSS if rate < 0.45 else NEURAL)
-
-
-def _ret_color(ret: float) -> str:
-    return GAIN if ret >= 0 else LOSS
+_rate_color = rate_color
+_ret_color = ret_color
 
 
 def _table_html(headers: list[str], rows_html: str) -> str:

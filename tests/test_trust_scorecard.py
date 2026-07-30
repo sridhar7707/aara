@@ -89,10 +89,14 @@ def _risk_event(conn, day="2026-07-01"):
 
 
 def test_scorecard_shows_awaiting_first_trade_with_zero_executed_decisions(ledger_conn):
-    """0 EXECUTED decisions means reproducibility_sampled=0, which is
-    "no evidence yet," not a failed gate -- must not render as FAIL."""
+    """On a brand-new ledger, Gates 1 (constitution -- 0/0 checks),
+    2 (reproducibility -- 0 sampled), and 4 (risk controls -- no
+    risk_evaluation_events) are all "no evidence yet," not failures --
+    none of them may render FAIL. Gate 3 (ledger integrity) is the one
+    gate that's genuinely PASS on an empty ledger."""
     html = ts.render_trust_scorecard()
-    assert "AWAITING FIRST TRADE" in html
+    assert html.count("AWAITING FIRST TRADE") == 3
+    assert "FAIL" not in html
     assert "Evidence still accumulating" in html
 
 

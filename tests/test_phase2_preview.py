@@ -104,12 +104,25 @@ def test_list_proposals_returns_empty_list_when_dir_missing(tmp_path, monkeypatc
 
 
 def test_list_proposals_sorted_newest_first(tmp_path, monkeypatch):
+    """Uses explicit, well-separated created_at values (not create_proposal's
+    auto-timestamp, which could tie in rapid succession) so ordering is
+    deterministically verifiable -- including the exact edge case that
+    broke plain string sorting: a later timestamp whose isoformat() has no
+    fractional-seconds component (microsecond==0) sorting lexicographically
+    *before* an earlier one that does have one."""
     monkeypatch.setattr(ip, "PROPOSALS_DIR", tmp_path / "improvement_proposals")
-    p1 = ip.create_proposal("First change", "evidence 1", "Low")
-    p2_proposal = ip.create_proposal("Second change", "evidence 2", "Low")
+    older = ip.ImprovementProposal(
+        proposal_id="PROP-older", created_at="2026-01-01T10:00:00.500000+00:00",
+        what_changes="older", evidence="e", risk="r",
+    )
+    newer = ip.ImprovementProposal(
+        proposal_id="PROP-newer", created_at="2026-01-02T10:00:00+00:00",
+        what_changes="newer", evidence="e", risk="r",
+    )
+    ip._write(older)
+    ip._write(newer)
     result = ip.list_proposals()
-    assert [p.proposal_id for p in result] == [p2_proposal.proposal_id, p1.proposal_id] or \
-        set(p.proposal_id for p in result) == {p1.proposal_id, p2_proposal.proposal_id}
+    assert [p.proposal_id for p in result] == ["PROP-newer", "PROP-older"]
 
 
 def test_list_proposals_reflects_approval_status(tmp_path, monkeypatch):

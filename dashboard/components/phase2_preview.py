@@ -19,34 +19,17 @@ from loguru import logger
 from analytics.regime_views import regime_performance, RegimePerformance
 from analytics.improvement_proposals import list_proposals
 from dashboard.design_system import (
-    GAIN, LOSS, NEURAL, TEXT1, TEXT2,
-    FONT_LABEL, WEIGHT_BOLD,
+    GAIN, NEURAL,
     _section, _card, _wrap, _empty_state, _illustrative_banner,
     th_style, td_style,
 )
+from dashboard.components._ledger_analytics import connect_ledger_or_none, rate_color, ret_color
 from bot.core.error_logger import safe_render, timed
 
 _logger = logger
-
-
-def _connect():
-    import ledger.db as ledger_db
-    from bot.monitor.dashboard_data import refresh_db_from_hf
-    from bot.trust_ledger.connection import DEFAULT_LEDGER_DB_PATH
-    refresh_db_from_hf()
-    try:
-        return ledger_db.get_conn(DEFAULT_LEDGER_DB_PATH)
-    except Exception as exc:
-        _logger.warning(f"phase2_preview ledger connect: {exc}")
-        return None
-
-
-def _rate_color(rate: float) -> str:
-    return GAIN if rate >= 0.6 else (LOSS if rate < 0.45 else NEURAL)
-
-
-def _ret_color(ret: float) -> str:
-    return GAIN if ret >= 0 else LOSS
+_connect = connect_ledger_or_none
+_rate_color = rate_color
+_ret_color = ret_color
 
 
 def _regime_row(r) -> str:
