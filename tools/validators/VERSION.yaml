@@ -1,0 +1,6 @@
+validator_suite:
+  name: "Sentinel Governance Validator"
+  version: "1.0"
+  compatible_brand_version: "1.0"
+  status: frozen
+  strict_mode: true
