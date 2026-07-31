@@ -5,5 +5,5 @@ import pytest
 pytestmark = pytest.mark.skip(reason="scaffolding: not implemented yet")
 
 
-def test_get_evidence_for_decision_returns_list():
-    """GET /api/v1/decisions/{id}/evidence should return all Evidence for that decision."""
+def test_get_evidence_for_decision_returns_dict_with_evidence_list():
+    """GET /api/decisions/{id}/evidence should return {decision_id, evidence: [...]}, not a bare list."""

@@ -1,20 +1,28 @@
 """Governance API adapter (FastAPI). Signatures only, no implementation.
 
-IMPLEMENTATION_HANDOFF.md endpoint: GET /api/v1/governance/state
+Contract: API_REQUIREMENTS_v1.0.md "3. Governance & Compliance"
+(authoritative REST contract). Path prefix unversioned to match
+/api/governance/evaluations/{decision_id}.
 
-Not in the handoff doc's repository tree (which lists only
-decision_api.py, evidence_api.py, approval_api.py under api/), but the
-endpoint has no other home -- added as governance_api.py rather than
-folding it into decision_api.py, since governance/Risk Governor state
-is portfolio-wide, not decision-scoped.
+GET /state is IMPLEMENTATION_HANDOFF.md's Phase 2A workflow prioritization
+pick (not in the frozen contract) -- kept, unversioned for consistency with
+its sibling in this router. Governance/Risk Governor state is
+portfolio-wide, not decision-scoped, so it stays out of decision_api.py.
 """
 
 from fastapi import APIRouter
 
-router = APIRouter(prefix="/api/v1/governance", tags=["governance"])
+router = APIRouter(prefix="/api/governance", tags=["governance"])
 
 
 @router.get("/state")
 def get_governance_state() -> dict:
     """Risk Governor state (3-state: NORMAL/WARNING/DEFENSIVE) + drawdown + buffer."""
+    raise NotImplementedError
+
+
+@router.get("/evaluations/{decision_id}")
+def get_governance_evaluations(decision_id: str) -> dict:
+    """Governance audit trail for a decision, including escalations.
+    Backing view: decision_governance_evaluations."""
     raise NotImplementedError

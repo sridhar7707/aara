@@ -1,9 +1,15 @@
 """Approval API adapter (FastAPI). Signatures only, no implementation.
 
-IMPLEMENTATION_HANDOFF.md endpoints:
+Contract: API_REQUIREMENTS_v1.0.md "Decision Governance Commands"
+(authoritative REST contract). These are the only endpoints in that
+document under the /api/v1/ prefix -- decision reads and portfolio/
+governance reads are unversioned; approval commands are versioned
+because they write immutable ledger events.
+
 POST /api/v1/decisions/{id}/approve (approval only; does not execute)
 POST /api/v1/decisions/{id}/defer
 POST /api/v1/decisions/{id}/decline
+POST /api/v1/decisions/{id}/escalate
 
 Lifecycle: Decision -> Approved -> Dispatch Intent -> Execution Event
 are separate flows. Dispatch/execution are out of scope for Phase 2A.
