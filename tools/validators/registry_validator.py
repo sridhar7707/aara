@@ -75,6 +75,17 @@ def _check_component(name, meta, result):
 
 def _report_coverage(components, result):
     if not os.path.exists(CATALOG_PATH):
+        # docs/architecture/ is gitignored (repo policy, not an accident) --
+        # this means CATALOG_PATH is only ever present in a local checkout,
+        # never in CI. Silently returning here would make CI's "PASSED
+        # cleanly" imply coverage was checked when it wasn't; say so
+        # instead, at WARN (visible, but non-blocking even after Stage 3
+        # Phase B -- this is an environment limitation, not a registry
+        # defect).
+        result.add(REGISTRY_PATH, 0, "REGISTRY_COVERAGE_UNAVAILABLE",
+                    f"{CATALOG_PATH} not present in this checkout (docs/architecture/ is "
+                    f"gitignored) -- registry-vs-catalog coverage cannot be verified here; "
+                    f"run locally to check it", "WARN")
         return
     with open(CATALOG_PATH, "r", encoding="utf-8") as f:
         catalog_content = f.read()
