@@ -70,7 +70,7 @@ def _check_component(name, meta, result):
                     f"'{name}' specification file missing: {spec}", severity)
 
 
-def _report_coverage(registered_count, result):
+def _report_coverage(components, result):
     if not os.path.exists(CATALOG_PATH):
         return
     with open(CATALOG_PATH, "r", encoding="utf-8") as f:
@@ -78,11 +78,18 @@ def _report_coverage(registered_count, result):
     expected_count = len(CATALOG_HEADING_RE.findall(catalog_content))
     if expected_count == 0:
         return
-    result.add(
-        REGISTRY_PATH, 0, "REGISTRY_COVERAGE",
-        f"registry tracks {registered_count}/{expected_count} components documented in {CATALOG_PATH}",
-        "INFO",
-    )
+
+    # unresolved entries (e.g. GovernancePanel) don't claim to be any
+    # specific catalog component, so counting them toward "coverage" would
+    # be as misleading as omitting them entirely -- report separately.
+    resolved = [m for m in components.values() if (m or {}).get("lifecycle") != "unresolved"]
+    unresolved_count = len(components) - len(resolved)
+
+    message = f"registry tracks {len(resolved)}/{expected_count} catalog components in {CATALOG_PATH}"
+    if unresolved_count:
+        plural = "y" if unresolved_count == 1 else "ies"
+        message += f" ({unresolved_count} additional lifecycle: unresolved entr{plural}, not counted toward coverage)"
+    result.add(REGISTRY_PATH, 0, "REGISTRY_COVERAGE", message, "INFO")
 
 
 def validate_component_registry(parsed_contracts):
@@ -93,5 +100,5 @@ def validate_component_registry(parsed_contracts):
     components = registry.get("components") or {}
     for name, meta in components.items():
         _check_component(name, meta or {}, result)
-    _report_coverage(len(components), result)
+    _report_coverage(components, result)
     return result

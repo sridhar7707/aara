@@ -1,5 +1,25 @@
 # Sentinel Brand Change Log
 
+## Version 1.0.2 (2026-07-31)
+**Status:** FROZEN — Design Governance v1.1, Stage 2: Full Catalog Reconciliation (maintenance release)
+
+**Scope:** `brand/design_system/COMPONENT_REGISTRY.yaml` + 6 new component specifications. No token, color, typography, or accessibility changes.
+
+### Changes
+- Registered the 6 catalog components that were implemented but never tracked: `GovernanceBadge`, `EvidenceCard`, `ApprovalControls`, `ChainOfCustodyTimeline`, `AuditFingerprintCard`, `ModelAgreementBadge`. Registry now covers all 9 catalog components with a resolved identity (`GovernancePanel` remains the sole exception — see below).
+- Created their 6 missing specification docs, following the same rule as v1.0.1's two: cite only real tokens from `tokens.css`, never `SENTINEL_COMPONENT_CATALOG.md`'s disconnected color palette.
+- Found 2 more naming-drift cases identical to `PortfolioHealthCard`/`HealthScore`: `ChainOfCustodyTimeline` (catalog) vs. `ChainTimeline` (`chain_timeline.py`). Both resolved via the same `canonical_name`/`aliases` pattern, not a silent rename.
+- Found 2 components where the catalog **disagrees with itself** — not introduced by this registry, just surfaced: Component 6's in-section "Name:" field says `AuditFingerprintCard`, but the catalog's own end-of-document summary calls it `AuditFingerprintDisplay`; Component 7's "Name:" field says `ModelAgreementBadge`, but its own section heading says "Model Agreement Indicator." Both resolved by treating the in-section "Name:" field as canonical and registering every variant (including the implementation's own name) as an alias, so no lookup silently 404s. The catalog's internal inconsistency itself is unresolved — a documentation fix, not a registry one.
+- Deliberately left `owner` and `criticality` unset on all 6 new entries — see `metadata.unassigned_fields_note`. Neither field has a source document to derive a value from; guessing plausible-sounding ones would be exactly the kind of unverified inference this whole reconciliation effort has been working against.
+- `tools/validators/registry_validator.py`'s coverage check now separates resolved components (counted against the catalog) from `lifecycle: unresolved` ones (reported separately) — after this change, counting `GovernancePanel` as a 10th "registered" component against a 9-component catalog would itself have been misleading.
+
+### Not done in this release (per agreed Design Governance v1.1 sequencing)
+- **`GovernancePanel`'s identity is still unresolved** — explicitly deferred, not decided this pass. It has no implementation and no matching catalog entry.
+- CI enforcement (making `tools/validate_brand_system.py` a required PR/release gate) — intentionally sequenced *after* full reconciliation, per Stage 3 of the agreed plan, and further staged as informational-then-enforcing once adopted, to avoid gating on an imperfect baseline.
+- `SENTINEL_COMPONENT_CATALOG.md`'s own internal name inconsistencies (2 components) and its color-palette mismatch against `tokens.css` (flagged in v1.0.1) remain open — both are catalog-document fixes, not registry ones.
+
+---
+
 ## Version 1.0.1 (2026-07-31)
 **Status:** FROZEN — Component Registry Synchronization (maintenance release)
 

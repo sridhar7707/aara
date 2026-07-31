@@ -1,20 +1,21 @@
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
   brand_version: "1.0"
   status: frozen
   reason: >
-    Registry synchronization only (v1.0.1). No token, color, typography,
-    accessibility, or component contract changes. See BRAND_CHANGELOG.md.
-  coverage:
-    note: >
-      docs/architecture/SENTINEL_COMPONENT_CATALOG.md documents 9 reusable
-      components; this registry currently tracks 4. The other 5
-      (GovernanceBadge, EvidenceCard, ChainOfCustodyTimeline,
-      AuditFingerprintCard, ModelAgreementBadge) are implemented in
-      sentinel/frontend/components/ but were never registered here --
-      deliberately left out of this synchronization pass rather than added
-      by guesswork. tools/validate_brand_system.py reports the live
-      registered/expected count on every run.
+    Design Governance v1.1, Stage 2 (v1.0.2): registered the 6 remaining
+    implemented-but-untracked components (GovernanceBadge, EvidenceCard,
+    ApprovalControls, ChainOfCustodyTimeline, AuditFingerprintCard,
+    ModelAgreementBadge). Registry now covers 9/9 catalog components with a
+    resolved identity; GovernancePanel remains lifecycle: unresolved and is
+    counted separately -- see its note: field. No token, color, typography,
+    or accessibility changes. See BRAND_CHANGELOG.md.
+  unassigned_fields_note: >
+    owner and criticality are not set on the 6 components added in v1.0.2.
+    Both are organizational/priority judgments with no source document
+    (catalog or implementation) to derive them from -- left unassigned
+    rather than guessed, pending an explicit governance decision, same
+    principle as GovernancePanel's lifecycle: unresolved.
 
 # lifecycle values and what each requires:
 #   implemented -- file: must exist on disk, specification: must exist
@@ -105,4 +106,126 @@ components:
     criticality: medium
     required_metrics:
       - decision_quality_score
+      - model_agreement
+
+  GovernanceBadge:
+    lifecycle: implemented
+    file: "sentinel/frontend/components/governance_badge.py"
+    specification: "brand/design_system/GOVERNANCE_BADGE.md"
+    domain:
+      - governance
+    states:
+      - PASS
+      - ESCALATED
+      - BREACH
+
+  EvidenceCard:
+    lifecycle: implemented
+    file: "sentinel/frontend/components/evidence_card.py"
+    specification: "brand/design_system/EVIDENCE_CARD.md"
+    domain:
+      - evidence_provenance
+    states:
+      - collapsed
+      - expanded
+      - inspecting
+    required_fields:
+      - evidence_id
+      - type
+      - provider
+      - provider_version
+      - data_as_of
+      - recorded_at
+      - confidence
+      - confidence_interval
+
+  ApprovalControls:
+    lifecycle: implemented
+    file: "sentinel/frontend/components/approval_controls.py"
+    specification: "brand/design_system/APPROVAL_CONTROLS.md"
+    domain:
+      - decision_intelligence
+      - governance
+    states:
+      - ready
+      - submitting
+      - disabled
+      - escalated
+    required_fields:
+      - decision_id
+      - can_approve
+      - requires_confirmation
+      - is_escalated
+
+  ChainOfCustodyTimeline:
+    lifecycle: implemented
+    canonical_name: ChainOfCustodyTimeline
+    file: "sentinel/frontend/components/chain_timeline.py"
+    aliases:
+      - ChainTimeline
+    migration_note: >
+      Implementation module/docstring say "ChainTimeline"
+      (sentinel/frontend/components/chain_timeline.py); catalog Component 5
+      "Name:" field says "ChainOfCustodyTimeline". Same alias pattern as
+      PortfolioHealthCard/HealthScore. Remove the alias once the
+      implementation is renamed to match, in the next major version.
+    specification: "brand/design_system/CHAIN_OF_CUSTODY_TIMELINE.md"
+    domain:
+      - audit_trails
+    states:
+      - collapsed
+      - expanded
+      - verifying
+      - verified
+      - tampered
+
+  AuditFingerprintCard:
+    lifecycle: implemented
+    canonical_name: AuditFingerprintCard
+    file: "sentinel/frontend/components/audit_fingerprint.py"
+    aliases:
+      - AuditFingerprint
+      - AuditFingerprintDisplay
+    migration_note: >
+      Three names exist for this one component: the catalog's Component 6
+      in-section "Name:" field says "AuditFingerprintCard" (used here as
+      canonical); the catalog's own end-of-document summary list instead
+      calls it "AuditFingerprintDisplay" -- an inconsistency inside
+      SENTINEL_COMPONENT_CATALOG.md itself, not introduced by this
+      registry; the implementation module/docstring say "AuditFingerprint"
+      (sentinel/frontend/components/audit_fingerprint.py). Both aliases
+      are registered so neither name silently 404s a lookup. Resolve the
+      catalog's internal inconsistency separately, then collapse to one
+      name in the next major version.
+    specification: "brand/design_system/AUDIT_FINGERPRINT_CARD.md"
+    domain:
+      - audit_trails
+    states:
+      - default
+      - verifying
+      - verified
+      - tampered
+
+  ModelAgreementBadge:
+    lifecycle: implemented
+    canonical_name: ModelAgreementBadge
+    file: "sentinel/frontend/components/model_agreement.py"
+    aliases:
+      - ModelAgreement
+      - ModelAgreementIndicator
+    migration_note: >
+      Three names exist for this one component: the catalog's Component 7
+      in-section "Name:" field says "ModelAgreementBadge" (used here as
+      canonical); the catalog's own section heading instead reads "Model
+      Agreement Indicator" -- an inconsistency inside
+      SENTINEL_COMPONENT_CATALOG.md itself, not introduced by this
+      registry; the implementation module/docstring say "ModelAgreement"
+      (sentinel/frontend/components/model_agreement.py). Both aliases are
+      registered so neither name silently 404s a lookup. Resolve the
+      catalog's internal inconsistency separately, then collapse to one
+      name in the next major version.
+    specification: "brand/design_system/MODEL_AGREEMENT_BADGE.md"
+    domain:
+      - model_intelligence
+    required_metrics:
       - model_agreement
