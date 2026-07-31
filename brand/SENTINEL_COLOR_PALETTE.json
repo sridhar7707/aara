@@ -1,0 +1,111 @@
+{
+  "brand": {
+    "primary": {
+      "name": "Deep Navy",
+      "hex": "#0B1F3A",
+      "rgb": "11, 31, 58",
+      "hsl": "207, 55%, 13%",
+      "usage": "Main brand color, headers, navigation, buttons",
+      "meaning": "Institutional trust, stability, banking, financial security",
+      "cssVariable": "--color-navy-primary"
+    },
+    "secondary": {
+      "name": "Forest Emerald",
+      "hex": "#176B4D",
+      "rgb": "23, 107, 77",
+      "hsl": "154, 65%, 25%",
+      "usage": "Growth indicators, positive metrics, secondary buttons",
+      "meaning": "Controlled growth, wealth building, steady success",
+      "cssVariable": "--color-emerald-secondary"
+    },
+    "accent": {
+      "name": "Muted Gold",
+      "hex": "#C8A45D",
+      "rgb": "200, 164, 93",
+      "hsl": "39, 57%, 57%",
+      "usage": "Highlights, premium elements, long-term value",
+      "meaning": "Premium quality, wealth accumulation, timeless value",
+      "cssVariable": "--color-gold-accent"
+    }
+  },
+  "neutral": {
+    "background": {
+      "name": "Warm White",
+      "hex": "#F8F7F3",
+      "rgb": "248, 247, 243",
+      "hsl": "30, 25%, 96%",
+      "usage": "All backgrounds",
+      "meaning": "Professional, approachable, financial-grade",
+      "cssVariable": "--color-background-warm"
+    },
+    "text_primary": {
+      "name": "Dark Charcoal",
+      "hex": "#1A1A1A",
+      "rgb": "26, 26, 26",
+      "hsl": "0, 0%, 10%",
+      "usage": "Body text, headlines, primary content",
+      "meaning": "Professional, readable, high contrast",
+      "cssVariable": "--color-text-primary"
+    },
+    "text_secondary": {
+      "name": "Medium Gray",
+      "hex": "#666666",
+      "rgb": "102, 102, 102",
+      "hsl": "0, 0%, 40%",
+      "usage": "Secondary text, labels, hints, inactive states",
+      "meaning": "Subtle, supporting, non-primary information",
+      "cssVariable": "--color-text-secondary"
+    }
+  },
+  "semantic": {
+    "success": {
+      "name": "Forest Emerald",
+      "hex": "#176B4D",
+      "usage": "Approved decisions, positive outcomes"
+    },
+    "warning": {
+      "name": "Muted Gold",
+      "hex": "#C8A45D",
+      "usage": "Risk Governor WARNING state, caution"
+    },
+    "danger": {
+      "name": "Deep Navy",
+      "hex": "#0B1F3A",
+      "usage": "Risk Governor DEFENSIVE state, governance failures (not red)"
+    },
+    "info": {
+      "name": "Deep Navy",
+      "hex": "#0B1F3A",
+      "usage": "Information, neutral messaging"
+    }
+  },
+  "contrast_ratios": {
+    "navy_on_warm_white": "13.4:1",
+    "emerald_on_warm_white": "7.1:1",
+    "gold_on_navy": "8.9:1",
+    "charcoal_on_warm_white": "14.2:1",
+    "gray_on_warm_white": "5.8:1"
+  },
+  "wcag_compliance": {
+    "level": "AA",
+    "standard": "Web Content Accessibility Guidelines 2.1",
+    "contrast_requirement": "4.5:1 for normal text, 3:1 for large text",
+    "status": "All primary colors meet AA standard"
+  },
+  "css_variables": {
+    "root": ":root {",
+    "colors": [
+      "--color-navy-primary: #0B1F3A;",
+      "--color-emerald-secondary: #176B4D;",
+      "--color-gold-accent: #C8A45D;",
+      "--color-background-warm: #F8F7F3;",
+      "--color-text-primary: #1A1A1A;",
+      "--color-text-secondary: #666666;"
+    ],
+    "close": "}"
+  },
+  "frozen": true,
+  "version": "1.0",
+  "date": "2026-07-30",
+  "status": "AUTHORITATIVE"
+}

@@ -1,0 +1,108 @@
+metadata:
+  version: "1.0.1"
+  brand_version: "1.0"
+  status: frozen
+  reason: >
+    Registry synchronization only (v1.0.1). No token, color, typography,
+    accessibility, or component contract changes. See BRAND_CHANGELOG.md.
+  coverage:
+    note: >
+      docs/architecture/SENTINEL_COMPONENT_CATALOG.md documents 9 reusable
+      components; this registry currently tracks 4. The other 5
+      (GovernanceBadge, EvidenceCard, ChainOfCustodyTimeline,
+      AuditFingerprintCard, ModelAgreementBadge) are implemented in
+      sentinel/frontend/components/ but were never registered here --
+      deliberately left out of this synchronization pass rather than added
+      by guesswork. tools/validate_brand_system.py reports the live
+      registered/expected count on every run.
+
+# lifecycle values and what each requires:
+#   implemented -- file: must exist on disk, specification: must exist
+#   planned     -- specification: must exist, file: may be absent
+#   unresolved  -- identity/existence not yet settled; file: and
+#                  specification: not required, but note: explaining the
+#                  open question IS required
+#   deprecated  -- file: may still exist; validator warns rather than errors
+
+components:
+  DecisionCard:
+    lifecycle: implemented
+    file: "sentinel/frontend/components/decision_card.py"
+    specification: "brand/design_system/DECISION_CARD.md"
+    owner: "Investor Experience"
+    domain:
+      - decision_intelligence
+      - governance
+    criticality: high
+    states:
+      - PENDING
+      - APPROVED
+      - DEFERRED
+      - DECLINED
+      - ESCALATED
+    required_metrics:
+      - conviction_score
+      - evidence_strength
+      - decision_quality_score
+    audit_requirements:
+      - audit_fingerprint_hash
+      - timestamp
+
+  GovernancePanel:
+    lifecycle: unresolved
+    note: >
+      No implementation and no catalog entry under this name.
+      SENTINEL_COMPONENT_CATALOG.md's Component 1 is "GovernanceBadge"
+      (governance_badge.py exists) -- a status badge, not a panel. Could be
+      a typo for GovernanceBadge, or a distinct, never-built component.
+      Do not assume either way; resolve by human decision, then either
+      repoint this entry at GovernanceBadge or promote it to lifecycle:
+      planned with its own specification.
+    owner: "Risk & Policy Engine"
+    domain:
+      - risk_governance
+      - audit_trails
+    criticality: high
+    states:
+      - NORMAL
+      - WARNING
+      - DEFENSIVE
+    required_fields:
+      - governance_checks
+      - policy_version
+      - audit_reference
+
+  RiskGovernorBadge:
+    lifecycle: implemented
+    file: "sentinel/frontend/components/risk_governor_badge.py"
+    specification: "brand/design_system/RISK_GOVERNOR_BADGE.md"
+    owner: "Risk & Policy Engine"
+    domain:
+      - defensive_state
+    criticality: high
+    states:
+      - NORMAL
+      - WARNING
+      - DEFENSIVE
+
+  PortfolioHealthCard:
+    lifecycle: implemented
+    canonical_name: PortfolioHealthCard
+    file: "sentinel/frontend/components/health_score.py"
+    aliases:
+      - HealthScore
+    migration_note: >
+      Implementation module/docstring currently say "HealthScore"
+      (sentinel/frontend/components/health_score.py); catalog and this
+      registry use the canonical name "PortfolioHealthCard". Purpose and
+      domain match SENTINEL_COMPONENT_CATALOG.md's Component 8. Remove the
+      HealthScore alias once the implementation is renamed to match, in the
+      next major version.
+    specification: "brand/design_system/PORTFOLIO_HEALTH_CARD.md"
+    owner: "Portfolio Analytics"
+    domain:
+      - asset_health
+    criticality: medium
+    required_metrics:
+      - decision_quality_score
+      - model_agreement

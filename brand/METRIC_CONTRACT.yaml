@@ -1,0 +1,65 @@
+metadata:
+  version: "1.0"
+  brand_version: "1.0"
+  status: frozen
+
+metrics:
+  conviction_score:
+    api_field: "decisions.metrics.conviction_score"
+    data_type: "integer"
+    unit: "score"
+    scale:
+      minimum: 0
+      maximum: 100
+    display:
+      label: "Conviction Score"
+      format: "XX/100"
+      investor_visible: true
+
+  decision_quality_score:
+    api_field: "decisions.metrics.decision_quality_score"
+    data_type: "integer"
+    unit: "score"
+    scale:
+      minimum: 0
+      maximum: 100
+    display:
+      label: "Decision Quality Score"
+      format: "XX/100"
+      investor_visible: true
+
+  evidence_strength:
+    api_field: "decisions.metrics.evidence_strength"
+    data_type: "integer"
+    unit: "score"
+    scale:
+      minimum: 0
+      maximum: 100
+    display:
+      label: "Evidence Strength"
+      format: "XX/100"
+      investor_visible: true
+
+  model_agreement:
+    api_field: "decisions.metrics.model_agreement"
+    data_type: "integer"
+    unit: "score"
+    scale:
+      minimum: 0
+      maximum: 100
+    display:
+      label: "Model Agreement"
+      format: "XX/100"
+      investor_visible: true
+
+  model_confidence:
+    api_field: "admin.decisions.internal_diagnostics.raw_model_confidence"
+    data_type: "float"
+    unit: "ratio"
+    scale:
+      minimum: 0.00
+      maximum: 1.00
+    display:
+      label: "Internal Model Confidence"
+      format: "0.00"
+      investor_visible: false

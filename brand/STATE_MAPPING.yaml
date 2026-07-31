@@ -1,0 +1,53 @@
+metadata:
+  version: "1.0"
+  brand_version: "1.0"
+  status: frozen
+  phase: "2A"
+
+decision_states:
+  PENDING:
+    label: "Pending Review"
+    color_token: "--status-pending"
+    icon: "decision_review_v1.0.svg"
+    semantic_meaning: "Awaiting governance check or execution signal"
+
+  APPROVED:
+    label: "Approved"
+    color_token: "--status-approved"
+    icon: "governance_check_v1.0.svg"
+    semantic_meaning: "Verified against policy guardrails"
+
+  DEFERRED:
+    label: "Deferred"
+    color_token: "--status-deferred"
+    icon: "decision_review_v1.0.svg"
+    semantic_meaning: "Postponed due to volatility or missing parameters"
+
+  DECLINED:
+    label: "Declined"
+    color_token: "--status-declined"
+    icon: "risk_warning_v1.0.svg"
+    semantic_meaning: "Governance rejection by Risk Governor engine"
+    not_meaning:
+      - financial_loss
+      - portfolio_decline
+      - market_prediction_failure
+
+  ESCALATED:
+    label: "Escalated Review"
+    color_token: "--status-escalated"
+    icon: "governance_check_v1.0.svg"
+    semantic_meaning: "Manual human-in-the-loop intervention required"
+
+risk_governor:
+  NORMAL:
+    label: "Normal Operation"
+    color_token: "--status-approved"
+
+  WARNING:
+    label: "Warning Threshold"
+    color_token: "--status-deferred"
+
+  DEFENSIVE:
+    label: "Defensive Intervention"
+    color_token: "--status-declined"

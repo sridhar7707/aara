@@ -1,0 +1,34 @@
+# Explicit, auditable exceptions to Sentinel brand governance checks.
+#
+# Every entry MUST include a justification -- validate_brand_system.py
+# refuses to run (config error, not a silent pass) if one is missing or
+# blank. This file is the only place exceptions may live; do not add
+# per-file skip logic elsewhere in the validators.
+#
+# files: whole-file exemption from every check in code_scan_validator.py.
+# terms: exempts one forbidden term / internal-only metric label in one file.
+# colors: exempts one literal hex color in one file.
+#
+# Example (commented out -- no live exceptions exist yet):
+#
+# files:
+#   - path: sentinel/frontend/dev_preview.py
+#     justification: >
+#       Local-only dev harness, never shipped; intentionally shows the
+#       legacy metric vocabulary side-by-side for migration reference.
+#
+# terms:
+#   - term: "AI Confidence"
+#     file: sentinel/frontend/components/health_score.py
+#     justification: "Quoted verbatim in a code comment documenting what NOT to render."
+#
+# colors:
+#   - hex: "#0B1F3A"
+#     file: sentinel/frontend/components/decision_card.py
+#     justification: "Matches --color-navy-primary; token not yet wired through this component."
+
+files: []
+
+terms: []
+
+colors: []

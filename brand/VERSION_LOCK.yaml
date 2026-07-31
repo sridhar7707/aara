@@ -1,0 +1,20 @@
+release:
+  name: "phase2a-brand-system-v1.0-frozen"
+  version: "1.0"
+  status: frozen
+  date: "2026-07-30"
+
+contracts:
+  manifest: "1.0"
+  state_mapping: "1.0"
+  metric_contract: "1.0"
+  component_registry: "1.0.1"
+
+compatibility:
+  sentinel_phase: "2A"
+  backend_api: "v1.0"
+
+identities:
+  tagline_primary: "AI-guided wealth management. Human-governed. Transparent by design."
+  product_descriptor: "The Governed Decision Cockpit"
+  internal_codename: "Sentinel Intelligence Platform"

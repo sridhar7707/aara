@@ -1,0 +1,73 @@
+brand:
+  name: Sentinel Intelligence
+  version: "1.0"
+  status: frozen
+  tagline_primary: "AI-guided wealth management. Human-governed. Transparent by design."
+  product_descriptor:
+    type: "category_descriptor"
+    value: "The Governed Decision Cockpit"
+  internal_codename: "Sentinel Intelligence Platform"
+
+colors:
+  primary: "#0B1F3A"
+  secondary: "#176B4D"
+  accent: "#C8A45D"
+  background: "#F8F7F3"
+  surface: "#FFFFFF"
+  text_primary: "#1A1A1A"
+  text_secondary: "#666666"
+  border: "#E2E8F0"
+
+typography:
+  primary_family: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+  data_family: "Monaco, 'Courier New', monospace"
+
+metrics:
+  conviction_score:
+    label: "Conviction Score"
+    type: integer
+    range: "0-100"
+    format: "XX/100"
+  decision_quality_score:
+    label: "Decision Quality Score"
+    type: integer
+    range: "0-100"
+    format: "XX/100"
+  evidence_strength:
+    label: "Evidence Strength"
+    type: integer
+    range: "0-100"
+    format: "XX/100"
+  model_agreement:
+    label: "Model Agreement"
+    type: integer
+    range: "0-100"
+    format: "XX/100"
+  model_confidence:
+    label: "Model Confidence"
+    type: float
+    range: "0.00-1.00"
+    visibility: internal_only
+
+compatibility:
+  phase:
+    current: "Phase 2A"
+  supported_devices:
+    - desktop
+    - tablet
+    - mobile
+  theme:
+    supported:
+      - warm_white
+    dark_mode:
+      status: deferred
+  backend:
+    api_contract:
+      version: "v1.0"
+
+principles:
+  - governance_first
+  - evidence_over_prediction
+  - human_control
+  - complete_auditability
+  - multi_device_first

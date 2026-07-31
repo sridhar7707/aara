@@ -1,0 +1,62 @@
+:root {
+  /* ==========================================================================
+     1. Primitive Palette
+     ========================================================================== */
+  --color-navy-primary: #0B1F3A;
+  --color-emerald-secondary: #176B4D;
+  --color-gold-accent: #C8A45D;
+  --color-background-warm: #F8F7F3;
+  --color-surface-white: #FFFFFF;
+
+  --color-text-primary: #1A1A1A;
+  --color-text-secondary: #666666;
+  --color-border-subtle: #E2E8F0;
+
+  /* ==========================================================================
+     2. Semantic UI & Component Lifecycle Tokens
+     ========================================================================== */
+  /* Complete State Lifecycle */
+  --status-pending: var(--color-text-secondary);
+  --status-approved: var(--color-emerald-secondary);
+  --status-deferred: var(--color-gold-accent);
+  --status-declined: var(--color-navy-primary);
+  --status-escalated: var(--color-gold-accent);
+
+  /* Governance Execution Shortcuts */
+  --governance-pass: var(--color-emerald-secondary);
+  --governance-review: var(--color-gold-accent);
+  --governance-block: var(--color-navy-primary);
+
+  /* Financial Metrics & Data Trends */
+  --metric-positive: var(--color-emerald-secondary);
+  --metric-neutral: var(--color-text-secondary);
+  --metric-negative: var(--color-navy-primary);
+
+  /* ==========================================================================
+     3. Typography, Spacing & Elevation
+     ========================================================================== */
+  --font-primary: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-data: Monaco, "Courier New", monospace;
+
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+
+  --radius-button: 6px;
+  --radius-card: 8px;
+  --radius-badge: 4px;
+
+  --shadow-card: 0 2px 8px rgba(11, 31, 58, 0.08);
+  --shadow-overlay: 0 10px 25px rgba(11, 31, 58, 0.15);
+
+  /* ==========================================================================
+     4. Responsive Breakpoints (Multi-Device First)
+     ========================================================================== */
+  --breakpoint-mobile: 320px;
+  --breakpoint-tablet: 768px;
+  --breakpoint-desktop: 1024px;
+  --breakpoint-wide: 1280px;
+}
