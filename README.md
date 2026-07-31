@@ -116,6 +116,12 @@ ai-trading-bot/
 │       ├── retrain.yml         # Weekly model retraining
 │       └── keepalive.yml       # HuggingFace Space keep-alive ping
 │
+├── sentinel/                    # Sentinel Intelligence -- a separate,
+│                                # governance-first Decision Intelligence
+│                                # platform. Phase 2A architectural
+│                                # scaffolding only (no logic/persistence/
+│                                # execution yet). See sentinel/README.md.
+│
 ├── trades.db                   # SQLite trade history
 ├── config.py                   # Configuration (symbols, parameters)
 ├── requirements.txt            # Python dependencies

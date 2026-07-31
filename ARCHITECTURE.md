@@ -506,6 +506,16 @@ ai-trading-bot/
 │   ├── retrain.yml               # Weekly model retraining (Sunday 2am)
 │   └── keepalive.yml             # HF Space keep-alive (daily ping)
 │
+├── sentinel/                      # Sentinel Intelligence -- governance-first
+│   │                              # Decision Intelligence platform, a separate
+│   │                              # initiative from the TradeGenius bot above.
+│   │                              # Phase 2A architectural scaffolding only
+│   │                              # (no business logic, no persistence, no
+│   │                              # execution yet) -- see sentinel/README.md.
+│   ├── backend/                   # domain / events / services / repositories
+│   │                              # / projections / config / api (FastAPI)
+│   └── frontend/                  # Gradio workspaces + components
+│
 ├── config.py                     # All configuration + parameters
 ├── requirements.txt              # Python dependencies
 ├── .env.example                  # Environment variable template
