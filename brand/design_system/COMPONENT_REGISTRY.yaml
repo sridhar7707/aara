@@ -1,21 +1,21 @@
 metadata:
-  version: "1.0.2"
+  version: "1.0.3"
   brand_version: "1.0"
   status: frozen
   reason: >
-    Design Governance v1.1, Stage 2 (v1.0.2): registered the 6 remaining
-    implemented-but-untracked components (GovernanceBadge, EvidenceCard,
-    ApprovalControls, ChainOfCustodyTimeline, AuditFingerprintCard,
-    ModelAgreementBadge). Registry now covers 9/9 catalog components with a
-    resolved identity; GovernancePanel remains lifecycle: unresolved and is
-    counted separately -- see its note: field. No token, color, typography,
-    or accessibility changes. See BRAND_CHANGELOG.md.
+    Design Governance v1.1, Stage 1 (v1.0.3): resolved GovernancePanel from
+    lifecycle: unresolved to lifecycle: planned -- a distinct, deliberately
+    scoped composite governance view, NOT a naming mistake for
+    GovernanceBadge (their states/owner/domain don't match; see the entry's
+    note: and brand/design_system/GOVERNANCE_PANEL.md). This closes Stage 1
+    of Design Governance v1.1; Stage 2 (v1.0.2) already reconciled the rest
+    of the catalog. No token, color, typography, or accessibility changes.
+    See BRAND_CHANGELOG.md.
   unassigned_fields_note: >
     owner and criticality are not set on the 6 components added in v1.0.2.
     Both are organizational/priority judgments with no source document
     (catalog or implementation) to derive them from -- left unassigned
-    rather than guessed, pending an explicit governance decision, same
-    principle as GovernancePanel's lifecycle: unresolved.
+    rather than guessed, pending an explicit governance decision.
 
 # lifecycle values and what each requires:
 #   implemented -- file: must exist on disk, specification: must exist
@@ -50,15 +50,16 @@ components:
       - timestamp
 
   GovernancePanel:
-    lifecycle: unresolved
+    lifecycle: planned
     note: >
-      No implementation and no catalog entry under this name.
-      SENTINEL_COMPONENT_CATALOG.md's Component 1 is "GovernanceBadge"
-      (governance_badge.py exists) -- a status badge, not a panel. Could be
-      a typo for GovernanceBadge, or a distinct, never-built component.
-      Do not assume either way; resolve by human decision, then either
-      repoint this entry at GovernanceBadge or promote it to lifecycle:
-      planned with its own specification.
+      Resolved 2026-07-31 (BRAND_CHANGELOG.md v1.0.3) as a distinct,
+      not-yet-built component -- NOT a typo for GovernanceBadge, despite
+      matching its "Governance"-prefixed name. Deciding evidence: this
+      entry's states/owner/required_fields matched RiskGovernorBadge, not
+      GovernanceBadge's actual PASS/ESCALATED/BREACH states -- consistent
+      with GovernancePanel being a richer composite audit view that embeds
+      Risk Governor state (see specification:), not a summary badge. See
+      brand/design_system/GOVERNANCE_PANEL.md.
     owner: "Risk & Policy Engine"
     domain:
       - risk_governance
@@ -72,6 +73,7 @@ components:
       - governance_checks
       - policy_version
       - audit_reference
+    specification: "brand/design_system/GOVERNANCE_PANEL.md"
 
   RiskGovernorBadge:
     lifecycle: implemented

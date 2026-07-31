@@ -49,6 +49,16 @@ jobs:
       - name: Architecture & standards review
         run: python scripts/arch_review.py
 
+      # Sentinel brand/UI governance (Design Governance v1.1, Stage 3 Phase A).
+      # Deliberately non-blocking while the registry/catalog/implementation
+      # baseline stabilizes -- see brand/CI_INTEGRATION.md and
+      # brand/BRAND_CHANGELOG.md. Promote continue-on-error to false (Phase
+      # B) once findings here represent new regressions, not open
+      # architectural questions.
+      - name: Sentinel brand governance validation (informational)
+        continue-on-error: true
+        run: python tools/validate_brand_system.py
+
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short
 

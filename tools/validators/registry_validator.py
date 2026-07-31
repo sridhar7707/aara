@@ -11,11 +11,14 @@ one-size-fits-all:
   deprecated  -- file: may still exist; issues are WARN, not ERROR
 
 Also reports registry coverage against docs/architecture/
-SENTINEL_COMPONENT_CATALOG.md's component count (INFO, non-blocking) --
-the registry is a partial, hand-maintained subset of the catalog today, not
-an independently authoritative list of what exists. Duplicate component
-keys are caught earlier, in yaml_contracts.py's duplicate-key-detecting
-loader (plain YAML parsing would silently keep only the last one).
+SENTINEL_COMPONENT_CATALOG.md's documented component names (INFO,
+non-blocking), matched by identity (canonical_name or registry key), not
+by lifecycle -- a registered component can validly describe something the
+catalog has never documented (e.g. GovernancePanel), which is a different
+situation from tracking a component the catalog does document. Duplicate
+component keys are caught earlier, in yaml_contracts.py's
+duplicate-key-detecting loader (plain YAML parsing would silently keep
+only the last one).
 """
 import os
 import re
@@ -25,7 +28,7 @@ from .types import ValidationResult
 
 REGISTRY_PATH = "brand/design_system/COMPONENT_REGISTRY.yaml"
 CATALOG_PATH = "docs/architecture/SENTINEL_COMPONENT_CATALOG.md"
-CATALOG_HEADING_RE = re.compile(r'^## Component \d+:', re.MULTILINE)
+CATALOG_NAME_RE = re.compile(r'^\*\*Name:\*\*\s*(\S+)', re.MULTILINE)
 
 VALID_LIFECYCLES = {"implemented", "planned", "unresolved", "deprecated"}
 
@@ -75,20 +78,24 @@ def _report_coverage(components, result):
         return
     with open(CATALOG_PATH, "r", encoding="utf-8") as f:
         catalog_content = f.read()
-    expected_count = len(CATALOG_HEADING_RE.findall(catalog_content))
-    if expected_count == 0:
+    catalog_names = set(CATALOG_NAME_RE.findall(catalog_content))
+    if not catalog_names:
         return
 
-    # unresolved entries (e.g. GovernancePanel) don't claim to be any
-    # specific catalog component, so counting them toward "coverage" would
-    # be as misleading as omitting them entirely -- report separately.
-    resolved = [m for m in components.values() if (m or {}).get("lifecycle") != "unresolved"]
-    unresolved_count = len(components) - len(resolved)
+    # Match by identity (canonical_name if set, else the registry key),
+    # not by lifecycle -- a component can be legitimately planned/
+    # implemented/deprecated while still describing something the catalog
+    # has never documented (e.g. GovernancePanel), and that's not the same
+    # situation as tracking a component the catalog *does* document.
+    tracked_names = {(m or {}).get("canonical_name", key) for key, m in components.items()}
+    covered = tracked_names & catalog_names
+    beyond_catalog = tracked_names - catalog_names
 
-    message = f"registry tracks {len(resolved)}/{expected_count} catalog components in {CATALOG_PATH}"
-    if unresolved_count:
-        plural = "y" if unresolved_count == 1 else "ies"
-        message += f" ({unresolved_count} additional lifecycle: unresolved entr{plural}, not counted toward coverage)"
+    message = f"registry tracks {len(covered)}/{len(catalog_names)} catalog components in {CATALOG_PATH}"
+    if beyond_catalog:
+        plural = "y" if len(beyond_catalog) == 1 else "ies"
+        message += (f" ({len(beyond_catalog)} additional entr{plural} not in the catalog: "
+                     f"{', '.join(sorted(beyond_catalog))})")
     result.add(REGISTRY_PATH, 0, "REGISTRY_COVERAGE", message, "INFO")
 
 

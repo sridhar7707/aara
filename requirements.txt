@@ -42,3 +42,8 @@ duckdb>=1.0.0
 # Testing
 pytest>=7.4.0
 pytest-mock>=3.12.0
+
+# Sentinel brand governance validator (tools/validators/) -- was only ever
+# present transitively via other packages; declared explicitly since our
+# own code imports it directly.
+PyYAML>=6.0.0

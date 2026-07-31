@@ -1,5 +1,30 @@
 # Sentinel Brand Change Log
 
+## Version 1.0.3 (2026-07-31)
+**Status:** FROZEN — Design Governance v1.1, Stage 1: GovernancePanel Reconciliation (maintenance release)
+
+**Scope:** `brand/design_system/COMPONENT_REGISTRY.yaml` + 1 new specification (`GOVERNANCE_PANEL.md`) + `tools/validators/registry_validator.py`'s coverage logic. No token, color, typography, or accessibility changes.
+
+### Decision
+**`GovernancePanel` is resolved as a distinct, deliberately-scoped, not-yet-built component — not a naming mistake for `GovernanceBadge`.** `lifecycle: unresolved` → `lifecycle: planned`.
+
+Initial evidence (no implementation, no catalog listing under this name, `GovernanceBadge` exists and covers "governance status badge") suggested a simple typo. That was tested against the entry's own pre-existing metadata before deciding, and the two didn't agree: `GovernancePanel`'s `states` (`NORMAL`/`WARNING`/`DEFENSIVE`) and `owner` ("Risk & Policy Engine") match `RiskGovernorBadge` exactly — `GovernanceBadge`'s actual catalog-defined states are `PASS`/`ESCALATED`/`BREACH`, a different vocabulary entirely. A straight rename would have silently discarded that deliberately-authored content, or kept it and misdescribed `GovernanceBadge` with states it's never had.
+
+Resolution: `GovernancePanel` and `GovernanceBadge` are different concepts that solve different UI problems — `GovernanceBadge` is a compact status indicator for cards/tables/lists (implemented); `GovernancePanel` is a richer composite view (policy checks, rule evaluations, Risk Governor state, approval history, audit references) that embeds Risk Governor state as one element, which is exactly why its states/owner resembled `RiskGovernorBadge`'s rather than `GovernanceBadge`'s. Both concepts are retained. `GovernancePanel` gets a specification (`brand/design_system/GOVERNANCE_PANEL.md`) now; implementation stays deferred.
+
+### Changes
+- `GovernancePanel`: `lifecycle: unresolved` → `planned`, `note:` rewritten to record this decision and its evidence, `specification:` added.
+- Created `brand/design_system/GOVERNANCE_PANEL.md`.
+- `registry_validator.py`'s `REGISTRY_COVERAGE` check reworked to match registry entries against the catalog's actual `**Name:**` fields (identity-based) rather than inferring catalog membership from `lifecycle != unresolved`. That heuristic would have wrongly counted `GovernancePanel` as "covering" a catalog component now that it's `planned` — it still isn't one of the catalog's 9 documented components, planned or not.
+
+### Design Governance v1.1 status after this release
+- Stage 1 (resolve `GovernancePanel`) — **done**.
+- Stage 2 (reconcile catalog/registry/implementation) — done (v1.0.2).
+- Stage 3 (CI enforcement, phased informational-then-enforcing) — not started; this was the last blocker per the agreed sequencing.
+- Still open, both documentation-only and out of scope for the registry: `SENTINEL_COMPONENT_CATALOG.md`'s internal name inconsistencies (2 components) and its color-palette mismatch against `tokens.css` (flagged in v1.0.1).
+
+---
+
 ## Version 1.0.2 (2026-07-31)
 **Status:** FROZEN — Design Governance v1.1, Stage 2: Full Catalog Reconciliation (maintenance release)
 
