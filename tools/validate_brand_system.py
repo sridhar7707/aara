@@ -18,14 +18,14 @@ from validators.types import ValidationResult
 from validators.yaml_contracts import load_contracts, validate_version_lock
 
 
-def main():
-    print("Executing Sentinel Brand Governance Validation...")
-
-    try:
-        allowlist = load_allowlist()
-    except ValueError as e:
-        print(f"\nBrand Governance Validation FAILED:\n  - [ERROR] ALLOWLIST_CONFIG: {e}")
-        sys.exit(1)
+def run_brand_checks() -> ValidationResult:
+    """Runs every brand/UI governance check and returns the combined
+    result. Raises ValueError if tools/validators/allowlist.yaml has an
+    entry missing a justification -- that's a config error, not a check
+    result, so it propagates instead of being folded into the violations
+    list.
+    """
+    allowlist = load_allowlist()
 
     result = ValidationResult()
     parsed_contracts, contract_result = load_contracts()
@@ -35,6 +35,17 @@ def main():
     result.extend(validate_tokens())
     result.extend(validate_code(parsed_contracts, allowlist))
     result.extend(validate_component_registry(parsed_contracts))
+    return result
+
+
+def main():
+    print("Executing Sentinel Brand Governance Validation...")
+
+    try:
+        result = run_brand_checks()
+    except ValueError as e:
+        print(f"\nBrand Governance Validation FAILED:\n  - [ERROR] ALLOWLIST_CONFIG: {e}")
+        sys.exit(1)
 
     if result.violations:
         header = "FAILED" if result.blocking else "PASSED with advisories"
