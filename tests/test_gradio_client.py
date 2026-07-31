@@ -32,6 +32,8 @@ os.environ.setdefault("_BOT_LOG_HANDLER_ADDED", "1")
 
 import bot.monitor.dashboard_data as dd
 import dashboard.data as ddata
+import ledger.db as ledger_db
+import bot.trust_ledger.connection as ledger_connection
 from bot.main import init_db
 
 TODAY      = date.today().isoformat()
@@ -134,6 +136,18 @@ def phase2_db(tmp_path, monkeypatch):
     ddata._CACHE.clear()
     ddata._CACHE_TS = 0.0
     monkeypatch.delenv("SPACE_ID", raising=False)
+
+    # Trust Ledger (Phase 1B/2): a separate DB from the trades DB above.
+    # connect_ledger_or_none() opens this path directly -- without seeding
+    # it here, trust_scorecard/constitution_compliance/calibration_buckets/
+    # regime_performance can't open a connection in a fresh checkout (no
+    # data/trust_ledger.db on disk) and fall back to their "unavailable"
+    # card. Locally that's masked because a real data/trust_ledger.db
+    # already exists from prior local runs.
+    ledger_path = str(tmp_path / "trust_ledger_test.db")
+    monkeypatch.setattr(ledger_connection, "DEFAULT_LEDGER_DB_PATH", ledger_path)
+    ledger_db.init_db(ledger_path).close()
+
     return db_path
 
 
