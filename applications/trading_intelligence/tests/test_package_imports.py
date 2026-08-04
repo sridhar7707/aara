@@ -1,8 +1,8 @@
 """Structural tests for the trading_intelligence application boundary skeleton.
 
 Verifies the package imports cleanly and that the forbidden dependency rules
-from README.md (no bot/, dashboard/, or scheduler/ imports) hold as a checked
-fact, not just a documented claim.
+from README.md (no bot/, dashboard/, scheduler/, database/, or ledger/
+imports) hold as a checked fact, not just a documented claim.
 """
 import ast
 import importlib
@@ -15,9 +15,12 @@ _PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent
 _SUBPACKAGES = [
     "applications.trading_intelligence",
     "applications.trading_intelligence.contracts",
+    "applications.trading_intelligence.contracts.decision_contract",
     "applications.trading_intelligence.adapters",
     "applications.trading_intelligence.projections",
+    "applications.trading_intelligence.projections.decision_view",
     "applications.trading_intelligence.services",
+    "applications.trading_intelligence.services.decision_query_service",
 ]
 
 
@@ -27,7 +30,7 @@ def test_package_imports_cleanly(module_name):
 
 
 def test_no_module_imports_forbidden_runtimes():
-    forbidden_prefixes = ("bot", "dashboard", "scheduler")
+    forbidden_prefixes = ("bot", "dashboard", "scheduler", "database", "ledger")
     py_files = list(_PACKAGE_ROOT.rglob("*.py"))
     assert py_files, "expected at least one .py file under applications/trading_intelligence/"
 
