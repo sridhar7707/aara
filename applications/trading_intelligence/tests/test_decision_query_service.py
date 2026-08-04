@@ -35,6 +35,9 @@ class _InMemoryDecisionSource(DecisionSource):
     def get_decision(self, decision_id):
         return self._decisions.get(decision_id)
 
+    def list_decisions(self, decision_ids):
+        return [self._decisions[d] for d in decision_ids if d in self._decisions]
+
 
 def test_decision_source_cannot_be_instantiated_directly():
     with pytest.raises(TypeError):
@@ -72,7 +75,51 @@ def test_get_decision_view_delegates_to_the_injected_source_not_a_shared_default
 
 def test_incomplete_decision_source_subclass_cannot_be_instantiated():
     class _Incomplete(DecisionSource):
-        pass  # get_decision deliberately not implemented
+        pass  # get_decision/list_decisions deliberately not implemented
 
     with pytest.raises(TypeError):
         _Incomplete()
+
+
+def test_list_decision_views_returns_empty_list_when_no_ids_requested():
+    service = DecisionQueryService(_InMemoryDecisionSource())
+
+    assert service.list_decision_views([]) == []
+
+
+def test_list_decision_views_returns_empty_list_when_source_has_no_matches():
+    service = DecisionQueryService(_InMemoryDecisionSource())
+
+    assert service.list_decision_views(["missing-1", "missing-2"]) == []
+
+
+def test_list_decision_views_returns_multiple_views():
+    contract_a = _make_contract(decision_id="dec-001", symbol="AAPL")
+    contract_b = _make_contract(decision_id="dec-002", symbol="MSFT")
+    source = _InMemoryDecisionSource({"dec-001": contract_a, "dec-002": contract_b})
+    service = DecisionQueryService(source)
+
+    views = service.list_decision_views(["dec-001", "dec-002"])
+
+    assert [v.decision_id for v in views] == ["dec-001", "dec-002"]
+    assert [v.symbol for v in views] == ["AAPL", "MSFT"]
+
+
+def test_list_decision_views_skips_ids_the_source_does_not_have():
+    source = _InMemoryDecisionSource({"dec-001": _make_contract()})
+    service = DecisionQueryService(source)
+
+    views = service.list_decision_views(["dec-001", "missing-decision"])
+
+    assert len(views) == 1
+    assert views[0].decision_id == "dec-001"
+
+
+def test_get_decision_view_still_works_after_list_support_added():
+    contract = _make_contract()
+    service = DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract}))
+
+    view = service.get_decision_view("dec-001")
+
+    assert view is not None
+    assert view.decision_id == "dec-001"
