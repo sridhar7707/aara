@@ -688,11 +688,22 @@ Implemented:
 - Policy contract
 - Approval contract
 
+## Phase 3: Ledger and Projection Contracts
+
+Status: COMPLETE
+
+Implemented:
+
+- LedgerStore abstraction contract
+- DecisionProjection read model contract
+
 Validation:
 
-25 sentinel_engine tests passing
+- 33 sentinel_engine tests passing
 
 Next:
 
-Ledger and Projection architecture
+- Repository adapters
+- Projection services
+- Bot integration adapters
 
