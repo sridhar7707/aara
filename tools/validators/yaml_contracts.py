@@ -40,6 +40,15 @@ def _unique_key_loader():
     return UniqueKeyLoader
 
 
+def load_yaml_strict(path):
+    """Loads one YAML file with the duplicate-key-rejecting loader. Raises
+    on a missing file, bad YAML, or a duplicate key -- callers decide how
+    to turn that into a ValidationResult, this function never swallows it.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.load(f, Loader=_unique_key_loader())
+
+
 def load_contracts():
     """Returns (parsed_contracts: dict[path, obj], ValidationResult).
 
@@ -54,8 +63,7 @@ def load_contracts():
                         f"Missing mandatory YAML contract: {contract}", "BLOCK")
             continue
         try:
-            with open(contract, "r", encoding="utf-8") as f:
-                parsed[contract] = yaml.load(f, Loader=_unique_key_loader())
+            parsed[contract] = load_yaml_strict(contract)
         except Exception as e:
             result.add(contract, 0, "YAML_INVALID", f"Invalid YAML syntax or structure: {e}", "BLOCK")
     return parsed, result
@@ -103,4 +111,49 @@ def validate_version_lock(parsed_contracts):
                 f"contracts.{contract_key} pins '{pinned_version}' but {file_path} "
                 f"declares '{actual_version}'",
             )
+    return result
+
+
+VERSION_LOCK_REQUIRED_SECTIONS = ["release", "contracts", "compatibility", "identities"]
+VERSION_LOCK_REQUIRED_RELEASE_FIELDS = ["name", "version", "status", "date"]
+
+
+def validate_version_lock_structure(parsed_contracts, validator_suite):
+    """Structural checks on brand/VERSION_LOCK.yaml's own shape -- required
+    top-level sections, required release: fields, frozen status, and that
+    release.version matches the validator suite's declared
+    compatible_brand_version (tools/validators/VERSION.yaml). Complements
+    validate_version_lock() above, which checks the four *contract*
+    versions listed under `contracts:` against each contract file's own
+    declared version -- that one checks cross-file alignment, this one
+    checks this one file's own required shape.
+    """
+    result = ValidationResult()
+    lock_data = parsed_contracts.get("brand/VERSION_LOCK.yaml")
+    if not lock_data:
+        return result
+
+    for section in VERSION_LOCK_REQUIRED_SECTIONS:
+        if section not in lock_data:
+            result.add("brand/VERSION_LOCK.yaml", 0, "VERSION_LOCK_SECTION_MISSING",
+                        f"Missing required top-level section: {section}", "BLOCK")
+
+    release = lock_data.get("release") or {}
+    for field in VERSION_LOCK_REQUIRED_RELEASE_FIELDS:
+        if field not in release:
+            result.add("brand/VERSION_LOCK.yaml", 0, "VERSION_LOCK_RELEASE_FIELD_MISSING",
+                        f"release: section missing required field: {field}", "BLOCK")
+
+    status = release.get("status")
+    if "status" in release and status != "frozen":
+        result.add("brand/VERSION_LOCK.yaml", 0, "VERSION_LOCK_NOT_FROZEN",
+                    f"release.status must be 'frozen', got {status!r}", "BLOCK")
+
+    if validator_suite:
+        compatible = validator_suite.get("compatible_brand_version")
+        release_version = release.get("version")
+        if "version" in release and compatible is not None and release_version != compatible:
+            result.add("brand/VERSION_LOCK.yaml", 0, "VERSION_LOCK_VALIDATOR_MISMATCH",
+                        f"release.version ({release_version!r}) does not match validator suite's "
+                        f"compatible_brand_version ({compatible!r})", "BLOCK")
     return result
