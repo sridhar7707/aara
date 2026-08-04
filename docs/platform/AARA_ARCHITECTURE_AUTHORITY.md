@@ -1,0 +1,116 @@
+# AARA Architecture Authority
+
+**Purpose:** Which documents are authoritative when architecture docs disagree.
+
+## Hierarchy
+
+1. **Committed code** — highest authority. What's actually built and tested wins over
+   any document.
+2. **Committed architecture decision records** (`docs/decisions/ADR-*.md`) — explicit,
+   dated resolutions of a specific conflict. Supersede any conflicting doc below.
+3. **Committed architecture/migration docs** (tracked in git, e.g. everything directly
+   under `docs/platform/`, `docs/implementation/`, top-level `CLAUDE_AARA_MIGRATION.md`)
+   — intended design, in the absence of a conflicting ADR.
+4. **`docs/architecture/*`** — gitignored (`.gitignore:44`). Local working drafts, not
+   the project's controlled source of truth. Useful for ideas; not binding.
+
+## Directory structure
+
+```
+docs/
+├── decisions/
+│   └── ADRs
+│       (why decisions were made)
+│
+├── platform/
+│   ├── architecture definitions
+│   ├── system boundaries
+│   └── migration strategy
+│       (what architecture we follow)
+│
+├── analysis/
+│   ├── runtime investigations
+│   ├── dependency maps
+│   └── findings
+│       (what we discovered)
+│
+└── architecture/
+    └── local exploratory drafts only
+```
+
+`docs/platform/` contains authoritative architecture boundary and migration
+strategy documents — tracked in git, binding in the absence of a conflicting ADR
+(hierarchy level 3 above). A document only belongs in `docs/architecture/` if it is
+a local, exploratory draft not yet promoted to a decision; once a document starts
+being used to make real calls (as `TRADING_INTELLIGENCE_BOUNDARY.md` and
+`DASHBOARD_DEPENDENCY_REDUCTION_PLAN.md` did), it moves to `docs/platform/`.
+
+## Current document roles
+
+| Document | Role |
+|---|---|
+| `docs/implementation/CODEBASE_MIGRATION_MATRIX.md` | Authoritative: package/module migration mapping for `sentinel_engine/`, `applications/`, `dashboard/` splits. See [ADR-001](../decisions/ADR-001-sentinel-engine-structure.md). |
+| `docs/implementation/SENTINEL_EXTRACTION_PLAN.md` | Authoritative: phase-by-phase execution log and next-steps for the `sentinel_engine/` extraction. |
+| `docs/platform/SENTINEL_ENGINE_BOUNDARY_AND_API_CONTRACTS.md` | Reinterpreted as a **conceptual capability model** (the `analyze`/`explain`/`remember`/`evaluate`/`recommend` verbs products call), not the engine's package architecture. Its literal `sentinel/core/`, `sentinel/reasoning/` layout is superseded by ADR-001. |
+| `CLAUDE_AARA_MIGRATION.md` | Migration strategy and naming/positioning rules (Aara / Sentinel Intelligence Engine / Aara Wealth Intelligence). Its "not a trading bot" framing is clarified by ADR-001: trading is scoped out of the Wealth Intelligence *product*, not the platform. |
+| `docs/products/AARA_WEALTH_INTELLIGENCE_PRODUCT_ARCHITECTURE.md` | Authoritative for Product #2 (Aara Wealth Intelligence) only. Does not define Product #1 or the engine. |
+| `docs/decisions/ADR-002-bot-runtime-protection.md` | Authoritative: protects `bot/`, `dashboard/`, `scheduler/`, `.github/workflows/`, `database/`, and top-level `ledger/` from any code change until a future ADR explicitly and narrowly lifts it. |
+| `docs/platform/TRADING_INTELLIGENCE_BOUNDARY.md` | Authoritative: target ownership boundary between Trading Intelligence (Product #1) and `sentinel_engine/`. Promoted from `docs/architecture/` — see Directory Structure above. |
+| `docs/platform/DASHBOARD_DEPENDENCY_REDUCTION_PLAN.md` | Authoritative: documents `dashboard/`'s coupling to `bot`/`database`/`scheduler` and un-decided reduction options. Promoted from `docs/architecture/`. No option chosen yet. |
+| `docs/analysis/BOT_RUNTIME_BASELINE.md`, `BOT_DEPENDENCY_MAP.md`, `BOT_EXTRACTION_CANDIDATES.md` | Authoritative findings (what was discovered, not a decision) — entry points, import coupling, per-module extraction risk. Includes the corrected finding that `scheduler/` is a second live trading-trigger path, not an unused/legacy module. |
+| `docs/architecture/*` (remaining files) | Gitignored working drafts (Phase 2A Gradio/mock-data decision-intelligence UI spec). Not binding on `sentinel_engine/` or product-identity decisions. |
+
+## Product model (per CODEBASE_MIGRATION_MATRIX.md)
+
+One shared Sentinel Intelligence Engine (`sentinel_engine/`), two products:
+
+- **Product #1 — Aara Trading Intelligence**: medium-term investing intelligence,
+  portfolio decisions, trade evaluation, risk management, paper trading validation,
+  eventual broker integration. Not day trading, not auto-execution-as-identity, not
+  market prediction as the product pitch. No dedicated architecture document yet.
+- **Product #2 — Aara Wealth Intelligence**: account aggregation, portfolio health,
+  wealth X-Ray. Defined in `docs/products/AARA_WEALTH_INTELLIGENCE_PRODUCT_ARCHITECTURE.md`.
+  Explicitly excludes trading/execution from its own MVP.
+
+## Terminology
+
+"Sentinel" is used for three different things in existing docs, which invites
+ambiguity. Going forward:
+
+- **Sentinel Intelligence Engine** — the platform layer (`sentinel_engine/`). Never
+  "Sentinel" alone when precision matters.
+- **Trading Intelligence** (Product #1) — a module/application consuming the engine.
+  Never "Sentinel Trading Bot" — that phrasing anchors company identity to trading,
+  which `AARA_WEALTH_INTELLIGENCE_PRODUCT_ARCHITECTURE.md` and `CLAUDE_AARA_MIGRATION.md`
+  both explicitly avoid.
+- **Wealth Intelligence** (Product #2) — a second module/application consuming the
+  same engine.
+
+```
+AARA Platform
+  Sentinel Intelligence Engine
+    Trading Intelligence Module
+    Wealth Intelligence Module
+    (future modules)
+```
+
+## Migration Status
+
+**Date:** 2026-08-04
+
+| Area | Status |
+|---|---|
+| Architecture reconciliation | COMPLETE |
+| Runtime boundary analysis | COMPLETE |
+| Production trading paths | PROTECTED (see ADR-002) |
+| Code extraction | NOT STARTED |
+
+**Next implementation phase:** Adapter/interface design only, after architecture
+review. No `bot/`, `dashboard/`, `scheduler/`, or workflow code has been moved,
+refactored, or had its imports changed at any point in this process.
+
+## Resolving future conflicts
+
+A new document that conflicts with an existing authoritative doc does not silently
+coexist with it. Write a new ADR under `docs/decisions/` that references both and states
+which wins and why.
