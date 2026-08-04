@@ -697,13 +697,31 @@ Implemented:
 - LedgerStore abstraction contract
 - DecisionProjection read model contract
 
+## Phase 4: Repository Adapters
+
+Status: COMPLETE
+
+Implemented:
+
+- LedgerRepository (storage-backend-independent facade over LedgerStore)
+- ProjectionRepository abstraction contract
+
+## Phase 5: Sentinel Engine Services Layer
+
+Status: COMPLETE
+
+Implemented:
+
+- DecisionService
+- EvidenceService
+- GovernanceService
+
 Validation:
 
-- 33 sentinel_engine tests passing
+- 60 sentinel_engine tests passing
 
 Next:
 
-- Repository adapters
-- Projection services
+- Concrete storage adapters (SQLite)
 - Bot integration adapters
 
