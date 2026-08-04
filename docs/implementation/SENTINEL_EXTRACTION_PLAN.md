@@ -602,6 +602,22 @@ Completed:
 
 \[x] Dependency analysis
 
+\[x] Sentinel package skeleton (Phase 0)
+
+\[x] Baseline tests captured (see Baseline Test Snapshot below)
+
+\[x] Event system extraction (Phases 1-7: domain, events, evidence, governance,
+     ledger, projections, repositories, services, adapters — 82 sentinel_engine
+     tests passing)
+
+\[x] Phase 2A: boundary, event-model, gap-analysis, and ledger-integration-options
+     design (docs/platform/TRADING_INTELLIGENCE_BOUNDARY.md,
+     TRADING_INTELLIGENCE_EVENT_MODEL.md,
+     docs/analysis/TRADING_INTELLIGENCE_CONTRACT_GAP_ANALYSIS.md,
+     TRADING_INTELLIGENCE_SENTINEL_LEDGER_INTEGRATION_OPTIONS.md)
+
+\[x] ADR-001 through ADR-004 recorded (see docs/decisions/)
+
 
 ---
 
@@ -648,17 +664,11 @@ Migration may begin.
 
 Next:
 
-
-
-\[ ] Create Sentinel package skeleton
-
-
-
-\[ ] Capture baseline tests
-
-
-
-\[ ] Begin event system extraction
+Phase 3 — Product Development. Concrete ledger storage adapters and bot
+integration adapters are explicitly **not** part of Phase 3's initial scope —
+per ADR-004, that work is deferred until Phase 1A validation completes and
+ADR-004's decision criteria are met. See
+docs/decisions/ADR-004-sentinel-ledger-ownership-strategy.md.
 
 ---
 
@@ -728,8 +738,49 @@ Validation:
 
 - 69 sentinel_engine tests passing
 
+## Phase 7: Sentinel Engine Adapters
+
+Status: COMPLETE
+
+Implemented:
+
+- decision_adapter (sentinel_engine/adapters/decision_adapter.py) — translation
+  boundary from plain dict data into the Decision contract, zero bot/ imports
+
+Validation:
+
+- 82 sentinel_engine tests passing
+
+## Phase 2A: Boundary, Event Model & Ledger Design
+
+Status: COMPLETE
+
+Implemented (documentation/design only — no code, no protected paths touched):
+
+- docs/platform/TRADING_INTELLIGENCE_BOUNDARY.md — ownership boundary between
+  sentinel_engine and future applications/trading_intelligence/
+- docs/analysis/TRADING_INTELLIGENCE_CONTRACT_GAP_ANALYSIS.md — field-level
+  comparison of bot/trust_ledger data against Decision/Event/EventType contracts
+- docs/platform/TRADING_INTELLIGENCE_EVENT_MODEL.md — resolves the
+  DECISION_CREATED/DECISION_EXECUTED split, rejected-candidate handling,
+  portfolio-scoped risk model, and outcome lifecycle
+- docs/platform/TRADING_INTELLIGENCE_SENTINEL_LEDGER_INTEGRATION_OPTIONS.md —
+  three ledger-ownership architectures compared (Trading-Intelligence-owned,
+  Sentinel-canonical, dual-ledger), no option chosen
+- docs/decisions/ADR-003-aara-identity-and-product-access.md — multi-product
+  identity/access requirement recorded, implementation deferred
+- docs/decisions/ADR-004-sentinel-ledger-ownership-strategy.md — ledger
+  ownership choice (Option A/B/C) formally deferred until Phase 1A validation
+  completes; ADR-002 protections preserved unchanged
+
+Validation:
+
+- 82 sentinel_engine tests passing (unchanged from Phase 7 — this phase was
+  documentation only)
+
 Next:
 
-- Concrete storage adapters (SQLite)
-- Bot integration adapters
+- Phase 3 — Product Development (see "Current Status" below; concrete storage
+  adapters and bot integration remain explicitly deferred per ADR-004, not part
+  of Phase 3's initial scope)
 
