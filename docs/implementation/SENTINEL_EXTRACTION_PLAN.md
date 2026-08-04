@@ -716,9 +716,17 @@ Implemented:
 - EvidenceService
 - GovernanceService
 
+## Phase 6: Sentinel Engine Application Boundary
+
+Status: COMPLETE
+
+Implemented:
+
+- SentinelEngine (single entry point coordinating DecisionService, EvidenceService, GovernanceService)
+
 Validation:
 
-- 60 sentinel_engine tests passing
+- 69 sentinel_engine tests passing
 
 Next:
 
