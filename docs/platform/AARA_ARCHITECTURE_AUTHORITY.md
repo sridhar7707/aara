@@ -109,6 +109,18 @@ AARA Platform
 review. No `bot/`, `dashboard/`, `scheduler/`, or workflow code has been moved,
 refactored, or had its imports changed at any point in this process.
 
+## Future Platform Capability Requirements
+
+- AARA is a multi-product platform (Trading Intelligence, Wealth Intelligence, and
+  future products sharing one Sentinel Intelligence Engine).
+- Identity and product access is a future cross-platform capability — not specific
+  to any one product.
+- [ADR-003](../decisions/ADR-003-aara-identity-and-product-access.md) defines the
+  requirement (roles, entitlements, workspace/capability separation).
+- Implementation is intentionally deferred until product boundaries are finalized.
+  No authentication, authorization, schema, or UI work exists yet for this
+  requirement.
+
 ## Resolving future conflicts
 
 A new document that conflicts with an existing authoritative doc does not silently

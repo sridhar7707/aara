@@ -602,4 +602,15 @@ Aara Wealth Intelligence is:
 
 ---
 
+# Future: Platform Identity and Access
+
+Aara Wealth Intelligence will eventually participate in AARA's shared,
+cross-platform identity and product-access model (see
+[ADR-003](../decisions/ADR-003-aara-identity-and-product-access.md)) as the
+"Wealth Intelligence User" role. This is a recorded future requirement only — no
+authentication, authorization, or access-control implementation exists for this
+product today.
+
+---
+
 # End of Document
