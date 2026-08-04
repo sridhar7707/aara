@@ -660,3 +660,39 @@ Next:
 
 \[ ] Begin event system extraction
 
+---
+
+# Sentinel Engine Extraction Status
+
+## Phase 0: Architecture boundary created
+
+Status: COMPLETE
+
+## Phase 1: Core Decision/Event Contracts
+
+Status: COMPLETE
+
+Implemented:
+
+- Decision domain model
+- Event contract
+- Event type vocabulary
+
+## Phase 2: Evidence and Governance Contracts
+
+Status: COMPLETE
+
+Implemented:
+
+- Evidence contract
+- Policy contract
+- Approval contract
+
+Validation:
+
+25 sentinel_engine tests passing
+
+Next:
+
+Ledger and Projection architecture
+
