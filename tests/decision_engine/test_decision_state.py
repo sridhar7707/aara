@@ -14,6 +14,7 @@ def test_enum_has_all_expected_values():
         "RECOMMENDED",
         "APPROVED",
         "REJECTED",
+        "INSUFFICIENT_EVIDENCE",
         "EXECUTED",
     }
 
@@ -26,6 +27,13 @@ def test_valid_transition_evaluating_to_recommended():
     assert transition(DecisionState.EVALUATING, DecisionState.RECOMMENDED) == DecisionState.RECOMMENDED
 
 
+def test_valid_transition_evaluating_to_insufficient_evidence():
+    assert (
+        transition(DecisionState.EVALUATING, DecisionState.INSUFFICIENT_EVIDENCE)
+        == DecisionState.INSUFFICIENT_EVIDENCE
+    )
+
+
 def test_invalid_transition_rejected():
     with pytest.raises(InvalidStateTransitionError):
         transition(DecisionState.OBSERVED, DecisionState.APPROVED)
@@ -36,6 +44,16 @@ def test_rejected_state_is_terminal():
         transition(DecisionState.REJECTED, DecisionState.EVALUATING)
 
 
+def test_insufficient_evidence_state_is_terminal():
+    with pytest.raises(InvalidStateTransitionError):
+        transition(DecisionState.INSUFFICIENT_EVIDENCE, DecisionState.EVALUATING)
+
+
 def test_decision_intelligence_cannot_transition_to_executed():
     with pytest.raises(InvalidStateTransitionError):
         transition(DecisionState.APPROVED, DecisionState.EXECUTED)
+
+
+def test_decision_intelligence_cannot_transition_insufficient_evidence_to_executed():
+    with pytest.raises(InvalidStateTransitionError):
+        transition(DecisionState.INSUFFICIENT_EVIDENCE, DecisionState.EXECUTED)

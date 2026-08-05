@@ -21,7 +21,7 @@ from typing import Optional
 # The execution layer (5) MUST pass through risk (4) — never called directly
 # from strategy layers.
 # ---------------------------------------------------------------------------
-LAYER_ORDER = ["data", "regime", "rl_agent", "risk", "execution", "monitoring", "core", "dashboard", "database"]
+LAYER_ORDER = ["data", "regime", "rl_agent", "decision", "risk", "execution", "monitoring", "core", "dashboard", "database"]
 
 LAYER_PATHS: dict[str, list[str]] = {
     "data":       ["bot/strategy/features.py", "bot/strategy/macro.py",
@@ -29,6 +29,7 @@ LAYER_PATHS: dict[str, list[str]] = {
     "regime":     ["bot/strategy/regime_classifier.py"],
     "rl_agent":   ["bot/strategy/rl_agent.py", "bot/strategy/ensemble.py",
                    "bot/strategy/xgb_predictor.py", "bot/strategy/lstm_predictor.py"],
+    "decision":   ["bot/decision_engine/"],
     "risk":       ["bot/risk/risk_manager.py"],
     "execution":  ["bot/execution/alpaca_client.py"],
     "monitoring": ["bot/monitor/"],
@@ -37,8 +38,9 @@ LAYER_PATHS: dict[str, list[str]] = {
     "database":   ["database/"],
 }
 
-# Strategy layers must never call execution directly (must go via risk manager)
-STRATEGY_LAYERS = {"data", "regime", "rl_agent"}
+# Strategy layers (plus decision_engine, which sits just above risk) must
+# never call execution directly (must go via risk manager)
+STRATEGY_LAYERS = {"data", "regime", "rl_agent", "decision"}
 EXECUTION_SYMBOLS = re.compile(r'\balpaca_client\b|\bsubmit_order\b|\bplace_order\b', re.IGNORECASE)
 
 # Critical risk thresholds — any change to these is a [BLOCK]

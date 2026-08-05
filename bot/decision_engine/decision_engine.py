@@ -35,7 +35,7 @@ class DecisionEngine:
 
         state = transition(DecisionState.OBSERVED, DecisionState.EVALUATING)
         if evidence_summary.evidence_count == 0:
-            state = transition(state, DecisionState.REJECTED)
+            state = transition(state, DecisionState.INSUFFICIENT_EVIDENCE)
         else:
             state = transition(state, DecisionState.RECOMMENDED)
 

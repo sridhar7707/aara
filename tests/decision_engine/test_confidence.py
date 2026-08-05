@@ -98,3 +98,14 @@ def test_rationale_mentions_supporting_and_conflicting_counts():
     result = calculator.calculate(_summary(["xgb", "lstm"], ["macro"]))
     assert "2" in result.rationale
     assert "1" in result.rationale
+
+
+def test_score_is_direction_neutral_under_supporting_conflicting_swap():
+    """Confidence measures agreement strength only, never direction: swapping
+    which side (supporting vs. conflicting) holds the majority must not
+    change the score, or confidence would secretly encode a bullish/bearish
+    lean instead of pure consistency."""
+    calculator = ConfidenceCalculator()
+    bullish_majority = calculator.calculate(_summary(["a", "b", "c"], ["d"]))
+    bearish_majority = calculator.calculate(_summary(["a"], ["b", "c", "d"]))
+    assert bullish_majority.score == pytest.approx(bearish_majority.score)

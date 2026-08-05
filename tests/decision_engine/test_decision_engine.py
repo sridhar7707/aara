@@ -39,7 +39,7 @@ def test_complete_evaluation_pipeline_produces_populated_result():
     assert result.state == DecisionState.RECOMMENDED
 
 
-def test_empty_evidence_yields_rejected_state_and_no_confidence():
+def test_empty_evidence_yields_insufficient_evidence_state_and_no_confidence():
     engine = DecisionEngine()
     context = _context()
 
@@ -48,7 +48,7 @@ def test_empty_evidence_yields_rejected_state_and_no_confidence():
     assert result.evidence_summary.evidence_count == 0
     assert result.confidence_score.score == 0.0
     assert result.recommendation == "HOLD"
-    assert result.state == DecisionState.REJECTED
+    assert result.state == DecisionState.INSUFFICIENT_EVIDENCE
 
 
 def test_conflicting_evidence_outweighing_support_yields_sell_recommendation():
@@ -97,7 +97,11 @@ def test_state_never_reaches_execution_states():
     ]
     for evidence in cases:
         result = engine.evaluate(context, evidence)
-        assert result.state in (DecisionState.RECOMMENDED, DecisionState.REJECTED)
+        assert result.state in (
+            DecisionState.RECOMMENDED,
+            DecisionState.REJECTED,
+            DecisionState.INSUFFICIENT_EVIDENCE,
+        )
         assert result.state != DecisionState.EXECUTED
         assert result.state != DecisionState.APPROVED
 
