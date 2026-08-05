@@ -14,6 +14,7 @@ _PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 _SUBPACKAGES = [
     "applications.trading_intelligence",
+    "applications.trading_intelligence.product",
     "applications.trading_intelligence.contracts",
     "applications.trading_intelligence.contracts.decision_contract",
     "applications.trading_intelligence.adapters",
