@@ -59,6 +59,9 @@ jobs:
         continue-on-error: true
         run: python tools/validate_brand_system.py
 
+      - name: Run sentinel_engine boundary tests
+        run: python -m pytest sentinel_engine/tests -v --tb=short
+
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short
 
