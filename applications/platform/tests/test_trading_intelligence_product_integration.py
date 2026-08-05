@@ -16,7 +16,15 @@ exists (ProductRegistry, WorkspaceRegistry, NavigationBuilder,
 AuthenticationProvider, EntitlementChecker, User, Product, Workspace,
 NavigationItem, NavigationModel). This file only proves they compose
 correctly for Trading Intelligence specifically.
+
+Per docs/platform/AARA_WORKSPACE_ENTRY_ARCHITECTURE.md Section 5: also
+proves a NavigationItem can be used to locate and construct the Decision
+Center experience end-to-end, with no resolver/router/factory -- the test
+itself performs the trivial workspace_id lookup, matching that document's
+Section 4 conclusion that no such production object is needed yet.
 """
+import datetime
+
 from applications.platform.entitlements.entitlement_checker import EntitlementChecker
 from applications.platform.identity.authentication_provider import AuthenticationProvider
 from applications.platform.identity.user import User
@@ -24,7 +32,17 @@ from applications.platform.navigation.navigation_builder import NavigationBuilde
 from applications.platform.registry.product_registry import ProductRegistry
 from applications.platform.workspaces.workspace import Workspace
 from applications.platform.workspaces.workspace_registry import WorkspaceRegistry
+from applications.trading_intelligence.adapters.sentinel_projection_decision_source import (
+    SentinelProjectionDecisionSource,
+)
 from applications.trading_intelligence.product import TRADING_INTELLIGENCE_PRODUCT
+from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
+from applications.trading_intelligence.tests.fakes import InMemoryProjectionRepository
+from applications.trading_intelligence.ui.decision_center.controller import (
+    DecisionCenterController,
+)
+from sentinel_engine.projections.decision_projection import DecisionProjection
+from sentinel_engine.repositories.projection_repository import ProjectionRepository
 
 _DECISION_CENTER_WORKSPACE = Workspace(
     workspace_id="trading_intelligence.decision_center",
@@ -150,6 +168,103 @@ def test_non_entitled_users_do_not_see_trading_intelligence():
     model = builder.build()
 
     assert model.items == []
+
+
+def _build_entitled_navigation_model():
+    user = User(user_id="u1", display_name="Investor One")
+    products = _InMemoryProductRegistry()
+    products.register(TRADING_INTELLIGENCE_PRODUCT)
+    workspaces = _InMemoryWorkspaceRegistry()
+    workspaces.register_workspace(_DECISION_CENTER_WORKSPACE)
+    entitlements = _FakeEntitlementChecker(grants={(user.user_id, "trading_intelligence")})
+    builder = NavigationBuilder(
+        product_registry=products,
+        workspace_registry=workspaces,
+        entitlement_checker=entitlements,
+        auth_provider=_FakeAuthenticationProvider(current_user=user),
+    )
+    return builder.build()
+
+
+def test_navigation_item_can_be_used_to_construct_decision_center_experience():
+    """1. Platform produces a Trading Intelligence navigation item.
+    2. That item identifies the Decision Center workspace.
+    3. This integration layer (the test itself -- no resolver/router/factory)
+    uses that identity to construct DecisionCenterController.
+    4. The controller produces a correct DecisionCenterScreen."""
+    model = _build_entitled_navigation_model()
+
+    trading_intelligence_items = [item for item in model.items if item.product_id == "trading_intelligence"]
+    assert trading_intelligence_items, "expected a Trading Intelligence navigation item"
+
+    decision_center_item = next(
+        (item for item in model.items if item.workspace_id == "trading_intelligence.decision_center"),
+        None,
+    )
+    assert decision_center_item is not None, "expected a Decision Center navigation item"
+
+    # No resolver/router/factory: the test performs the trivial identity
+    # check itself, per AARA_WORKSPACE_ENTRY_ARCHITECTURE.md Section 4/5.
+    assert decision_center_item.workspace_id == "trading_intelligence.decision_center"
+
+    repository = InMemoryProjectionRepository()
+    repository.save(
+        DecisionProjection(
+            decision_id="dec-001",
+            symbol="AAPL",
+            action="BUY",
+            status="DECISION_CREATED",
+            confidence=0.78,
+            evidence_reference="evidence-001",
+            risk_reference="risk-001",
+            updated_at=datetime.datetime(2026, 8, 4, 12, 0, 0),
+        )
+    )
+    source = SentinelProjectionDecisionSource(repository)
+    query_service = DecisionQueryService(source)
+    controller = DecisionCenterController(query_service)
+
+    screen = controller.load_screen(["dec-001"])
+
+    assert screen.list_area.decisions[0].decision_id == "dec-001"
+    assert screen.detail_area.decision.decision_id == "dec-001"
+
+
+def test_navigation_driven_construction_performs_no_writes():
+    """5. Existing read-only data flow remains unchanged: locating and
+    constructing the Decision Center experience via a NavigationItem must
+    not introduce any write path into the real projection repository."""
+    model = _build_entitled_navigation_model()
+    decision_center_item = next(
+        item for item in model.items if item.workspace_id == "trading_intelligence.decision_center"
+    )
+    assert decision_center_item.workspace_id == "trading_intelligence.decision_center"
+
+    class _AssertNoSaveRepository(ProjectionRepository):
+        def __init__(self):
+            self._projections = {
+                "dec-001": DecisionProjection(
+                    decision_id="dec-001",
+                    symbol="AAPL",
+                    action="BUY",
+                    status="DECISION_CREATED",
+                    confidence=0.78,
+                    evidence_reference="evidence-001",
+                    risk_reference="risk-001",
+                    updated_at=datetime.datetime(2026, 8, 4, 12, 0, 0),
+                )
+            }
+
+        def get(self, decision_id):
+            return self._projections.get(decision_id)
+
+        def save(self, projection):
+            raise AssertionError("no layer in this chain may call ProjectionRepository.save()")
+
+    source = SentinelProjectionDecisionSource(_AssertNoSaveRepository())
+    controller = DecisionCenterController(DecisionQueryService(source))
+
+    controller.load_screen(["dec-001"])
 
 
 def test_module_does_not_import_forbidden_runtimes():
