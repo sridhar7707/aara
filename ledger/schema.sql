@@ -226,6 +226,33 @@ CREATE TABLE IF NOT EXISTS deployment_manifest_events (
     CHECK (event_type != 'PROMOTED' OR approval_event_id IS NOT NULL)
 );
 
+-- Confidence Integrity Redesign, Phase 1 (schema only -- no writer exists yet,
+-- see docs/implementation/CONFIDENCE_INTEGRITY_IMPLEMENTATION_PLAN.md).
+-- decision_id is deliberately NOT a foreign key to decision_events: Shadow
+-- Mode confidence observations may exist for a cycle that never produces a
+-- decision_events row at all (e.g. a HOLD). confidence_score is named for
+-- ledger storage, not UI display -- the ledger stores domain truth, not
+-- presentation; risk_evidence_state/risk_evidence_reason are nullable and
+-- forward-compatible, populated only once a later phase's Risk Evidence
+-- gate exists -- not written by anything yet.
+CREATE TABLE IF NOT EXISTS decision_confidence_events (
+    sequence_number        INTEGER PRIMARY KEY AUTOINCREMENT,
+    confidence_event_id    TEXT NOT NULL UNIQUE,
+    decision_id            TEXT NOT NULL,
+    timestamp               TEXT NOT NULL,
+    confidence_score        REAL,             -- nullable: NO_EVIDENCE must never be forced to 0.0
+    evidence_completeness   REAL NOT NULL,
+    disagreement_spread     REAL NOT NULL,
+    confidence_state        TEXT NOT NULL,
+    evidence_basis          TEXT NOT NULL,    -- JSON
+    risk_evidence_state     TEXT,             -- nullable, forward-compatible
+    risk_evidence_reason    TEXT,             -- nullable, forward-compatible
+    record_hash             TEXT NOT NULL,
+    previous_record_hash    TEXT NOT NULL,
+    CHECK (confidence_state IN ('COMPLETE_EVIDENCE','MODEL_UNCERTAIN','DATA_INCOMPLETE',
+                                 'PARTIAL_EVIDENCE','CONFLICTED_EVIDENCE','NO_EVIDENCE'))
+);
+
 -- ============================================================================
 -- Group C: Operational Tables (mutable, not sources of historical truth)
 -- ============================================================================
@@ -282,6 +309,7 @@ CREATE INDEX IF NOT EXISTS idx_candidate_events_asset       ON candidate_evaluat
 CREATE INDEX IF NOT EXISTS idx_manifest_events_manifest_id  ON deployment_manifest_events(manifest_id);
 CREATE INDEX IF NOT EXISTS idx_training_runs_artifact       ON model_training_runs(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_constitution_enforcement_decision_id ON constitution_enforcement_events(decision_id);
+CREATE INDEX IF NOT EXISTS idx_decision_confidence_decision_id ON decision_confidence_events(decision_id);
 
 -- ============================================================================
 -- Append-only enforcement triggers (Section 3): blanket no-update/no-delete
@@ -381,6 +409,13 @@ CREATE TRIGGER IF NOT EXISTS trg_constitution_enforcement_events_no_delete
 BEFORE DELETE ON constitution_enforcement_events
 BEGIN SELECT RAISE(ABORT, 'constitution_enforcement_events is append-only'); END;
 
+CREATE TRIGGER IF NOT EXISTS trg_decision_confidence_events_no_update
+BEFORE UPDATE ON decision_confidence_events
+BEGIN SELECT RAISE(ABORT, 'decision_confidence_events is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS trg_decision_confidence_events_no_delete
+BEFORE DELETE ON decision_confidence_events
+BEGIN SELECT RAISE(ABORT, 'decision_confidence_events is append-only'); END;
+
 -- ============================================================================
 -- Chain-integrity triggers (new in v1.2, Section 3 item 3): a BEFORE INSERT
 -- trigger on every Group A table rejects any row whose previous_record_hash
@@ -455,6 +490,14 @@ WHEN NEW.previous_record_hash != COALESCE(
     '0000000000000000000000000000000000000000000000000000000000000000'
 )
 BEGIN SELECT RAISE(ABORT, 'constitution_enforcement_events: previous_record_hash does not match current chain head'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_decision_confidence_events_chain_integrity
+BEFORE INSERT ON decision_confidence_events
+WHEN NEW.previous_record_hash != COALESCE(
+    (SELECT record_hash FROM decision_confidence_events ORDER BY sequence_number DESC LIMIT 1),
+    '0000000000000000000000000000000000000000000000000000000000000000'
+)
+BEGIN SELECT RAISE(ABORT, 'decision_confidence_events: previous_record_hash does not match current chain head'); END;
 
 -- ============================================================================
 -- Candidate provenance enforcement (new in v1.4): a decision_events row must

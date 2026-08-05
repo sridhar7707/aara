@@ -134,6 +134,13 @@ _MINIMAL_PAYLOADS = {
         "rule_name": "Risk Governor Authority", "check_timestamp": "2026-07-28T00:00:00Z",
         "check_result": "PASS", "action_taken": "execution_proceeded", "reason": "test",
     },
+    "decision_confidence_events": lambda: {
+        "confidence_event_id": "CONF-EXTRA", "decision_id": "DEC-1",
+        "timestamp": "2026-07-28T00:00:00Z", "confidence_score": 0.55,
+        "evidence_completeness": 0.825, "disagreement_spread": 0.1,
+        "confidence_state": "PARTIAL_EVIDENCE", "evidence_basis": {},
+        "risk_evidence_state": None, "risk_evidence_reason": None,
+    },
 }
 
 
@@ -308,6 +315,53 @@ def test_chain_integrity_trigger_allows_correct_previous_hash(conn):
     but this asserts it explicitly against the genesis case."""
     row = ledger.append_ledger_row(conn, "candidate_evaluation_events", _candidate_payload())
     assert row["previous_record_hash"] == _GENESIS
+
+
+# ── Confidence Integrity Redesign, Phase 1 (schema only, zero writers in
+#    production code yet) ─────────────────────────────────────────────────
+
+def test_decision_confidence_events_chain_verifies_clean(conn):
+    """No production writer exists yet (Phase 1 is schema-only) -- this
+    proves the table's hash chain behaves like every other Group A table's
+    once rows exist, using append_ledger_row directly the same way a future
+    writer would.
+
+    Every column is passed explicitly, including the nullable
+    risk_evidence_state/risk_evidence_reason as None -- omitting a nullable
+    key from the payload dict (rather than passing it as None) breaks hash
+    verification, because _deserialize_row() reconstructs its payload from
+    every column SELECT * returns, including ones the original insert never
+    mentioned. A future writer (Phase 2) must follow the same rule."""
+    ledger.append_ledger_row(conn, "decision_confidence_events", {
+        "confidence_event_id": "CONF-1", "decision_id": "DEC-1",
+        "timestamp": "2026-07-28T00:00:00Z", "confidence_score": 0.73,
+        "evidence_completeness": 1.0, "disagreement_spread": 0.1,
+        "confidence_state": "COMPLETE_EVIDENCE", "evidence_basis": {"models": []},
+        "risk_evidence_state": None, "risk_evidence_reason": None,
+    })
+    ledger.append_ledger_row(conn, "decision_confidence_events", {
+        "confidence_event_id": "CONF-2", "decision_id": "DEC-2",
+        "timestamp": "2026-07-28T00:01:00Z", "confidence_score": None,
+        "evidence_completeness": 0.0, "disagreement_spread": 0.0,
+        "confidence_state": "NO_EVIDENCE", "evidence_basis": {"models": []},
+        "risk_evidence_state": None, "risk_evidence_reason": None,
+    })
+    assert ledger.verify_chain(conn, "decision_confidence_events") == []
+
+
+def test_decision_confidence_events_decision_id_has_no_foreign_key(conn):
+    """Deliberate: Shadow Mode confidence observations may exist for a cycle
+    that never produces a decision_events row at all (e.g. a HOLD) -- a
+    decision_id referencing nothing in decision_events must be accepted,
+    not rejected."""
+    row = ledger.append_ledger_row(conn, "decision_confidence_events", {
+        "confidence_event_id": "CONF-ORPHAN", "decision_id": "DEC-DOES-NOT-EXIST",
+        "timestamp": "2026-07-28T00:00:00Z", "confidence_score": 0.6,
+        "evidence_completeness": 1.0, "disagreement_spread": 0.0,
+        "confidence_state": "COMPLETE_EVIDENCE", "evidence_basis": {},
+        "risk_evidence_state": None, "risk_evidence_reason": None,
+    })
+    assert row["decision_id"] == "DEC-DOES-NOT-EXIST"
 
 
 # ── 5. Manifest lifecycle: legal order only ───────────────────────────────────

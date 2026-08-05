@@ -59,3 +59,8 @@ def new_constitution_event_id() -> str:
 def new_data_quality_event_id() -> str:
     """For data_quality_events -- portfolio-level, no symbol."""
     return _new_id("DQ")
+
+
+def new_confidence_event_id(symbol: str | None = None) -> str:
+    """For decision_confidence_events -- Confidence Integrity Redesign Phase 1."""
+    return _new_id("CONF", symbol)
