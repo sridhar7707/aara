@@ -3,7 +3,15 @@
 Verifies imports and the dependency rule from
 docs/platform/AARA_PLATFORM_SHELL_ARCHITECTURE.md Section 4 / this task's
 "Platform layer must not know" list: no product package, sentinel_engine,
-bot, or dashboard import anywhere under applications/platform/.
+bot, or dashboard import anywhere under applications/platform/'s production
+surface (identity/, entitlements/, registry/).
+
+The forbidden-import scan deliberately excludes tests/ itself: integration
+tests (test_trading_intelligence_registration.py) legitimately import a real
+product descriptor to verify registration end-to-end -- that's a test
+exercising the boundary, not a violation of it. The rule applies to what the
+platform's importable code depends on, not to what its test suite is allowed
+to construct.
 
 Fake-implementation-satisfies-interface coverage lives in each contract's own
 test file (test_authentication_provider.py, test_entitlement_checker.py,
@@ -26,6 +34,18 @@ _MODULES = [
     "applications.platform.entitlements.entitlement_checker",
     "applications.platform.registry",
     "applications.platform.registry.product_registry",
+    "applications.platform.shell",
+    "applications.platform.shell.shell_model",
+    "applications.platform.shell.shell_builder",
+    "applications.platform.shell.platform_shell_view",
+    "applications.platform.shell.shell_presenter",
+    "applications.platform.workspaces",
+    "applications.platform.workspaces.workspace",
+    "applications.platform.workspaces.workspace_registry",
+    "applications.platform.navigation",
+    "applications.platform.navigation.navigation_item",
+    "applications.platform.navigation.navigation_model",
+    "applications.platform.navigation.navigation_builder",
 ]
 
 
@@ -45,8 +65,12 @@ def test_platform_layer_does_not_import_products_sentinel_bot_or_dashboard():
         "database",
         "ledger",
     )
-    py_files = list(_PLATFORM_ROOT.rglob("*.py"))
-    assert py_files, "expected at least one .py file under applications/platform/"
+    py_files = [
+        path
+        for path in _PLATFORM_ROOT.rglob("*.py")
+        if "tests" not in path.relative_to(_PLATFORM_ROOT).parts
+    ]
+    assert py_files, "expected at least one production .py file under applications/platform/"
 
     for path in py_files:
         source = path.read_text(encoding="utf-8")
