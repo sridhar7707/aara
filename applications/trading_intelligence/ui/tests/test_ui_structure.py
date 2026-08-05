@@ -47,6 +47,31 @@ def test_ui_does_not_import_bot_dashboard_scheduler_or_sentinel_engine_directly(
                 )
 
 
+def test_controller_does_not_import_mock_data():
+    """Inverse of test_screen_components_do_not_import_services_directly:
+    the controller must load real decisions through DecisionQueryService
+    only -- mock_data.py stays a standalone demo module, never a production
+    dependency of the controller flow (Phase 5A: Decision Center Real Data
+    Wiring, requirement 2)."""
+    forbidden = ("applications.trading_intelligence.ui.decision_center.mock_data",)
+    path = _UI_ROOT / "decision_center" / "controller.py"
+
+    assert path.exists(), f"expected {path} to exist"
+    source = path.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert not alias.name.startswith(forbidden), (
+                    f"{path}: {alias.name!r} must not be imported by the controller"
+                )
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            assert not module.startswith(forbidden), (
+                f"{path}: {module!r} must not be imported by the controller"
+            )
+
+
 def test_screen_components_do_not_import_services_directly():
     """UI components (screen.py, mock_data.py) must not call services --
     only decision_center/controller.py may. Enforces the integration boundary

@@ -80,6 +80,18 @@ def test_load_decision_detail_handles_missing_decision():
     assert detail_area.is_empty is True
 
 
+def test_load_decisions_with_multiple_decisions_returns_them_all():
+    controller = _make_controller({
+        "dec-001": _make_contract(decision_id="dec-001", symbol="AAPL"),
+        "dec-002": _make_contract(decision_id="dec-002", symbol="MSFT"),
+        "dec-003": _make_contract(decision_id="dec-003", symbol="NVDA"),
+    })
+
+    list_area = controller.load_decisions(["dec-001", "dec-002", "dec-003"])
+
+    assert [d.decision_id for d in list_area.decisions] == ["dec-001", "dec-002", "dec-003"]
+
+
 def test_load_screen_selects_first_decision_by_default():
     controller = _make_controller({
         "dec-001": _make_contract(decision_id="dec-001", symbol="AAPL"),
