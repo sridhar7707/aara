@@ -1,15 +1,17 @@
 from dataclasses import dataclass
-from typing import List
+from datetime import datetime
+from typing import List, Optional
 
 from bot.decision_engine.decision_state import DecisionState
 
 
-@dataclass
+@dataclass(frozen=True)
 class EvidenceItem:
     source: str
     signal: str
     value: float
     contribution: float
+    timestamp: Optional[datetime] = None
 
 
 @dataclass
