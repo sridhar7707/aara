@@ -136,6 +136,10 @@ Intelligence
 Aara Estate Intelligence
 ```
 
+**Note (per ADR-001):** Aara Trading Intelligence (Product #1) also
+branches directly from Sentinel Intelligence Engine, alongside the
+products shown above.
+
 ---
 
 # 7. Repository Strategy
@@ -417,6 +421,11 @@ Internal intelligence capability.
 
 Not exposed directly to consumers.
 
+**Note (per ADR-001):** `bot/`'s eventual role is Aara Trading
+Intelligence, Product #1 on the platform's product model. This section
+describes its current internal-module framing; it does not remove
+Trading Intelligence from the platform's product set.
+
 ---
 
 # 13. Development Principles
@@ -476,6 +485,10 @@ Wealth        CFO            Tax             Estate
 
 Intelligence  Intelligence   Intelligence   Intelligence
 ```
+
+**Note (per ADR-001):** These branches also include Aara Trading
+Intelligence (Product #1), consuming the same Sentinel Intelligence
+Engine as Wealth/CFO/Tax/Estate Intelligence.
 
 ---
 

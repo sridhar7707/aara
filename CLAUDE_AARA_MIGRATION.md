@@ -5,6 +5,11 @@
 **Version:** 1.0
 **Status:** Active Migration Plan
 
+> **Naming clarification (per ADR-007):** The retired identity is only the
+> old top-level **"Sentinel Intelligence"** brand. **Sentinel Intelligence
+> Engine** is not deprecated, renamed, or absorbed — it continues as a
+> permanent architectural layer under AARA Systems.
+
 ---
 
 # 1. Mission
@@ -82,6 +87,7 @@ Contains reusable intelligence capabilities:
 
 Future Aara products may use this layer:
 
+* Aara Trading Intelligence (Product #1, per ADR-001)
 * Aara Wealth Intelligence
 * Aara CFO
 * Aara Tax Intelligence
@@ -192,6 +198,12 @@ aara/
     └── infrastructure/
 ```
 
+Note: this diagram reflects physical repository/folder layout only, not
+the `AARA Systems → Sentinel Intelligence Engine → Products` brand/
+ownership hierarchy defined in ADR-007. `sentinel/` and `products/`
+appearing as sibling folders here is a code-organization choice, not a
+statement that products sit outside the engine's hierarchy.
+
 ---
 
 # 5. Current Repository Mapping
@@ -249,6 +261,12 @@ Future possibilities:
 * market research module
 * investment analysis module
 * institutional intelligence component
+
+Note (per ADR-001): Aara Trading Intelligence is Product #1 alongside
+Aara Wealth Intelligence (Product #2) — both consume the shared Sentinel
+Intelligence Engine. This entry describes `bot/`'s current internal-
+research framing; it does not remove Trading Intelligence from the
+platform's product set.
 
 ---
 

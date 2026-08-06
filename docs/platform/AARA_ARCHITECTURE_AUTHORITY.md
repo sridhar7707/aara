@@ -58,6 +58,7 @@ being used to make real calls (as `TRADING_INTELLIGENCE_BOUNDARY.md` and
 | `docs/decisions/ADR-002-bot-runtime-protection.md` | Authoritative: protects `bot/`, `dashboard/`, `scheduler/`, `.github/workflows/`, `database/`, and top-level `ledger/` from any code change until a future ADR explicitly and narrowly lifts it. |
 | `docs/decisions/ADR-003-aara-identity-and-product-access.md` | Authoritative requirement, implementation deferred: multi-product identity/role/entitlement model (Trading Intelligence User, Wealth Intelligence User, Platform Administrator). No auth/schema/UI work exists yet. |
 | `docs/decisions/ADR-004-sentinel-ledger-ownership-strategy.md` | Authoritative: formally defers the ledger-ownership choice (Option A/B/C, see `TRADING_INTELLIGENCE_SENTINEL_LEDGER_INTEGRATION_OPTIONS.md`) until Phase 1A validation completes and its decision criteria are met. ADR-002 protections unchanged. |
+| `docs/decisions/ADR-007-aara-platform-hierarchy.md` | Authoritative: formalizes the `AARA Systems → Sentinel Intelligence Engine → Products` naming hierarchy. Sentinel Intelligence Engine is a permanent architectural layer — not deprecated, renamed, or replaced by AARA. |
 | `docs/platform/TRADING_INTELLIGENCE_BOUNDARY.md` | Authoritative: target ownership boundary between Trading Intelligence (Product #1) and `sentinel_engine/`. Promoted from `docs/architecture/` — see Directory Structure above. |
 | `docs/platform/TRADING_INTELLIGENCE_EVENT_MODEL.md` | Authoritative: resolves the `DECISION_CREATED`/`DECISION_EXECUTED` split, rejected-candidate handling (two-stage), portfolio-scoped `RISK_EVALUATED` model, and BUY-only outcome lifecycle. |
 | `docs/platform/TRADING_INTELLIGENCE_SENTINEL_LEDGER_INTEGRATION_OPTIONS.md` | Authoritative comparison (no option chosen — see ADR-004): three ledger-ownership architectures with tradeoffs on migration risk, rollback, and Phase 1A impact. |
@@ -118,7 +119,8 @@ AARA Platform
 | Phase 2A (Trading Intelligence boundary, event model, contract gap analysis, ledger integration options) | COMPLETE |
 | Ledger ownership decision (Option A/B/C) | DEFERRED — see ADR-004, gated on Phase 1A completion |
 | AARA identity/product-access model | REQUIREMENT RECORDED, IMPLEMENTATION DEFERRED — see ADR-003 |
-| Code extraction (`bot/` → `applications/trading_intelligence/`) | NOT STARTED |
+| `applications/trading_intelligence/` + `applications/platform/` skeleton (contracts, projections, services, adapters, UI) | BUILT — not fed by `bot/`; one real, tested, one-way read dependency on `sentinel_engine/` via `adapters/sentinel_projection_decision_source.py`, not wired to a live backend (no concrete `ProjectionRepository` exists — see ADR-004) |
+| Code extraction (`bot/` → `applications/trading_intelligence/`) | NOT STARTED — no `bot/` code moved, refactored, or import-changed (ADR-002 unchanged) |
 
 **Next implementation phase:** Phase 3 — Product Development. Concrete ledger
 storage adapters and bot integration adapters are explicitly **not** in Phase 3's

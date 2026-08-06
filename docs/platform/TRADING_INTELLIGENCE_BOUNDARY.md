@@ -34,9 +34,10 @@ it today):
 ## 2. Trading Intelligence Responsibilities
 
 **Current implementation:** `bot/`, `scheduler/`.
-**Future target:** `applications/trading_intelligence/` (does not exist yet — no
-directory has been created, per ADR-002; this is a target, not a plan to create it
-now).
+**Skeleton built, not fed by current implementation:** `applications/trading_intelligence/`
+exists — contracts, projections, services, adapters, and a Decision Center UI, all
+tested — but contains no code moved from `bot/`/`scheduler/`. That move remains
+gated by ADR-002; no directory move or `bot/` import change has occurred.
 
 Responsibilities, mapped to what currently implements them:
 
@@ -142,7 +143,11 @@ commitment to build them, and not a specification of their shape.
 
 - Trading Intelligence depends on Sentinel Engine. Sentinel Engine never depends on
   Trading Intelligence — the dependency direction is one-way, and is already true
-  today (zero coupling in either direction, verified in `BOT_DEPENDENCY_MAP.md`).
+  today: `bot/`/`scheduler/` still have zero coupling to `sentinel_engine/` (verified
+  in `BOT_DEPENDENCY_MAP.md`), and `applications/trading_intelligence/`'s one real
+  dependency (`adapters/sentinel_projection_decision_source.py`) runs Trading
+  Intelligence → Engine only, never the reverse — structurally enforced by
+  `sentinel_engine/tests/test_package_imports.py`.
 - Adapters are the only mechanism permitted to cross the boundary. Nothing in
   `sentinel_engine` imports `bot`/`scheduler` types directly, and nothing in
   `bot`/`scheduler` imports `sentinel_engine` types directly.
@@ -188,17 +193,29 @@ sentinel_engine/
 ## Current Boundary Reality (Not Target — What Actually Exists Today)
 
 - **Zero code coupling** between `sentinel_engine/` and `bot/`/`scheduler/` in either
-  direction (verified in `BOT_DEPENDENCY_MAP.md`). Trading Intelligence, as it
-  exists today, has no dependency on the engine and vice versa.
-- `sentinel_engine/adapters/decision_adapter.py` (`to_decision(data: dict)`) is the
-  only boundary-shaped code that exists — it's a one-sided translation function, not
-  a live bridge. It was built with zero `bot` imports by design (ADR from the
-  extraction plan), so it doesn't create coupling on its own.
-- There is currently no mechanism by which anything Trading Intelligence does
-  produces a `sentinel_engine.domain.decision.Decision`, records a
-  `sentinel_engine.events.event.Event`, or writes to any `sentinel_engine` ledger.
-  Trading's own audit trail today is `bot/trust_ledger/` + the top-level `ledger/`
-  package, entirely separate from `sentinel_engine/ledger/`.
+  direction (verified in `BOT_DEPENDENCY_MAP.md`) — unchanged. `bot/`/`scheduler/`
+  still have no dependency on the engine and vice versa.
+- **`applications/trading_intelligence/` now has one real, tested, read-only
+  dependency on `sentinel_engine/`:** `adapters/sentinel_projection_decision_source.py`
+  imports `sentinel_engine.projections.decision_projection` and
+  `sentinel_engine.repositories.projection_repository` directly. It is exercised by
+  tests but **not wired into any live runtime path** — no concrete
+  `ProjectionRepository` backend exists yet (deferred per ADR-004), and nothing in
+  production code instantiates `DecisionQueryService` with it.
+
+  The existence of `applications/trading_intelligence/` does not represent migration
+  of the existing trading runtime. It represents the future product boundary. The
+  current trading execution runtime remains under `bot/` and is protected by
+  ADR-002.
+- `sentinel_engine/adapters/decision_adapter.py` (`to_decision(data: dict)`) remains
+  the only *write-direction* boundary code that exists — a one-sided translation
+  function, not a live bridge, built with zero `bot` imports by design.
+- There is still no mechanism by which anything Trading Intelligence does produces a
+  `sentinel_engine.domain.decision.Decision`, records a `sentinel_engine.events.event.Event`,
+  or writes to any `sentinel_engine` ledger — the read-only adapter above only reads
+  existing `DecisionProjection`s, it does not write. Trading's own audit trail today
+  is `bot/trust_ledger/` + the top-level `ledger/` package, entirely separate from
+  `sentinel_engine/ledger/`.
 
 ## 9. Unresolved Decisions
 
