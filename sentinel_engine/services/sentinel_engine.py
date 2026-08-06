@@ -48,6 +48,9 @@ class SentinelEngine:
     def is_policy_enabled(self, policy_id: str) -> bool:
         return self._governance_service.is_policy_enabled(policy_id)
 
+    def evaluate_policy(self, decision_id: str, policy_id: str) -> bool:
+        return self._governance_service.evaluate_policy(decision_id, policy_id)
+
     def record_approval(self, approval: Approval) -> None:
         self._governance_service.record_approval(approval)
 

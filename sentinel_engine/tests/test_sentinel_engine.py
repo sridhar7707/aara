@@ -87,12 +87,11 @@ def _make_approval(**overrides):
 
 
 def _make_engine():
-    decision_service = DecisionService(
-        LedgerRepository(_InMemoryLedgerStore()),
-        _InMemoryProjectionRepository(),
-    )
-    evidence_service = EvidenceService()
-    governance_service = GovernanceService()
+    ledger_repository = LedgerRepository(_InMemoryLedgerStore())
+    projection_repository = _InMemoryProjectionRepository()
+    decision_service = DecisionService(ledger_repository, projection_repository)
+    evidence_service = EvidenceService(ledger_repository, projection_repository)
+    governance_service = GovernanceService(ledger_repository, projection_repository)
     return SentinelEngine(decision_service, evidence_service, governance_service)
 
 
@@ -146,6 +145,19 @@ def test_is_policy_enabled_returns_false_for_unknown_policy():
     engine = _make_engine()
 
     assert engine.is_policy_enabled("missing-policy") is False
+
+
+def test_evaluate_policy_delegates_to_governance_service():
+    engine = _make_engine()
+    engine.register_policy(_make_policy(enabled=True))
+
+    assert engine.evaluate_policy("dec-001", "pol-001") is True
+
+
+def test_evaluate_policy_returns_false_for_unknown_policy():
+    engine = _make_engine()
+
+    assert engine.evaluate_policy("dec-001", "missing-policy") is False
 
 
 def test_record_approval_and_query_get_approval():
