@@ -121,6 +121,57 @@ def test_record_approval_then_get_approval_returns_it():
     assert service.get_approval("dec-001") == approval
 
 
+def test_record_approval_writes_approval_recorded_event_with_correct_payload():
+    service, ledger_repository, _ = _make_service()
+    approval = _make_approval()
+
+    service.record_approval(approval)
+
+    events = ledger_repository.get_events()
+    assert len(events) == 1
+    assert events[0].event_type == EventType.APPROVAL_RECORDED
+    assert events[0].payload["decision_id"] == "dec-001"
+    assert events[0].payload["approval_id"] == "apr-001"
+    assert events[0].payload["status"] == "APPROVED"
+    assert events[0].payload["approved_by"] == "risk_officer"
+
+
+def test_record_approval_event_belongs_to_the_approval_s_decision_id():
+    service, ledger_repository, _ = _make_service()
+    approval = _make_approval(decision_id="dec-002")
+
+    service.record_approval(approval)
+
+    events = ledger_repository.get_events()
+    assert events[0].payload["decision_id"] == "dec-002"
+
+
+def test_record_approval_advances_projection_status_when_projection_exists():
+    service, _, projection_repository = _make_service()
+    projection_repository.save(_make_projection())
+    approval = _make_approval()
+
+    service.record_approval(approval)
+
+    projection = projection_repository.get("dec-001")
+    assert projection is not None
+    assert projection.status == EventType.APPROVAL_RECORDED.value
+    assert projection.updated_at == approval.timestamp
+    # Unrelated fields preserved by the read-modify-write, not overwritten.
+    assert projection.symbol == "AAPL"
+    assert projection.action == "BUY"
+    assert projection.confidence == 0.78
+
+
+def test_record_approval_does_not_create_a_projection_when_none_exists():
+    service, _, projection_repository = _make_service()
+    approval = _make_approval()
+
+    service.record_approval(approval)
+
+    assert projection_repository.get("dec-001") is None
+
+
 def test_governance_service_does_not_expose_internal_storage_attributes():
     service, _, _ = _make_service()
 

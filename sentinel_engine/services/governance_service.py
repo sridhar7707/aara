@@ -2,11 +2,12 @@
 policy against a decision, and records Approval contracts. No trading rules
 live here — only the governance slice of the decision lifecycle.
 
-Policy/approval state stays in-memory and private. evaluate_policy() emits a
-GOVERNANCE_EVALUATED domain event through LedgerRepository and advances the
-decision's projection only through ProjectionRepository.advance_status() —
-this service never constructs, mutates, or saves a DecisionProjection
-itself, mirroring the boundary established for EvidenceService.
+Policy/approval state stays in-memory and private. evaluate_policy() and
+record_approval() each emit a domain event (GOVERNANCE_EVALUATED,
+APPROVAL_RECORDED) through LedgerRepository and advance the decision's
+projection only through ProjectionRepository.advance_status() — this
+service never constructs, mutates, or saves a DecisionProjection itself,
+mirroring the boundary established for EvidenceService.
 """
 import uuid
 from datetime import datetime
@@ -65,6 +66,23 @@ class GovernanceService:
 
     def record_approval(self, approval: Approval) -> None:
         self._approvals[approval.decision_id] = approval
+
+        event = Event(
+            event_id=str(uuid.uuid4()),
+            event_type=EventType.APPROVAL_RECORDED,
+            created_at=approval.timestamp,
+            payload={
+                "decision_id": approval.decision_id,
+                "approval_id": approval.approval_id,
+                "status": approval.status,
+                "approved_by": approval.approved_by,
+            },
+        )
+        self._ledger_repository.save_event(event)
+
+        self._projection_repository.advance_status(
+            approval.decision_id, EventType.APPROVAL_RECORDED.value, approval.timestamp,
+        )
 
     def get_approval(self, decision_id: str) -> Optional[Approval]:
         return self._approvals.get(decision_id)
