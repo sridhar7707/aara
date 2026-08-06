@@ -23,7 +23,7 @@ Since that commit, `sentinel_engine/` has been built out following the
 `CODEBASE_MIGRATION_MATRIX.md` model: `Decision`, `Event`, `EventType`, `Evidence`,
 `Policy`, `Approval` contracts; `LedgerStore` and `ProjectionRepository` abstractions;
 `DecisionService`, `EvidenceService`, `GovernanceService`; a `SentinelEngine` facade; a
-`decision_adapter` boundary. 82 tests pass under `sentinel_engine/tests/`.
+`decision_adapter` boundary. 108 tests pass under `sentinel_engine/tests/`.
 
 ## Decision
 

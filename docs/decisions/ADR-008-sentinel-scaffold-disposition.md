@@ -1,6 +1,6 @@
 # ADR-008: Sentinel Scaffold Disposition
 
-**Status:** Proposed
+**Status:** Accepted — Archive Executed (commit `1fcc77b`)
 **Date:** 2026-08-06
 
 ## Context
@@ -13,7 +13,7 @@ Two packages both use the name "Sentinel" today:
   actually builds events and projections and persists them via repository
   abstractions; a `SentinelEngine` facade genuinely coordinates the three
   services; `adapters/decision_adapter.py` performs real field validation
-  (raises `ValueError` on malformed input). 82 tests passing (per ADR-001). A
+  (raises `ValueError` on malformed input). 108 tests passing (per ADR-001). A
   structural self-enforcement test (`tests/test_package_imports.py`) AST-scans
   every production file and asserts zero imports of `bot`/`dashboard`/
   `scheduler`/`ledger`/`database`/`applications`. Currently has exactly one
