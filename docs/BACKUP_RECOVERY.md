@@ -96,7 +96,7 @@ python -c "from bot.monitor.sync_db import push_db; push_db()"
 
 ```bash
 # 1. Clone repo
-git clone https://github.com/ksri77/ai-trading-bot
+git clone https://github.com/sridhar7707/aara
 
 # 2. Install dependencies
 pip install -r requirements.txt

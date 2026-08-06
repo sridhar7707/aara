@@ -130,7 +130,7 @@ _GLOSSARY = """
 **ATR** — a measure of a stock's volatility, used to size the stop-loss distance.
 """
 
-_REPO_URL = "https://github.com/sridhar7707/ai-trading-bot"
+_REPO_URL = "https://github.com/sridhar7707/aara"
 _ABOUT = f"""
 An automated **paper-trading** system — simulated capital, no real money. Market
 data and order execution use Alpaca's paper-trading API.
