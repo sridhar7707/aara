@@ -60,7 +60,7 @@ A self-learning AI trading bot that targets index outperformance (beating the S&
 ## 📁 Project Structure
 
 ```
-ai-trading-bot/
+aara/
 │
 ├── bot/                        # Core bot logic
 │   ├── execution/              # Order execution (Alpaca)
@@ -135,8 +135,8 @@ ai-trading-bot/
 
 ### 1. Clone the repo
 ```bash
-git clone https://github.com/YOUR_USERNAME/ai-trading-bot.git
-cd ai-trading-bot
+git clone https://github.com/YOUR_USERNAME/aara.git
+cd aara
 ```
 
 ### 2. Install dependencies

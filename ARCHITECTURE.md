@@ -7,7 +7,7 @@
 
 ## 👤 Project Owner
 - **Email:** ksri77@gmail.com
-- **Repo:** ai-trading-bot
+- **Repo:** aara
 
 ---
 
@@ -458,7 +458,7 @@ Year 2+:     With retraining — realistic shot at outperforming
 ## 📁 Project Structure
 
 ```
-ai-trading-bot/
+aara/
 │
 ├── bot/                          # Core bot logic
 │   ├── execution/
@@ -988,7 +988,7 @@ requests             # SEC EDGAR + Unusual Whales API calls
 
 If continuing on a new device or new Claude session, share this file and say:
 
-> *"Here is my ARCHITECTURE.md for my AI trading bot project. I want to continue building from Phase [X]. My email is ksri77@gmail.com and the GitHub repo is ai-trading-bot."*
+> *"Here is my ARCHITECTURE.md for my AI trading bot project. I want to continue building from Phase [X]. My email is ksri77@gmail.com and the GitHub repo is aara."*
 
 Claude will have full context to continue exactly where we left off.
 
