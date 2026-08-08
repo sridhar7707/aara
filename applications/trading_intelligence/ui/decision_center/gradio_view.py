@@ -14,6 +14,11 @@ capability anywhere in this read chain (documented, deliberate, not fixed
 here; see decision_query_service.py's docstring). This UI is constructed
 with the list of ids its composition root already knows about (the ones it
 seeded) and refreshes against that same known list.
+
+Row selection: gr.Dataframe's `select` event (Gradio 4.44) passes a
+gr.SelectData whose `row_value` is the entire selected row as a 1-D list,
+in the same column order as _LIST_HEADERS -- so row_value[0] is the
+Decision ID without needing a second lookup against the rendered rows.
 """
 from typing import List, Tuple
 
@@ -67,6 +72,8 @@ class DecisionCenterUI:
                 fn=self._render_detail, inputs=[decision_id_input], outputs=detail_outputs,
             )
 
+            list_output.select(fn=self._on_row_select, inputs=None, outputs=detail_outputs)
+
         return demo
 
     def _render_screen(self) -> Tuple[List[List[str]], str, str, str, str, str]:
@@ -80,6 +87,11 @@ class DecisionCenterUI:
             return self._empty_detail()
         detail_area = self._controller.load_decision_detail(decision_id)
         return self._format_detail(detail_area)
+
+    def _on_row_select(self, evt: gr.SelectData) -> _DetailValues:
+        if not evt.selected or not evt.row_value:
+            return self._empty_detail()
+        return self._render_detail(evt.row_value[0])
 
     @staticmethod
     def _format_list_rows(list_area: DecisionListArea) -> List[List[str]]:

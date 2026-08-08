@@ -18,6 +18,14 @@ from applications.trading_intelligence.ui.decision_center.screen import (
 )
 
 
+def _make_select_event(row_value, selected=True):
+    return gr.SelectData(
+        target=None,
+        data={"index": (0, 0), "value": row_value[0] if row_value else None,
+              "row_value": row_value, "selected": selected},
+    )
+
+
 def _make_view(**overrides):
     defaults = dict(
         decision_id="dec-001",
@@ -149,3 +157,51 @@ def test_render_detail_handles_missing_decision():
     result = ui._render_detail("missing-decision")
 
     assert result == ("-", "-", "-", "-", "-")
+
+
+def test_row_select_calls_controller_with_the_id_from_the_selected_row():
+    view = _make_view(decision_id="dec-002", symbol="MSFT")
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view))
+    ui = DecisionCenterUI(controller, ["dec-001", "dec-002"])
+    row = ["dec-002", "MSFT", "HOLD", "Decision Created", "82%"]
+
+    ui._on_row_select(_make_select_event(row))
+
+    assert controller.load_decision_detail_calls == ["dec-002"]
+
+
+def test_row_select_renders_the_selected_decision_detail():
+    view = _make_view(
+        decision_id="dec-003", symbol="NVDA", action="SELL",
+        status=DecisionState.APPROVAL_RECORDED, confidence=0.91,
+    )
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view))
+    ui = DecisionCenterUI(controller, ["dec-003"])
+    row = ["dec-003", "NVDA", "SELL", "Approval Recorded", "91%"]
+
+    symbol, action, status, confidence, updated = ui._on_row_select(_make_select_event(row))
+
+    assert symbol == "NVDA"
+    assert action == "SELL"
+    assert status == "Approval Recorded"
+    assert confidence == "91%"
+
+
+def test_row_select_handles_deselection_without_crashing():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    result = ui._on_row_select(_make_select_event(["dec-001"], selected=False))
+
+    assert result == ("-", "-", "-", "-", "-")
+    assert controller.load_decision_detail_calls == []
+
+
+def test_row_select_handles_missing_row_value_without_crashing():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, [])
+
+    result = ui._on_row_select(_make_select_event(None))
+
+    assert result == ("-", "-", "-", "-", "-")
+    assert controller.load_decision_detail_calls == []
