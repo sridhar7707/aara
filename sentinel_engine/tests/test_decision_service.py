@@ -3,6 +3,7 @@ import datetime
 
 from sentinel_engine.services.decision_service import DecisionService
 from sentinel_engine.domain.decision import Decision
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.events.event_types import EventType
 from sentinel_engine.ledger.ledger import LedgerStore
 from sentinel_engine.repositories.ledger_repository import LedgerRepository
@@ -85,7 +86,7 @@ def test_create_decision_saves_projection_with_created_status():
     assert projection is not None
     assert projection.symbol == "AAPL"
     assert projection.action == "BUY"
-    assert projection.status == EventType.DECISION_CREATED.value
+    assert projection.status == DecisionState.DECISION_CREATED
 
 
 def test_get_projection_returns_none_for_unknown_decision():

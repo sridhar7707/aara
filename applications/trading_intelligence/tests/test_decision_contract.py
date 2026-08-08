@@ -4,6 +4,8 @@ import dataclasses
 
 import pytest
 
+from sentinel_engine.domain.decision_state import DecisionState
+
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
 
 
@@ -12,7 +14,7 @@ def _make_contract(**overrides):
         decision_id="dec-001",
         symbol="AAPL",
         action="BUY",
-        status="DECISION_CREATED",
+        status=DecisionState.DECISION_CREATED,
         confidence=0.78,
         evidence_reference="evidence-001",
         risk_reference="risk-001",
@@ -27,7 +29,7 @@ def test_decision_contract_can_be_created_with_required_fields():
     assert contract.decision_id == "dec-001"
     assert contract.symbol == "AAPL"
     assert contract.action == "BUY"
-    assert contract.status == "DECISION_CREATED"
+    assert contract.status == DecisionState.DECISION_CREATED
     assert contract.confidence == 0.78
     assert contract.evidence_reference == "evidence-001"
     assert contract.risk_reference == "risk-001"
@@ -41,7 +43,7 @@ def test_decision_contract_is_a_dataclass():
 def test_decision_contract_is_immutable():
     contract = _make_contract()
     with pytest.raises(dataclasses.FrozenInstanceError):
-        contract.status = "DECISION_EXECUTED"
+        contract.status = DecisionState.APPROVAL_RECORDED
 
 
 def test_decision_contract_requires_all_fields():

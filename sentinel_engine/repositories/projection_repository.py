@@ -8,6 +8,7 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Optional
 
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.projections.decision_projection import DecisionProjection
 
 
@@ -20,7 +21,7 @@ class ProjectionRepository(ABC):
     def get(self, decision_id: str) -> Optional[DecisionProjection]:
         ...
 
-    def advance_status(self, decision_id: str, status: str, updated_at: datetime) -> None:
+    def advance_status(self, decision_id: str, status: DecisionState, updated_at: datetime) -> None:
         """Advance an existing projection's status; no-op if none exists.
 
         Concrete on this ABC (built on the abstract get/save primitives every

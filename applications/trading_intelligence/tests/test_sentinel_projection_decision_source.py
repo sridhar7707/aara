@@ -1,6 +1,7 @@
 """Tests for applications.trading_intelligence.adapters.sentinel_projection_decision_source."""
 import datetime
 
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.projections.decision_projection import DecisionProjection
 from sentinel_engine.repositories.projection_repository import ProjectionRepository
 
@@ -30,7 +31,7 @@ def _make_projection(**overrides):
         decision_id="dec-001",
         symbol="AAPL",
         action="BUY",
-        status="DECISION_CREATED",
+        status=DecisionState.DECISION_CREATED,
         confidence=0.78,
         evidence_reference="evidence-001",
         risk_reference="risk-001",
@@ -71,7 +72,7 @@ def test_get_decision_maps_every_field_correctly():
     assert result.decision_id == "dec-001"
     assert result.symbol == "AAPL"
     assert result.action == "BUY"
-    assert result.status == "DECISION_CREATED"
+    assert result.status == DecisionState.DECISION_CREATED
     assert result.confidence == 0.78
     assert result.evidence_reference == "evidence-001"
     assert result.risk_reference == "risk-001"

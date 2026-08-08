@@ -16,27 +16,27 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from sentinel_engine.events.event_types import EventType
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.repositories.ledger_repository import LedgerRepository
 from sentinel_engine.repositories.projection_repository import ProjectionRepository
 
 _STATUSES_PAST_GOVERNANCE = (
-    EventType.GOVERNANCE_EVALUATED.value,
-    EventType.APPROVAL_RECORDED.value,
+    DecisionState.GOVERNANCE_EVALUATED,
+    DecisionState.APPROVAL_RECORDED,
 )
 
 
 @dataclass(frozen=True)
 class RecentDecisionActivity:
     decision_id: str
-    status: str
+    status: DecisionState
     last_activity_at: datetime
 
 
 @dataclass(frozen=True)
 class MorningBrief:
     total_decisions: int
-    decisions_by_status: Dict[str, int]
+    decisions_by_status: Dict[DecisionState, int]
     recent_decisions: List[RecentDecisionActivity]
     pending_governance_count: int
     pending_approval_count: int
@@ -79,7 +79,7 @@ class MorningBriefQuery:
                 latest_activity_timestamp = event.created_at
 
         total_decisions = 0
-        decisions_by_status: Dict[str, int] = {}
+        decisions_by_status: Dict[DecisionState, int] = {}
         pending_governance_count = 0
         pending_approval_count = 0
         recent_candidates: List[RecentDecisionActivity] = []
@@ -95,7 +95,7 @@ class MorningBriefQuery:
 
             if status not in _STATUSES_PAST_GOVERNANCE:
                 pending_governance_count += 1
-            if status != EventType.APPROVAL_RECORDED.value:
+            if status != DecisionState.APPROVAL_RECORDED:
                 pending_approval_count += 1
 
             recent_candidates.append(

@@ -3,6 +3,8 @@ import datetime
 
 import pytest
 
+from sentinel_engine.domain.decision_state import DecisionState
+
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
 from applications.trading_intelligence.services.decision_query_service import (
     DecisionQueryService,
@@ -15,7 +17,7 @@ def _make_contract(**overrides):
         decision_id="dec-001",
         symbol="AAPL",
         action="BUY",
-        status="DECISION_CREATED",
+        status=DecisionState.DECISION_CREATED,
         confidence=0.78,
         evidence_reference="evidence-001",
         risk_reference="risk-001",
@@ -60,7 +62,7 @@ def test_get_decision_view_returns_a_view_built_from_the_source_contract():
     assert view is not None
     assert view.decision_id == "dec-001"
     assert view.symbol == "AAPL"
-    assert view.status == "DECISION_CREATED"
+    assert view.status == DecisionState.DECISION_CREATED
 
 
 def test_get_decision_view_delegates_to_the_injected_source_not_a_shared_default():

@@ -11,8 +11,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import List, Optional
 
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.events.event import Event
 from sentinel_engine.events.event_types import EventType
+from sentinel_engine.governance.approval_status import ApprovalStatus
 from sentinel_engine.repositories.ledger_repository import LedgerRepository
 from sentinel_engine.repositories.projection_repository import ProjectionRepository
 
@@ -35,7 +37,7 @@ class GovernanceEvaluationSummary:
 @dataclass(frozen=True)
 class ApprovalSummary:
     approval_id: str
-    status: str
+    status: ApprovalStatus
     approved_by: str
     approved_at: datetime
 
@@ -43,7 +45,7 @@ class ApprovalSummary:
 @dataclass(frozen=True)
 class DecisionTimeline:
     decision_id: str
-    status: str
+    status: DecisionState
     events: List[Event]
     evidence: List[EvidenceSummary]
     governance_evaluations: List[GovernanceEvaluationSummary]

@@ -1,4 +1,4 @@
-"""Trading Intelligence's decision read model — no persistence, no database.
+"""Trading Intelligence's decision read model -- no persistence, no database.
 
 Represents the "Trading Intelligence Projection" stage in
 TRADING_INTELLIGENCE_APPLICATION_ARCHITECTURE.md's read flow (Sentinel
@@ -8,9 +8,16 @@ Deliberately narrower than DecisionContract: evidence_reference/risk_reference
 are internal pointers a decision-list view doesn't display directly (per
 AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md, evidence and risk are shown by
 separate evidence panels/risk indicators, not embedded in the decision card).
+
+DecisionState is imported (and therefore re-exported) here so that
+ui/decision_center/mock_data.py -- which is forbidden from importing
+sentinel_engine directly (see applications/trading_intelligence/ui/tests/
+test_ui_structure.py) -- can obtain it via this module instead.
 """
 from dataclasses import dataclass
 from datetime import datetime
+
+from sentinel_engine.domain.decision_state import DecisionState
 
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
 
@@ -20,7 +27,7 @@ class DecisionView:
     decision_id: str
     symbol: str
     action: str
-    status: str
+    status: DecisionState
     confidence: float
     updated_at: datetime
 

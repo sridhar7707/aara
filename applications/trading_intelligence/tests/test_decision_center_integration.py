@@ -27,6 +27,7 @@ backed path alongside it.
 """
 import datetime
 
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.projections.decision_projection import DecisionProjection
 from sentinel_engine.repositories.projection_repository import ProjectionRepository
 
@@ -45,7 +46,7 @@ def _make_projection(**overrides):
         decision_id="dec-001",
         symbol="AAPL",
         action="BUY",
-        status="DECISION_CREATED",
+        status=DecisionState.DECISION_CREATED,
         confidence=0.78,
         evidence_reference="evidence-001",
         risk_reference="risk-001",
@@ -115,13 +116,13 @@ def test_decision_detail_loads_the_explicitly_selected_decision():
 def test_controller_produces_a_correctly_formatted_screen_model_from_real_projection_data():
     """Traces formatting all the way from a real DecisionProjection, not a
     hand-built DecisionContract/DecisionView -- confidence=0.78 -> "78%",
-    status="DECISION_CREATED" -> "Decision Created", timestamp formatting."""
+    status=DecisionState.DECISION_CREATED -> "Decision Created", timestamp formatting."""
     repository = InMemoryProjectionRepository()
     repository.save(
         _make_projection(
             decision_id="dec-001",
             confidence=0.78,
-            status="DECISION_CREATED",
+            status=DecisionState.DECISION_CREATED,
             updated_at=datetime.datetime(2026, 8, 4, 9, 35, 0),
         )
     )

@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, Optional
 
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.events.event import Event
 from sentinel_engine.events.event_types import EventType
 from sentinel_engine.governance.policy import Policy
@@ -59,7 +60,7 @@ class GovernanceService:
         self._ledger_repository.save_event(event)
 
         self._projection_repository.advance_status(
-            decision_id, EventType.GOVERNANCE_EVALUATED.value, evaluated_at,
+            decision_id, DecisionState.GOVERNANCE_EVALUATED, evaluated_at,
         )
 
         return enabled
@@ -81,7 +82,7 @@ class GovernanceService:
         self._ledger_repository.save_event(event)
 
         self._projection_repository.advance_status(
-            approval.decision_id, EventType.APPROVAL_RECORDED.value, approval.timestamp,
+            approval.decision_id, DecisionState.APPROVAL_RECORDED, approval.timestamp,
         )
 
     def get_approval(self, decision_id: str) -> Optional[Approval]:

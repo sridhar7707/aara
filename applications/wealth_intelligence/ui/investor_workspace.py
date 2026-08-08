@@ -128,7 +128,7 @@ class InvestorWorkspaceUI:
         ]
 
         return (
-            view.lifecycle_status,
+            view.lifecycle_status.value,
             view.symbol or _MISSING_VALUE,
             view.action or _MISSING_VALUE,
             evidence_rows,
@@ -152,6 +152,6 @@ class InvestorWorkspaceUI:
         if approval_summary is None:
             return _NOT_YET_APPROVED
         return (
-            f"{approval_summary.status} by {approval_summary.approved_by} "
+            f"{approval_summary.status.value} by {approval_summary.approved_by} "
             f"(recorded {approval_summary.approved_at.isoformat()})"
         )

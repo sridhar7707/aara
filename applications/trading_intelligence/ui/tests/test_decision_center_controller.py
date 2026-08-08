@@ -2,6 +2,7 @@
 import datetime
 
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
+from applications.trading_intelligence.projections.decision_view import DecisionState
 from applications.trading_intelligence.services.decision_query_service import (
     DecisionQueryService,
     DecisionSource,
@@ -30,7 +31,7 @@ def _make_contract(**overrides):
         decision_id="dec-001",
         symbol="AAPL",
         action="BUY",
-        status="DECISION_CREATED",
+        status=DecisionState.DECISION_CREATED,
         confidence=0.78,
         evidence_reference="evidence-001",
         risk_reference="risk-001",

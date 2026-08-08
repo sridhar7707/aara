@@ -8,8 +8,10 @@ from sentinel_engine.domain.decision import Decision
 from sentinel_engine.evidence.evidence import Evidence
 from sentinel_engine.governance.policy import Policy
 from sentinel_engine.governance.approval import Approval
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.events.event import Event
 from sentinel_engine.events.event_types import EventType
+from sentinel_engine.governance.approval_status import ApprovalStatus
 from sentinel_engine.ledger.ledger import LedgerStore
 from sentinel_engine.projections.decision_projection import DecisionProjection
 from sentinel_engine.repositories.ledger_repository import LedgerRepository
@@ -80,7 +82,7 @@ def _make_approval(**overrides):
     defaults = dict(
         approval_id="apr-001",
         decision_id="dec-001",
-        status="APPROVED",
+        status=ApprovalStatus.APPROVED,
         approved_by="risk_officer",
         timestamp=datetime.datetime(2026, 8, 6, 12, 2, 0),
     )
@@ -127,7 +129,7 @@ def test_get_decision_timeline_returns_complete_ordered_lifecycle():
 
     assert timeline is not None
     assert timeline.decision_id == decision_id
-    assert timeline.status == EventType.APPROVAL_RECORDED.value
+    assert timeline.status == DecisionState.APPROVAL_RECORDED
 
     assert len(timeline.events) == 4
     assert [event.event_type for event in timeline.events] == [
@@ -148,7 +150,7 @@ def test_get_decision_timeline_returns_complete_ordered_lifecycle():
 
     assert len(timeline.approvals) == 1
     assert timeline.approvals[0].approval_id == "apr-001"
-    assert timeline.approvals[0].status == "APPROVED"
+    assert timeline.approvals[0].status == ApprovalStatus.APPROVED
     assert timeline.approvals[0].approved_by == "risk_officer"
 
 
@@ -188,7 +190,7 @@ def test_get_decision_timeline_orders_events_by_created_at_not_append_order():
             decision_id="dec-001",
             symbol="AAPL",
             action="BUY",
-            status=EventType.EVIDENCE_ATTACHED.value,
+            status=DecisionState.EVIDENCE_ATTACHED,
             confidence=0.78,
             evidence_reference="evidence-001",
             risk_reference="risk-001",

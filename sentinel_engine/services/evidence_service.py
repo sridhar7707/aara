@@ -9,6 +9,7 @@ service never constructs, mutates, or saves a DecisionProjection itself.
 import uuid
 from typing import Dict, List
 
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.evidence.evidence import Evidence
 from sentinel_engine.events.event import Event
 from sentinel_engine.events.event_types import EventType
@@ -43,7 +44,7 @@ class EvidenceService:
         self._ledger_repository.save_event(event)
 
         self._projection_repository.advance_status(
-            decision_id, EventType.EVIDENCE_ATTACHED.value, evidence.collected_at,
+            decision_id, DecisionState.EVIDENCE_ATTACHED, evidence.collected_at,
         )
 
     def get_evidence_for_decision(self, decision_id: str) -> List[Evidence]:

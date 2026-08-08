@@ -8,8 +8,10 @@ from sentinel_engine.domain.decision import Decision
 from sentinel_engine.evidence.evidence import Evidence
 from sentinel_engine.governance.policy import Policy
 from sentinel_engine.governance.approval import Approval
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.events.event import Event
 from sentinel_engine.events.event_types import EventType
+from sentinel_engine.governance.approval_status import ApprovalStatus
 from sentinel_engine.ledger.ledger import LedgerStore
 from sentinel_engine.projections.decision_projection import DecisionProjection
 from sentinel_engine.repositories.ledger_repository import LedgerRepository
@@ -80,7 +82,7 @@ def _make_approval(**overrides):
     defaults = dict(
         approval_id="apr-001",
         decision_id="dec-001",
-        status="APPROVED",
+        status=ApprovalStatus.APPROVED,
         approved_by="risk_officer",
         timestamp=datetime.datetime(2026, 8, 6, 12, 2, 0),
     )
@@ -127,7 +129,7 @@ def test_get_decision_center_returns_complete_lifecycle_view():
 
     assert view is not None
     assert view.decision_id == decision_id
-    assert view.lifecycle_status == EventType.APPROVAL_RECORDED.value
+    assert view.lifecycle_status == DecisionState.APPROVAL_RECORDED
     assert view.symbol == "AAPL"
     assert view.action == "BUY"
 
@@ -150,7 +152,7 @@ def test_get_decision_center_returns_complete_lifecycle_view():
 
     assert len(view.approvals) == 1
     assert view.approvals[0].approval_id == "apr-001"
-    assert view.approvals[0].status == "APPROVED"
+    assert view.approvals[0].status == ApprovalStatus.APPROVED
     assert view.approvals[0].approved_by == "risk_officer"
 
 
@@ -192,7 +194,7 @@ def test_get_decision_center_orders_timeline_by_created_at_not_append_order():
             decision_id="dec-001",
             symbol="AAPL",
             action="BUY",
-            status=EventType.EVIDENCE_ATTACHED.value,
+            status=DecisionState.EVIDENCE_ATTACHED,
             confidence=0.78,
             evidence_reference="evidence-001",
             risk_reference="risk-001",

@@ -15,6 +15,8 @@ import pathlib
 import gradio as gr
 
 from applications.wealth_intelligence.ui.investor_workspace import InvestorWorkspaceUI
+from sentinel_engine.domain.decision_state import DecisionState
+from sentinel_engine.governance.approval_status import ApprovalStatus
 from sentinel_engine.presentation.investor_presenter import (
     ApprovalSummaryRow,
     DecisionCenterViewModel,
@@ -47,11 +49,11 @@ class _FakePresenter:
 def _make_morning_brief_view():
     return MorningBriefView(
         total_decisions=2,
-        status_summary={"DECISION_CREATED": 1, "APPROVAL_RECORDED": 1},
+        status_summary={DecisionState.DECISION_CREATED: 1, DecisionState.APPROVAL_RECORDED: 1},
         recent_activity_rows=[
             RecentActivityRow(
                 decision_id="dec-001",
-                status="APPROVAL_RECORDED",
+                status=DecisionState.APPROVAL_RECORDED,
                 last_activity_at=datetime.datetime(2026, 8, 6, 12, 3, 0),
             )
         ],
@@ -61,7 +63,7 @@ def _make_morning_brief_view():
 def _make_decision_center_view():
     return DecisionCenterViewModel(
         decision_id="dec-001",
-        lifecycle_status="APPROVAL_RECORDED",
+        lifecycle_status=DecisionState.APPROVAL_RECORDED,
         symbol="AAPL",
         action="BUY",
         evidence_rows=[
@@ -79,7 +81,7 @@ def _make_decision_center_view():
         ),
         approval_summary=ApprovalSummaryRow(
             approval_id="apr-001",
-            status="APPROVED",
+            status=ApprovalStatus.APPROVED,
             approved_by="risk_officer",
             approved_at=datetime.datetime(2026, 8, 6, 12, 3, 0),
         ),
@@ -137,6 +139,33 @@ def test_render_decision_center_passes_decision_id_and_maps_view_model():
         ["DECISION_CREATED", "2026-08-06T12:00:00"],
         ["APPROVAL_RECORDED", "2026-08-06T12:03:00"],
     ]
+
+
+def test_render_decision_center_renders_plain_strings_through_gradio_textbox():
+    """Regression test for a real bug: DecisionState/ApprovalStatus are
+    (str, Enum) members whose __str__ (all Python versions) and __format__
+    (3.12+) render as "DecisionState.APPROVAL_RECORDED" /
+    "ApprovalStatus.APPROVED" instead of the bare value. The handler-return
+    `==` assertions above pass regardless of this bug (enum `==` compares
+    equal to the plain string), so they cannot catch it -- this test
+    exercises gr.Textbox's actual postprocess() (which calls str() on the
+    value) for the lifecycle status, and checks the approval-summary text
+    for the literal class-qualification artifact that a raw f-string
+    embedding of the enum (without .value) would produce.
+    """
+    presenter = _FakePresenter(decision_center_view=_make_decision_center_view())
+    ui = InvestorWorkspaceUI(presenter)
+
+    lifecycle_status, _, _, _, _, approval_text, _ = ui._render_decision_center("dec-001")
+
+    rendered_lifecycle_status = gr.Textbox().postprocess(lifecycle_status)
+    assert rendered_lifecycle_status == "APPROVAL_RECORDED"
+    assert "DecisionState." not in rendered_lifecycle_status
+
+    assert isinstance(approval_text, str)
+    assert "ApprovalStatus." not in approval_text
+    assert "DecisionState." not in approval_text
+    assert approval_text == "APPROVED by risk_officer (recorded 2026-08-06T12:03:00)"
 
 
 def test_render_decision_center_handles_missing_decision_gracefully():

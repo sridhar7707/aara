@@ -9,9 +9,11 @@ from sentinel_engine.services.decision_service import DecisionService
 from sentinel_engine.services.evidence_service import EvidenceService
 from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.domain.decision import Decision
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.evidence.evidence import Evidence
 from sentinel_engine.governance.policy import Policy
 from sentinel_engine.governance.approval import Approval
+from sentinel_engine.governance.approval_status import ApprovalStatus
 from sentinel_engine.events.event_types import EventType
 from sentinel_engine.ledger.ledger import LedgerStore
 from sentinel_engine.repositories.ledger_repository import LedgerRepository
@@ -91,7 +93,7 @@ def test_decision_lifecycle_produces_ordered_ledger_trail_and_final_projection()
     approval = Approval(
         approval_id="apr-001",
         decision_id=decision_id,
-        status="APPROVED",
+        status=ApprovalStatus.APPROVED,
         approved_by="risk_officer",
         timestamp=datetime.datetime.utcnow() + datetime.timedelta(minutes=1),
     )
@@ -119,4 +121,4 @@ def test_decision_lifecycle_produces_ordered_ledger_trail_and_final_projection()
     )
 
     assert projection is not None
-    assert projection.status == EventType.APPROVAL_RECORDED.value
+    assert projection.status == DecisionState.APPROVAL_RECORDED

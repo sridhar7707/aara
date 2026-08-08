@@ -4,7 +4,7 @@ import dataclasses
 
 import pytest
 
-from applications.trading_intelligence.projections.decision_view import DecisionView
+from applications.trading_intelligence.projections.decision_view import DecisionState, DecisionView
 from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionCenterScreen,
     DecisionDetailArea,
@@ -17,7 +17,7 @@ def _make_view(**overrides):
         decision_id="dec-001",
         symbol="AAPL",
         action="BUY",
-        status="DECISION_CREATED",
+        status=DecisionState.DECISION_CREATED,
         confidence=0.78,
         updated_at=datetime.datetime(2026, 8, 4, 12, 0, 0),
     )
@@ -61,7 +61,7 @@ def test_decision_detail_area_formats_confidence_as_a_percentage():
 
 
 def test_decision_detail_area_formats_status_as_title_case_words():
-    area = DecisionDetailArea(decision=_make_view(status="DECISION_CREATED"))
+    area = DecisionDetailArea(decision=_make_view(status=DecisionState.DECISION_CREATED))
 
     assert area.status_display == "Decision Created"
 

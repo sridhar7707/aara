@@ -3,6 +3,7 @@ import datetime
 
 import pytest
 
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.repositories.projection_repository import ProjectionRepository
 from sentinel_engine.projections.decision_projection import DecisionProjection
 
@@ -12,7 +13,7 @@ def _make_projection(decision_id="dec-001", **overrides):
         decision_id=decision_id,
         symbol="AAPL",
         action="BUY",
-        status="DECISION_CREATED",
+        status=DecisionState.DECISION_CREATED,
         confidence=0.78,
         evidence_reference="evidence-001",
         risk_reference="risk-001",
@@ -57,13 +58,13 @@ def test_save_then_get_returns_the_saved_projection():
 
 def test_save_overwrites_the_projection_for_the_same_decision_id():
     repository = _InMemoryProjectionRepository()
-    original = _make_projection(status="DECISION_CREATED")
-    updated = _make_projection(status="DECISION_EXECUTED")
+    original = _make_projection(status=DecisionState.DECISION_CREATED)
+    updated = _make_projection(status=DecisionState.APPROVAL_RECORDED)
 
     repository.save(original)
     repository.save(updated)
 
-    assert repository.get("dec-001").status == "DECISION_EXECUTED"
+    assert repository.get("dec-001").status == DecisionState.APPROVAL_RECORDED
 
 
 def test_incomplete_projection_repository_subclass_cannot_be_instantiated():

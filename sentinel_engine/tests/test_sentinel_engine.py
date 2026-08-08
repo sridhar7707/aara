@@ -6,9 +6,11 @@ from sentinel_engine.services.decision_service import DecisionService
 from sentinel_engine.services.evidence_service import EvidenceService
 from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.domain.decision import Decision
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.evidence.evidence import Evidence
 from sentinel_engine.governance.policy import Policy
 from sentinel_engine.governance.approval import Approval
+from sentinel_engine.governance.approval_status import ApprovalStatus
 from sentinel_engine.events.event_types import EventType
 from sentinel_engine.ledger.ledger import LedgerStore
 from sentinel_engine.repositories.ledger_repository import LedgerRepository
@@ -78,7 +80,7 @@ def _make_approval(**overrides):
     defaults = dict(
         approval_id="apr-001",
         decision_id="dec-001",
-        status="APPROVED",
+        status=ApprovalStatus.APPROVED,
         approved_by="risk_officer",
         timestamp=datetime.datetime(2026, 8, 4, 12, 0, 0),
     )
@@ -110,7 +112,7 @@ def test_create_decision_delegates_to_decision_service():
     assert event.event_type == EventType.DECISION_CREATED
     projection = engine.get_decision_projection("dec-001")
     assert projection is not None
-    assert projection.status == EventType.DECISION_CREATED.value
+    assert projection.status == DecisionState.DECISION_CREATED
 
 
 def test_get_decision_projection_returns_none_for_unknown_decision():

@@ -2,6 +2,8 @@
 import datetime
 
 from sentinel_engine.services.governance_service import GovernanceService
+from sentinel_engine.domain.decision_state import DecisionState
+from sentinel_engine.governance.approval_status import ApprovalStatus
 from sentinel_engine.governance.policy import Policy
 from sentinel_engine.governance.approval import Approval
 from sentinel_engine.events.event_types import EventType
@@ -48,7 +50,7 @@ def _make_approval(**overrides):
     defaults = dict(
         approval_id="apr-001",
         decision_id="dec-001",
-        status="APPROVED",
+        status=ApprovalStatus.APPROVED,
         approved_by="risk_officer",
         timestamp=datetime.datetime(2026, 8, 4, 12, 0, 0),
     )
@@ -61,7 +63,7 @@ def _make_projection(**overrides):
         decision_id="dec-001",
         symbol="AAPL",
         action="BUY",
-        status=EventType.DECISION_CREATED.value,
+        status=DecisionState.DECISION_CREATED,
         confidence=0.78,
         evidence_reference="evidence-001",
         risk_reference="risk-001",
@@ -132,7 +134,7 @@ def test_record_approval_writes_approval_recorded_event_with_correct_payload():
     assert events[0].event_type == EventType.APPROVAL_RECORDED
     assert events[0].payload["decision_id"] == "dec-001"
     assert events[0].payload["approval_id"] == "apr-001"
-    assert events[0].payload["status"] == "APPROVED"
+    assert events[0].payload["status"] == ApprovalStatus.APPROVED
     assert events[0].payload["approved_by"] == "risk_officer"
 
 
@@ -155,7 +157,7 @@ def test_record_approval_advances_projection_status_when_projection_exists():
 
     projection = projection_repository.get("dec-001")
     assert projection is not None
-    assert projection.status == EventType.APPROVAL_RECORDED.value
+    assert projection.status == DecisionState.APPROVAL_RECORDED
     assert projection.updated_at == approval.timestamp
     # Unrelated fields preserved by the read-modify-write, not overwritten.
     assert projection.symbol == "AAPL"
@@ -209,7 +211,7 @@ def test_evaluate_policy_advances_projection_status_when_projection_exists():
 
     projection = projection_repository.get("dec-001")
     assert projection is not None
-    assert projection.status == EventType.GOVERNANCE_EVALUATED.value
+    assert projection.status == DecisionState.GOVERNANCE_EVALUATED
     # Unrelated fields preserved by the read-modify-write, not overwritten.
     assert projection.symbol == "AAPL"
     assert projection.action == "BUY"

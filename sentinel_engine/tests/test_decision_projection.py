@@ -4,6 +4,7 @@ import dataclasses
 
 import pytest
 
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.projections.decision_projection import DecisionProjection
 
 
@@ -12,7 +13,7 @@ def _make_projection(**overrides):
         decision_id="dec-001",
         symbol="AAPL",
         action="BUY",
-        status="DECISION_CREATED",
+        status=DecisionState.DECISION_CREATED,
         confidence=0.78,
         evidence_reference="evidence-001",
         risk_reference="risk-001",
@@ -27,7 +28,7 @@ def test_decision_projection_can_be_created_with_required_fields():
     assert projection.decision_id == "dec-001"
     assert projection.symbol == "AAPL"
     assert projection.action == "BUY"
-    assert projection.status == "DECISION_CREATED"
+    assert projection.status == DecisionState.DECISION_CREATED
     assert projection.confidence == 0.78
     assert projection.evidence_reference == "evidence-001"
     assert projection.risk_reference == "risk-001"
@@ -41,7 +42,7 @@ def test_decision_projection_is_a_dataclass():
 def test_decision_projection_is_immutable():
     projection = _make_projection()
     with pytest.raises(dataclasses.FrozenInstanceError):
-        projection.status = "DECISION_EXECUTED"
+        projection.status = DecisionState.APPROVAL_RECORDED
 
 
 def test_decision_projection_requires_all_fields():

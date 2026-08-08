@@ -14,6 +14,8 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from sentinel_engine.application.investor_workspace import InvestorWorkspaceFacade
+from sentinel_engine.domain.decision_state import DecisionState
+from sentinel_engine.governance.approval_status import ApprovalStatus
 from sentinel_engine.queries.decision_center_query import DecisionCenterView
 from sentinel_engine.queries.morning_brief_query import MorningBrief
 
@@ -21,14 +23,14 @@ from sentinel_engine.queries.morning_brief_query import MorningBrief
 @dataclass(frozen=True)
 class RecentActivityRow:
     decision_id: str
-    status: str
+    status: DecisionState
     last_activity_at: datetime
 
 
 @dataclass(frozen=True)
 class MorningBriefView:
     total_decisions: int
-    status_summary: Dict[str, int]
+    status_summary: Dict[DecisionState, int]
     recent_activity_rows: List[RecentActivityRow]
 
 
@@ -50,7 +52,7 @@ class GovernanceSummaryRow:
 @dataclass(frozen=True)
 class ApprovalSummaryRow:
     approval_id: str
-    status: str
+    status: ApprovalStatus
     approved_by: str
     approved_at: datetime
 
@@ -64,7 +66,7 @@ class TimelineRow:
 @dataclass(frozen=True)
 class DecisionCenterViewModel:
     decision_id: str
-    lifecycle_status: str
+    lifecycle_status: DecisionState
     symbol: Optional[str]
     action: Optional[str]
     evidence_rows: List[EvidenceRow]

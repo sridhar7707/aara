@@ -8,8 +8,10 @@ from sentinel_engine.domain.decision import Decision
 from sentinel_engine.evidence.evidence import Evidence
 from sentinel_engine.governance.policy import Policy
 from sentinel_engine.governance.approval import Approval
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.events.event import Event
 from sentinel_engine.events.event_types import EventType
+from sentinel_engine.governance.approval_status import ApprovalStatus
 from sentinel_engine.ledger.ledger import LedgerStore
 from sentinel_engine.projections.decision_projection import DecisionProjection
 from sentinel_engine.repositories.ledger_repository import LedgerRepository
@@ -80,7 +82,7 @@ def _make_approval(**overrides):
     defaults = dict(
         approval_id="apr-001",
         decision_id="dec-001",
-        status="APPROVED",
+        status=ApprovalStatus.APPROVED,
         approved_by="risk_officer",
         timestamp=datetime.datetime(2026, 8, 6, 12, 2, 0),
     )
@@ -146,10 +148,10 @@ def test_get_brief_summarizes_decisions_across_lifecycle_states():
 
     assert brief.total_decisions == 4
     assert brief.decisions_by_status == {
-        EventType.DECISION_CREATED.value: 1,
-        EventType.EVIDENCE_ATTACHED.value: 1,
-        EventType.GOVERNANCE_EVALUATED.value: 1,
-        EventType.APPROVAL_RECORDED.value: 1,
+        DecisionState.DECISION_CREATED: 1,
+        DecisionState.EVIDENCE_ATTACHED: 1,
+        DecisionState.GOVERNANCE_EVALUATED: 1,
+        DecisionState.APPROVAL_RECORDED: 1,
     }
     # Pending governance: dec-001 (created only) and dec-002 (evidence only).
     assert brief.pending_governance_count == 2
@@ -165,7 +167,7 @@ def test_get_brief_orders_recent_activity_by_created_at_not_insertion_order():
             decision_id="dec-early",
             symbol="AAPL",
             action="BUY",
-            status=EventType.DECISION_CREATED.value,
+            status=DecisionState.DECISION_CREATED,
             confidence=0.78,
             evidence_reference="evidence-001",
             risk_reference="risk-001",
@@ -177,7 +179,7 @@ def test_get_brief_orders_recent_activity_by_created_at_not_insertion_order():
             decision_id="dec-late",
             symbol="MSFT",
             action="BUY",
-            status=EventType.DECISION_CREATED.value,
+            status=DecisionState.DECISION_CREATED,
             confidence=0.65,
             evidence_reference="evidence-002",
             risk_reference="risk-002",
@@ -249,7 +251,7 @@ def test_get_brief_ignores_events_for_decisions_without_a_saved_projection():
     brief = query.get_brief()
 
     assert brief.total_decisions == 1
-    assert brief.decisions_by_status == {EventType.DECISION_CREATED.value: 1}
+    assert brief.decisions_by_status == {DecisionState.DECISION_CREATED: 1}
     assert [item.decision_id for item in brief.recent_decisions] == ["dec-001"]
     assert brief.pending_governance_count == 1
     assert brief.pending_approval_count == 1
@@ -274,8 +276,8 @@ def test_get_brief_keeps_two_known_decisions_independently_counted():
 
     assert brief.total_decisions == 2
     assert brief.decisions_by_status == {
-        EventType.DECISION_CREATED.value: 1,
-        EventType.APPROVAL_RECORDED.value: 1,
+        DecisionState.DECISION_CREATED: 1,
+        DecisionState.APPROVAL_RECORDED: 1,
     }
     assert brief.pending_governance_count == 1
     assert brief.pending_approval_count == 1

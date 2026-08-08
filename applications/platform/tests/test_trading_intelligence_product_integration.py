@@ -41,6 +41,7 @@ from applications.trading_intelligence.tests.fakes import InMemoryProjectionRepo
 from applications.trading_intelligence.ui.decision_center.controller import (
     DecisionCenterController,
 )
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.projections.decision_projection import DecisionProjection
 from sentinel_engine.repositories.projection_repository import ProjectionRepository
 
@@ -213,7 +214,7 @@ def test_navigation_item_can_be_used_to_construct_decision_center_experience():
             decision_id="dec-001",
             symbol="AAPL",
             action="BUY",
-            status="DECISION_CREATED",
+            status=DecisionState.DECISION_CREATED,
             confidence=0.78,
             evidence_reference="evidence-001",
             risk_reference="risk-001",
@@ -247,7 +248,7 @@ def test_navigation_driven_construction_performs_no_writes():
                     decision_id="dec-001",
                     symbol="AAPL",
                     action="BUY",
-                    status="DECISION_CREATED",
+                    status=DecisionState.DECISION_CREATED,
                     confidence=0.78,
                     evidence_reference="evidence-001",
                     risk_reference="risk-001",

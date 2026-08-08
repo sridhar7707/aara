@@ -1,6 +1,8 @@
 """Tests for sentinel_engine.presentation.investor_presenter.InvestorPresenter."""
 import datetime
 
+from sentinel_engine.domain.decision_state import DecisionState
+from sentinel_engine.governance.approval_status import ApprovalStatus
 from sentinel_engine.presentation.investor_presenter import (
     DecisionCenterViewModel,
     InvestorPresenter,
@@ -98,8 +100,8 @@ def test_get_morning_brief_view_calls_facade_and_maps_fields():
     now = datetime.datetime(2026, 8, 6, 12, 0, 0)
     brief = _MorningBrief(
         total_decisions=3,
-        decisions_by_status={"DECISION_CREATED": 1, "APPROVAL_RECORDED": 2},
-        recent_decisions=[_RecentDecisionActivity("dec-001", "APPROVAL_RECORDED", now)],
+        decisions_by_status={DecisionState.DECISION_CREATED: 1, DecisionState.APPROVAL_RECORDED: 2},
+        recent_decisions=[_RecentDecisionActivity("dec-001", DecisionState.APPROVAL_RECORDED, now)],
     )
     facade = _FakeWorkspaceFacade(morning_brief_result=brief)
     presenter = InvestorPresenter(facade)
@@ -109,10 +111,10 @@ def test_get_morning_brief_view_calls_facade_and_maps_fields():
     assert facade.morning_brief_calls == 1
     assert isinstance(view, MorningBriefView)
     assert view.total_decisions == 3
-    assert view.status_summary == {"DECISION_CREATED": 1, "APPROVAL_RECORDED": 2}
+    assert view.status_summary == {DecisionState.DECISION_CREATED: 1, DecisionState.APPROVAL_RECORDED: 2}
     assert len(view.recent_activity_rows) == 1
     assert view.recent_activity_rows[0].decision_id == "dec-001"
-    assert view.recent_activity_rows[0].status == "APPROVAL_RECORDED"
+    assert view.recent_activity_rows[0].status == DecisionState.APPROVAL_RECORDED
     assert view.recent_activity_rows[0].last_activity_at == now
 
 
@@ -124,7 +126,7 @@ def test_get_decision_center_view_passes_decision_id_and_maps_fields():
 
     decision_center_view = _DecisionCenterView(
         decision_id="dec-001",
-        lifecycle_status="APPROVAL_RECORDED",
+        lifecycle_status=DecisionState.APPROVAL_RECORDED,
         symbol="AAPL",
         action="BUY",
         evidence=[
@@ -134,7 +136,7 @@ def test_get_decision_center_view_passes_decision_id_and_maps_fields():
             _GovernanceEvaluationSummary("pol-001", True, evaluated_at)
         ],
         approvals=[
-            _ApprovalSummary("apr-001", "APPROVED", "risk_officer", approved_at)
+            _ApprovalSummary("apr-001", ApprovalStatus.APPROVED, "risk_officer", approved_at)
         ],
         timeline=[
             _TimelineEvent("DECISION_CREATED", created_at),
@@ -151,7 +153,7 @@ def test_get_decision_center_view_passes_decision_id_and_maps_fields():
     assert facade.received_decision_id == "dec-001"
     assert isinstance(view, DecisionCenterViewModel)
     assert view.decision_id == "dec-001"
-    assert view.lifecycle_status == "APPROVAL_RECORDED"
+    assert view.lifecycle_status == DecisionState.APPROVAL_RECORDED
     assert view.symbol == "AAPL"
     assert view.action == "BUY"
 
@@ -168,7 +170,7 @@ def test_get_decision_center_view_passes_decision_id_and_maps_fields():
 
     assert view.approval_summary is not None
     assert view.approval_summary.approval_id == "apr-001"
-    assert view.approval_summary.status == "APPROVED"
+    assert view.approval_summary.status == ApprovalStatus.APPROVED
     assert view.approval_summary.approved_by == "risk_officer"
     assert view.approval_summary.approved_at == approved_at
 

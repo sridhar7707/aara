@@ -2,6 +2,7 @@
 import datetime
 
 from sentinel_engine.services.evidence_service import EvidenceService
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.evidence.evidence import Evidence
 from sentinel_engine.events.event_types import EventType
 from sentinel_engine.ledger.ledger import LedgerStore
@@ -49,7 +50,7 @@ def _make_projection(**overrides):
         decision_id="dec-001",
         symbol="AAPL",
         action="BUY",
-        status=EventType.DECISION_CREATED.value,
+        status=DecisionState.DECISION_CREATED,
         confidence=0.78,
         evidence_reference="evidence-001",
         risk_reference="risk-001",
@@ -141,7 +142,7 @@ def test_associate_evidence_advances_projection_status_when_projection_exists():
 
     projection = projection_repository.get("dec-001")
     assert projection is not None
-    assert projection.status == EventType.EVIDENCE_ATTACHED.value
+    assert projection.status == DecisionState.EVIDENCE_ATTACHED
     assert projection.updated_at == evidence.collected_at
     # Unrelated fields preserved by the read-modify-write, not overwritten.
     assert projection.symbol == "AAPL"

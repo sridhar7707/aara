@@ -4,6 +4,8 @@ import dataclasses
 
 import pytest
 
+from sentinel_engine.domain.decision_state import DecisionState
+
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
 from applications.trading_intelligence.projections.decision_view import DecisionView
 
@@ -13,7 +15,7 @@ def _make_contract(**overrides):
         decision_id="dec-001",
         symbol="AAPL",
         action="BUY",
-        status="DECISION_CREATED",
+        status=DecisionState.DECISION_CREATED,
         confidence=0.78,
         evidence_reference="evidence-001",
         risk_reference="risk-001",
@@ -30,7 +32,7 @@ def test_decision_view_is_a_dataclass():
 def test_decision_view_is_immutable():
     view = DecisionView.from_contract(_make_contract())
     with pytest.raises(dataclasses.FrozenInstanceError):
-        view.status = "DECISION_EXECUTED"
+        view.status = DecisionState.APPROVAL_RECORDED
 
 
 def test_from_contract_maps_fields_correctly():
@@ -41,7 +43,7 @@ def test_from_contract_maps_fields_correctly():
     assert view.decision_id == "dec-001"
     assert view.symbol == "AAPL"
     assert view.action == "BUY"
-    assert view.status == "DECISION_CREATED"
+    assert view.status == DecisionState.DECISION_CREATED
     assert view.confidence == 0.78
     assert view.updated_at == datetime.datetime(2026, 8, 4, 12, 0, 0)
 

@@ -16,6 +16,7 @@ CQRS boundary.
 from dataclasses import dataclass
 from typing import List, Optional
 
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.events.event import Event
 from sentinel_engine.events.event_types import EventType
 from sentinel_engine.queries.decision_query import (
@@ -31,7 +32,7 @@ from sentinel_engine.repositories.projection_repository import ProjectionReposit
 @dataclass(frozen=True)
 class DecisionCenterView:
     decision_id: str
-    lifecycle_status: str
+    lifecycle_status: DecisionState
     symbol: Optional[str]
     action: Optional[str]
     evidence: List[EvidenceSummary]

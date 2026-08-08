@@ -8,6 +8,7 @@ import uuid
 from typing import Optional
 
 from sentinel_engine.domain.decision import Decision
+from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.events.event import Event
 from sentinel_engine.events.event_types import EventType
 from sentinel_engine.projections.decision_projection import DecisionProjection
@@ -44,7 +45,7 @@ class DecisionService:
             decision_id=decision.decision_id,
             symbol=decision.symbol,
             action=decision.action,
-            status=EventType.DECISION_CREATED.value,
+            status=DecisionState.DECISION_CREATED,
             confidence=decision.confidence,
             evidence_reference=decision.evidence_reference,
             risk_reference=decision.risk_reference,
