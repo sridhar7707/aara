@@ -18,6 +18,7 @@ from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionCenterScreen,
     DecisionDetailArea,
     DecisionListArea,
+    ReadStatus,
 )
 
 
@@ -208,6 +209,79 @@ def test_render_detail_handles_missing_decision():
     result = ui._render_detail("missing-decision")
 
     assert result == ("-", "-", "-", "-", "-", [], [], [])
+
+
+def test_render_detail_shows_a_message_when_the_decision_read_fails():
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=None, decision_status=ReadStatus.ERROR)
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    (
+        symbol, action, status, confidence, updated,
+        evidence_rows, governance_rows, approval_rows,
+    ) = ui._render_detail("dec-001")
+
+    assert symbol == "Unable to load this decision."
+    assert action == "-"
+    assert status == "-"
+    assert confidence == "-"
+    assert updated == "-"
+    assert evidence_rows == []
+    assert governance_rows == []
+    assert approval_rows == []
+
+
+def test_render_detail_shows_a_message_when_evidence_read_fails_but_decision_still_renders():
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(
+            decision=view, evidence=(), evidence_status=ReadStatus.ERROR,
+        )
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    (
+        symbol, action, status, confidence, updated,
+        evidence_rows, governance_rows, approval_rows,
+    ) = ui._render_detail("dec-001")
+
+    assert symbol == "AAPL"
+    assert evidence_rows == [["Evidence is temporarily unavailable.", "-", "-"]]
+    assert governance_rows == []
+    assert approval_rows == []
+
+
+def test_render_detail_shows_a_message_when_governance_read_fails():
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(
+            decision=view, governance=(), governance_status=ReadStatus.ERROR,
+        )
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_rest, evidence_rows, governance_rows, approval_rows = ui._render_detail("dec-001")
+
+    assert governance_rows == [["Governance information is temporarily unavailable.", "-", "-"]]
+    assert evidence_rows == []
+    assert approval_rows == []
+
+
+def test_render_detail_shows_a_message_when_approvals_read_fails():
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(
+            decision=view, approvals=(), approvals_status=ReadStatus.ERROR,
+        )
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_rest, evidence_rows, governance_rows, approval_rows = ui._render_detail("dec-001")
+
+    assert approval_rows == [["Approval information is temporarily unavailable.", "-", "-"]]
+    assert evidence_rows == []
+    assert governance_rows == []
 
 
 def test_row_select_calls_controller_with_the_id_from_the_selected_row():

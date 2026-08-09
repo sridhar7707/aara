@@ -8,12 +8,22 @@ docs/products/AARA_TRADING_INTELLIGENCE_DECISION_CENTER_DESIGN.md's layout
 (Section 4). No sentinel_engine, bot, dashboard, database, or ledger import.
 """
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import List, Optional, Tuple
 
 from applications.trading_intelligence.projections.approval_entry import ApprovalEntry
 from applications.trading_intelligence.projections.decision_view import DecisionView
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
+
+
+class ReadStatus(Enum):
+    """Distinguishes a successful read (possibly empty) from a read that
+    could not be completed. AVAILABLE-vs-EMPTY is never ambiguous here --
+    an empty tuple already means that -- so this only needs two members,
+    not a three-way split."""
+    OK = "ok"
+    ERROR = "error"
 
 
 @dataclass(frozen=True)
@@ -32,9 +42,13 @@ class DecisionListArea:
 @dataclass(frozen=True)
 class DecisionDetailArea:
     decision: Optional[DecisionView]
+    decision_status: ReadStatus = ReadStatus.OK
     evidence: Tuple[EvidenceEntry, ...] = field(default=())
+    evidence_status: ReadStatus = ReadStatus.OK
     governance: Tuple[GovernanceEntry, ...] = field(default=())
+    governance_status: ReadStatus = ReadStatus.OK
     approvals: Tuple[ApprovalEntry, ...] = field(default=())
+    approvals_status: ReadStatus = ReadStatus.OK
 
     @property
     def is_empty(self) -> bool:

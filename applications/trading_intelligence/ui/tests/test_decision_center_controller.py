@@ -2,6 +2,7 @@
 import datetime
 
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
+from applications.trading_intelligence.contracts.read_error import TradingIntelligenceReadError
 from applications.trading_intelligence.projections.approval_entry import ApprovalEntry, ApprovalStatus
 from applications.trading_intelligence.projections.decision_view import DecisionState
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
@@ -21,6 +22,7 @@ from applications.trading_intelligence.services.decision_query_service import (
 from applications.trading_intelligence.ui.decision_center.controller import (
     DecisionCenterController,
 )
+from applications.trading_intelligence.ui.decision_center.screen import ReadStatus
 
 
 class _InMemoryDecisionSource(DecisionSource):
@@ -158,6 +160,128 @@ def test_load_decision_detail_handles_missing_decision():
     detail_area = controller.load_decision_detail("missing-decision")
 
     assert detail_area.is_empty is True
+
+
+def test_load_decision_detail_missing_decision_is_ok_not_error():
+    """EMPTY (not-found) must stay distinguishable from ERROR."""
+    controller = _make_controller()
+
+    detail_area = controller.load_decision_detail("does-not-exist")
+
+    assert detail_area.decision is None
+    assert detail_area.decision_status is ReadStatus.OK
+
+
+class _BoomDecisionSource(DecisionSource):
+    def get_decision(self, decision_id):
+        raise TradingIntelligenceReadError("boom")
+
+    def list_decisions(self, decision_ids):
+        raise AssertionError("must not be called by load_decision_detail")
+
+
+class _StrictEvidenceSource(EvidenceSource):
+    def get_evidence(self, decision_id):
+        raise AssertionError("evidence must not be queried when decision read fails")
+
+
+class _StrictGovernanceSource(GovernanceSource):
+    def get_governance(self, decision_id):
+        raise AssertionError("governance must not be queried when decision read fails")
+
+    def get_approvals(self, decision_id):
+        raise AssertionError("approvals must not be queried when decision read fails")
+
+
+class _BoomEvidenceSource(EvidenceSource):
+    def get_evidence(self, decision_id):
+        raise TradingIntelligenceReadError("boom")
+
+
+class _BoomGovernanceSource(GovernanceSource):
+    def __init__(self, fail_governance=False, fail_approvals=False):
+        self._fail_governance = fail_governance
+        self._fail_approvals = fail_approvals
+
+    def get_governance(self, decision_id):
+        if self._fail_governance:
+            raise TradingIntelligenceReadError("boom")
+        return []
+
+    def get_approvals(self, decision_id):
+        if self._fail_approvals:
+            raise TradingIntelligenceReadError("boom")
+        return []
+
+
+def test_load_decision_detail_reports_decision_error_without_querying_evidence_or_governance():
+    controller = DecisionCenterController(
+        DecisionQueryService(_BoomDecisionSource()),
+        DecisionEvidenceQueryService(_StrictEvidenceSource()),
+        DecisionGovernanceQueryService(_StrictGovernanceSource()),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.decision is None
+    assert detail.decision_status is ReadStatus.ERROR
+
+
+def test_load_decision_detail_reports_evidence_error_but_keeps_decision_and_governance():
+    contract = _make_contract()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(_BoomEvidenceSource()),
+        DecisionGovernanceQueryService(
+            _InMemoryGovernanceSource(
+                {"dec-001": [_make_governance_entry()]},
+                {"dec-001": [_make_approval_entry()]},
+            )
+        ),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.decision is not None
+    assert detail.decision_status is ReadStatus.OK
+    assert detail.evidence == ()
+    assert detail.evidence_status is ReadStatus.ERROR
+    assert detail.governance == (_make_governance_entry(),)
+    assert detail.governance_status is ReadStatus.OK
+    assert detail.approvals == (_make_approval_entry(),)
+    assert detail.approvals_status is ReadStatus.OK
+
+
+def test_load_decision_detail_reports_governance_error_independently_of_approvals():
+    contract = _make_contract()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_BoomGovernanceSource(fail_governance=True)),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.governance == ()
+    assert detail.governance_status is ReadStatus.ERROR
+    assert detail.approvals == ()
+    assert detail.approvals_status is ReadStatus.OK
+
+
+def test_load_decision_detail_reports_approvals_error_independently_of_governance():
+    contract = _make_contract()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_BoomGovernanceSource(fail_approvals=True)),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.approvals == ()
+    assert detail.approvals_status is ReadStatus.ERROR
+    assert detail.governance == ()
+    assert detail.governance_status is ReadStatus.OK
 
 
 def test_load_decisions_with_multiple_decisions_returns_them_all():

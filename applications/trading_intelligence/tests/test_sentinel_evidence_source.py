@@ -10,7 +10,10 @@ from sentinel_engine.repositories.projection_repository import ProjectionReposit
 from sentinel_engine.services.decision_service import DecisionService
 from sentinel_engine.services.evidence_service import EvidenceService
 
+import pytest
+
 from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
+from applications.trading_intelligence.contracts.read_error import TradingIntelligenceReadError
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.services.decision_evidence_query_service import EvidenceSource
 
@@ -71,6 +74,20 @@ def _make_wiring():
     decision_query = DecisionQuery(ledger_repository, projection_repository)
     source = SentinelEvidenceSource(decision_query)
     return decision_service, evidence_service, source
+
+
+class _BoomDecisionQuery:
+    def get_decision_timeline(self, decision_id):
+        raise TimeoutError("simulated infrastructure failure")
+
+
+def test_get_evidence_translates_decision_query_exceptions():
+    source = SentinelEvidenceSource(_BoomDecisionQuery())
+
+    with pytest.raises(TradingIntelligenceReadError) as excinfo:
+        source.get_evidence("dec-001")
+
+    assert isinstance(excinfo.value.__cause__, TimeoutError)
 
 
 def test_sentinel_evidence_source_is_an_evidence_source():

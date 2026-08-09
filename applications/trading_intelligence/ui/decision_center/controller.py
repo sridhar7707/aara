@@ -10,9 +10,20 @@ TRADING_INTELLIGENCE_APPLICATION_ARCHITECTURE.md's query/read boundary.
 Not connected to production data: whatever DecisionQueryService/DecisionSource
 is injected here determines the data source, and no concrete real source is
 wired anywhere in this codebase yet.
+
+load_decision_detail() catches TradingIntelligenceReadError (contracts/
+read_error.py) independently around each of its three sequential calls --
+decision, evidence, governance, approvals -- so a failure in one concern
+never prevents the others from being read, and never escapes as a raw
+exception into the UI. Each failure is reported as an explicit
+ReadStatus.ERROR on the returned DecisionDetailArea rather than being
+conflated with "no data" (empty tuple/None). load_decisions()/load_screen()'s
+list-loading path is unchanged -- list_decisions() failure semantics are
+deliberately out of scope for this slice.
 """
 from typing import List, Optional
 
+from applications.trading_intelligence.contracts.read_error import TradingIntelligenceReadError
 from applications.trading_intelligence.services.decision_evidence_query_service import (
     DecisionEvidenceQueryService,
 )
@@ -24,6 +35,7 @@ from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionCenterScreen,
     DecisionDetailArea,
     DecisionListArea,
+    ReadStatus,
 )
 
 
@@ -43,14 +55,39 @@ class DecisionCenterController:
         return DecisionListArea(decisions=views)
 
     def load_decision_detail(self, decision_id: str) -> DecisionDetailArea:
-        view = self._query_service.get_decision_view(decision_id)
+        try:
+            view = self._query_service.get_decision_view(decision_id)
+        except TradingIntelligenceReadError:
+            return DecisionDetailArea(decision=None, decision_status=ReadStatus.ERROR)
         if view is None:
             return DecisionDetailArea(decision=None)
-        evidence = tuple(self._evidence_query_service.get_evidence(decision_id))
-        governance = tuple(self._governance_query_service.get_governance(decision_id))
-        approvals = tuple(self._governance_query_service.get_approvals(decision_id))
+
+        try:
+            evidence = tuple(self._evidence_query_service.get_evidence(decision_id))
+            evidence_status = ReadStatus.OK
+        except TradingIntelligenceReadError:
+            evidence = ()
+            evidence_status = ReadStatus.ERROR
+
+        try:
+            governance = tuple(self._governance_query_service.get_governance(decision_id))
+            governance_status = ReadStatus.OK
+        except TradingIntelligenceReadError:
+            governance = ()
+            governance_status = ReadStatus.ERROR
+
+        try:
+            approvals = tuple(self._governance_query_service.get_approvals(decision_id))
+            approvals_status = ReadStatus.OK
+        except TradingIntelligenceReadError:
+            approvals = ()
+            approvals_status = ReadStatus.ERROR
+
         return DecisionDetailArea(
-            decision=view, evidence=evidence, governance=governance, approvals=approvals,
+            decision=view,
+            evidence=evidence, evidence_status=evidence_status,
+            governance=governance, governance_status=governance_status,
+            approvals=approvals, approvals_status=approvals_status,
         )
 
     def load_screen(

@@ -12,6 +12,14 @@ list_decisions() takes an explicit decision_ids list rather than enumerating
 with no enumeration method, and this adapter must not add one to Sentinel
 Engine. See DecisionSource's own docstring for the same constraint stated at
 the abstraction level.
+
+get_decision() translates ProjectionRepository infrastructure exceptions into
+TradingIntelligenceReadError (contracts/read_error.py) -- ProjectionRepository
+is an ABC with no documented exception contract, so a future persistent
+backend may raise anything. list_decisions() is deliberately left
+untranslated in this slice (Decision List/top-table read semantics are a
+separate, later design decision); see this module's own tests for the test
+that locks that scope boundary in.
 """
 from typing import List, Optional
 
@@ -19,6 +27,7 @@ from sentinel_engine.projections.decision_projection import DecisionProjection
 from sentinel_engine.repositories.projection_repository import ProjectionRepository
 
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
+from applications.trading_intelligence.contracts.read_error import TradingIntelligenceReadError
 from applications.trading_intelligence.services.decision_query_service import DecisionSource
 
 
@@ -27,7 +36,12 @@ class SentinelProjectionDecisionSource(DecisionSource):
         self._projection_repository = projection_repository
 
     def get_decision(self, decision_id: str) -> Optional[DecisionContract]:
-        projection = self._projection_repository.get(decision_id)
+        try:
+            projection = self._projection_repository.get(decision_id)
+        except Exception as exc:
+            raise TradingIntelligenceReadError(
+                f"Failed to read decision {decision_id!r}."
+            ) from exc
         if projection is None:
             return None
         return self._to_contract(projection)

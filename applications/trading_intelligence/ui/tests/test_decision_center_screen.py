@@ -12,6 +12,7 @@ from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionCenterScreen,
     DecisionDetailArea,
     DecisionListArea,
+    ReadStatus,
 )
 
 
@@ -181,6 +182,60 @@ def test_decision_detail_area_with_governance_and_approvals_still_formats_core_d
 
     assert area.confidence_display == "78%"
     assert area.status_display == "Decision Created"
+
+
+def test_decision_detail_area_defaults_every_read_status_to_ok():
+    area = DecisionDetailArea(decision=None)
+
+    assert area.decision_status is ReadStatus.OK
+    assert area.evidence_status is ReadStatus.OK
+    assert area.governance_status is ReadStatus.OK
+    assert area.approvals_status is ReadStatus.OK
+
+
+def test_missing_decision_and_errored_decision_are_distinguishable():
+    missing = DecisionDetailArea(decision=None)
+    errored = DecisionDetailArea(decision=None, decision_status=ReadStatus.ERROR)
+
+    assert missing.decision_status is ReadStatus.OK
+    assert errored.decision_status is ReadStatus.ERROR
+    assert missing.decision_status != errored.decision_status
+
+
+def test_empty_evidence_and_errored_evidence_are_distinguishable():
+    empty = DecisionDetailArea(decision=_make_view(), evidence=())
+    errored = DecisionDetailArea(
+        decision=_make_view(), evidence=(), evidence_status=ReadStatus.ERROR
+    )
+
+    assert empty.evidence == () and empty.evidence_status is ReadStatus.OK
+    assert errored.evidence == () and errored.evidence_status is ReadStatus.ERROR
+
+
+def test_empty_governance_and_errored_governance_are_distinguishable():
+    empty = DecisionDetailArea(decision=_make_view(), governance=())
+    errored = DecisionDetailArea(
+        decision=_make_view(), governance=(), governance_status=ReadStatus.ERROR
+    )
+
+    assert empty.governance_status is ReadStatus.OK
+    assert errored.governance_status is ReadStatus.ERROR
+
+
+def test_empty_approvals_and_errored_approvals_are_distinguishable():
+    empty = DecisionDetailArea(decision=_make_view(), approvals=())
+    errored = DecisionDetailArea(
+        decision=_make_view(), approvals=(), approvals_status=ReadStatus.ERROR
+    )
+
+    assert empty.approvals_status is ReadStatus.OK
+    assert errored.approvals_status is ReadStatus.ERROR
+
+
+def test_decision_detail_area_read_status_fields_are_immutable():
+    area = DecisionDetailArea(decision=None)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        area.decision_status = ReadStatus.ERROR
 
 
 def test_decision_center_screen_composes_list_and_detail_areas():

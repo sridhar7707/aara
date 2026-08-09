@@ -29,18 +29,26 @@ Governance/Approval tables: DecisionDetailArea.governance/.approvals carry
 plain GovernanceEntry/ApprovalEntry tuples, formatted into
 List[List[str]] rows the same way as evidence -- read-only, no write
 component exists in either table.
+
+Read-error rendering: when DecisionDetailArea.decision_status/evidence_status/
+governance_status/approvals_status (screen.py's ReadStatus) is ERROR, this
+module renders a short fixed user-facing message into the same
+textbox/dataframe outputs used for the success path -- no new components, no
+traceback, no repository/exception details. A decision-read error replaces
+all detail fields with a single message (the whole detail can't be trusted,
+per the controller's own contract); an evidence/governance/approval-only
+error leaves the other, successfully-read fields alone and only replaces
+that one table with a single explanatory row.
 """
-from typing import List, Sequence, Tuple
+from typing import List, Tuple
 
 import gradio as gr
 
-from applications.trading_intelligence.projections.approval_entry import ApprovalEntry
-from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
-from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
 from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionDetailArea,
     DecisionListArea,
+    ReadStatus,
 )
 
 _LIST_HEADERS = ["Decision ID", "Symbol", "Action", "Status", "Confidence"]
@@ -48,6 +56,14 @@ _EVIDENCE_HEADERS = ["Evidence Type", "Source", "Attached At"]
 _GOVERNANCE_HEADERS = ["Policy ID", "Enabled", "Evaluated At"]
 _APPROVAL_HEADERS = ["Status", "Approved By", "Approved At"]
 _MISSING_VALUE = "-"
+_DECISION_READ_ERROR_MESSAGE = "Unable to load this decision."
+_EVIDENCE_READ_ERROR_ROW = [["Evidence is temporarily unavailable.", _MISSING_VALUE, _MISSING_VALUE]]
+_GOVERNANCE_READ_ERROR_ROW = [
+    ["Governance information is temporarily unavailable.", _MISSING_VALUE, _MISSING_VALUE]
+]
+_APPROVAL_READ_ERROR_ROW = [
+    ["Approval information is temporarily unavailable.", _MISSING_VALUE, _MISSING_VALUE]
+]
 
 _DetailValues = Tuple[
     str, str, str, str, str, List[List[str]], List[List[str]], List[List[str]]
@@ -141,6 +157,8 @@ class DecisionCenterUI:
 
     @staticmethod
     def _format_detail(detail_area: DecisionDetailArea) -> _DetailValues:
+        if detail_area.decision_status is ReadStatus.ERROR:
+            return DecisionCenterUI._decision_read_error_detail()
         if detail_area.is_empty:
             return DecisionCenterUI._empty_detail()
         decision = detail_area.decision
@@ -150,39 +168,52 @@ class DecisionCenterUI:
             detail_area.status_display,
             detail_area.confidence_display,
             detail_area.timestamp_display,
-            DecisionCenterUI._format_evidence_rows(detail_area.evidence),
-            DecisionCenterUI._format_governance_rows(detail_area.governance),
-            DecisionCenterUI._format_approval_rows(detail_area.approvals),
+            DecisionCenterUI._format_evidence_rows(detail_area),
+            DecisionCenterUI._format_governance_rows(detail_area),
+            DecisionCenterUI._format_approval_rows(detail_area),
         )
 
     @staticmethod
-    def _format_evidence_rows(evidence: Sequence[EvidenceEntry]) -> List[List[str]]:
+    def _format_evidence_rows(detail_area: DecisionDetailArea) -> List[List[str]]:
+        if detail_area.evidence_status is ReadStatus.ERROR:
+            return [list(row) for row in _EVIDENCE_READ_ERROR_ROW]
         return [
             [entry.evidence_type, entry.source, entry.attached_at.strftime("%Y-%m-%d %H:%M UTC")]
-            for entry in evidence
+            for entry in detail_area.evidence
         ]
 
     @staticmethod
-    def _format_governance_rows(governance: Sequence[GovernanceEntry]) -> List[List[str]]:
+    def _format_governance_rows(detail_area: DecisionDetailArea) -> List[List[str]]:
+        if detail_area.governance_status is ReadStatus.ERROR:
+            return [list(row) for row in _GOVERNANCE_READ_ERROR_ROW]
         return [
             [
                 entry.policy_id,
                 "Yes" if entry.enabled else "No",
                 entry.evaluated_at.strftime("%Y-%m-%d %H:%M UTC"),
             ]
-            for entry in governance
+            for entry in detail_area.governance
         ]
 
     @staticmethod
-    def _format_approval_rows(approvals: Sequence[ApprovalEntry]) -> List[List[str]]:
+    def _format_approval_rows(detail_area: DecisionDetailArea) -> List[List[str]]:
+        if detail_area.approvals_status is ReadStatus.ERROR:
+            return [list(row) for row in _APPROVAL_READ_ERROR_ROW]
         return [
             [
                 entry.status.value.replace("_", " ").title(),
                 entry.approved_by,
                 entry.approved_at.strftime("%Y-%m-%d %H:%M UTC"),
             ]
-            for entry in approvals
+            for entry in detail_area.approvals
         ]
+
+    @staticmethod
+    def _decision_read_error_detail() -> _DetailValues:
+        return (
+            _DECISION_READ_ERROR_MESSAGE, _MISSING_VALUE, _MISSING_VALUE,
+            _MISSING_VALUE, _MISSING_VALUE, [], [], [],
+        )
 
     @staticmethod
     def _empty_detail() -> _DetailValues:

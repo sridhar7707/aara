@@ -12,9 +12,12 @@ from sentinel_engine.repositories.projection_repository import ProjectionReposit
 from sentinel_engine.services.decision_service import DecisionService
 from sentinel_engine.services.governance_service import GovernanceService
 
+import pytest
+
 from applications.trading_intelligence.adapters.sentinel_governance_source import (
     SentinelGovernanceSource,
 )
+from applications.trading_intelligence.contracts.read_error import TradingIntelligenceReadError
 from applications.trading_intelligence.projections.approval_entry import ApprovalEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 from applications.trading_intelligence.services.decision_governance_query_service import (
@@ -89,6 +92,29 @@ def _make_wiring():
     decision_query = DecisionQuery(ledger_repository, projection_repository)
     source = SentinelGovernanceSource(decision_query)
     return decision_service, governance_service, source
+
+
+class _BoomDecisionQuery:
+    def get_decision_timeline(self, decision_id):
+        raise OSError("simulated infrastructure failure")
+
+
+def test_get_governance_translates_decision_query_exceptions():
+    source = SentinelGovernanceSource(_BoomDecisionQuery())
+
+    with pytest.raises(TradingIntelligenceReadError) as excinfo:
+        source.get_governance("dec-001")
+
+    assert isinstance(excinfo.value.__cause__, OSError)
+
+
+def test_get_approvals_translates_decision_query_exceptions():
+    source = SentinelGovernanceSource(_BoomDecisionQuery())
+
+    with pytest.raises(TradingIntelligenceReadError) as excinfo:
+        source.get_approvals("dec-001")
+
+    assert isinstance(excinfo.value.__cause__, OSError)
 
 
 def test_sentinel_governance_source_is_a_governance_source():

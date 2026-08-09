@@ -13,11 +13,17 @@ Deliberately does not key off Decision.evidence_reference: nothing in
 Sentinel Engine looks up evidence by that string (EvidenceService and
 DecisionQuery both key strictly by decision_id), so using it here would
 just be decorative, not functional.
+
+get_evidence() translates DecisionQuery infrastructure exceptions into
+TradingIntelligenceReadError (contracts/read_error.py) -- DecisionQuery has
+no documented exception contract, so a future persistent backend may raise
+anything.
 """
 from typing import List
 
 from sentinel_engine.queries.decision_query import DecisionQuery
 
+from applications.trading_intelligence.contracts.read_error import TradingIntelligenceReadError
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.services.decision_evidence_query_service import (
     EvidenceSource,
@@ -29,7 +35,12 @@ class SentinelEvidenceSource(EvidenceSource):
         self._decision_query = decision_query
 
     def get_evidence(self, decision_id: str) -> List[EvidenceEntry]:
-        timeline = self._decision_query.get_decision_timeline(decision_id)
+        try:
+            timeline = self._decision_query.get_decision_timeline(decision_id)
+        except Exception as exc:
+            raise TradingIntelligenceReadError(
+                f"Failed to read evidence for decision {decision_id!r}."
+            ) from exc
         if timeline is None:
             return []
         return [

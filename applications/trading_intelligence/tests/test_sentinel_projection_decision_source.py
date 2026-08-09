@@ -1,6 +1,8 @@
 """Tests for applications.trading_intelligence.adapters.sentinel_projection_decision_source."""
 import datetime
 
+import pytest
+
 from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.projections.decision_projection import DecisionProjection
 from sentinel_engine.repositories.projection_repository import ProjectionRepository
@@ -9,6 +11,7 @@ from applications.trading_intelligence.adapters.sentinel_projection_decision_sou
     SentinelProjectionDecisionSource,
 )
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
+from applications.trading_intelligence.contracts.read_error import TradingIntelligenceReadError
 from applications.trading_intelligence.services.decision_query_service import DecisionSource
 
 
@@ -44,6 +47,35 @@ def _make_projection(**overrides):
 def test_sentinel_projection_decision_source_is_a_decision_source():
     source = SentinelProjectionDecisionSource(_InMemoryProjectionRepository())
     assert isinstance(source, DecisionSource)
+
+
+class _BoomProjectionRepository(ProjectionRepository):
+    def save(self, projection):
+        raise AssertionError("must never be called")
+
+    def get(self, decision_id):
+        raise ConnectionError("simulated infrastructure failure")
+
+
+def test_get_decision_translates_repository_exceptions():
+    source = SentinelProjectionDecisionSource(_BoomProjectionRepository())
+
+    with pytest.raises(TradingIntelligenceReadError) as excinfo:
+        source.get_decision("dec-001")
+
+    assert isinstance(excinfo.value.__cause__, ConnectionError)
+
+
+def test_list_decisions_does_not_translate_repository_exceptions():
+    """Deliberate scope boundary (Slice 5): only the single-decision detail
+    read path is covered. list_decisions() (the Decision List/top-table
+    path) is untouched until a future slice designs its own error
+    semantics -- this test locks that decision in so it isn't silently
+    changed later."""
+    source = SentinelProjectionDecisionSource(_BoomProjectionRepository())
+
+    with pytest.raises(ConnectionError):
+        source.list_decisions(["dec-001"])
 
 
 def test_get_decision_returns_none_when_repository_has_no_projection():
