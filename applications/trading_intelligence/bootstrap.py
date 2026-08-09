@@ -44,11 +44,17 @@ from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.services.sentinel_engine import SentinelEngine
 
 from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
+from applications.trading_intelligence.adapters.sentinel_governance_source import (
+    SentinelGovernanceSource,
+)
 from applications.trading_intelligence.adapters.sentinel_projection_decision_source import (
     SentinelProjectionDecisionSource,
 )
 from applications.trading_intelligence.services.decision_evidence_query_service import (
     DecisionEvidenceQueryService,
+)
+from applications.trading_intelligence.services.decision_governance_query_service import (
+    DecisionGovernanceQueryService,
 )
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
@@ -148,6 +154,11 @@ def build_application() -> DecisionCenterUI:
     evidence_source = SentinelEvidenceSource(decision_query)
     evidence_query_service = DecisionEvidenceQueryService(evidence_source)
 
-    controller = DecisionCenterController(query_service, evidence_query_service)
+    governance_source = SentinelGovernanceSource(decision_query)
+    governance_query_service = DecisionGovernanceQueryService(governance_source)
+
+    controller = DecisionCenterController(
+        query_service, evidence_query_service, governance_query_service,
+    )
 
     return DecisionCenterUI(controller, decision_ids)

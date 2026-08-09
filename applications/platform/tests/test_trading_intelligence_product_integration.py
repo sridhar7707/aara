@@ -40,6 +40,10 @@ from applications.trading_intelligence.services.decision_evidence_query_service 
     DecisionEvidenceQueryService,
     EvidenceSource,
 )
+from applications.trading_intelligence.services.decision_governance_query_service import (
+    DecisionGovernanceQueryService,
+    GovernanceSource,
+)
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.tests.fakes import InMemoryProjectionRepository
 from applications.trading_intelligence.ui.decision_center.controller import (
@@ -58,6 +62,18 @@ class _NoEvidenceSource(EvidenceSource):
     applications/trading_intelligence/tests/test_decision_center_integration.py."""
 
     def get_evidence(self, decision_id):
+        return []
+
+
+class _NoGovernanceSource(GovernanceSource):
+    """Same rationale as _NoEvidenceSource above, for governance/approval
+    wiring -- has its own dedicated tests under
+    applications/trading_intelligence/."""
+
+    def get_governance(self, decision_id):
+        return []
+
+    def get_approvals(self, decision_id):
         return []
 
 
@@ -240,7 +256,8 @@ def test_navigation_item_can_be_used_to_construct_decision_center_experience():
     source = SentinelProjectionDecisionSource(repository)
     query_service = DecisionQueryService(source)
     evidence_query_service = DecisionEvidenceQueryService(_NoEvidenceSource())
-    controller = DecisionCenterController(query_service, evidence_query_service)
+    governance_query_service = DecisionGovernanceQueryService(_NoGovernanceSource())
+    controller = DecisionCenterController(query_service, evidence_query_service, governance_query_service)
 
     screen = controller.load_screen(["dec-001"])
 
@@ -281,7 +298,9 @@ def test_navigation_driven_construction_performs_no_writes():
 
     source = SentinelProjectionDecisionSource(_AssertNoSaveRepository())
     controller = DecisionCenterController(
-        DecisionQueryService(source), DecisionEvidenceQueryService(_NoEvidenceSource())
+        DecisionQueryService(source),
+        DecisionEvidenceQueryService(_NoEvidenceSource()),
+        DecisionGovernanceQueryService(_NoGovernanceSource()),
     )
 
     controller.load_screen(["dec-001"])

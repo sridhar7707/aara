@@ -4,8 +4,10 @@ import dataclasses
 
 import pytest
 
+from applications.trading_intelligence.projections.approval_entry import ApprovalEntry, ApprovalStatus
 from applications.trading_intelligence.projections.decision_view import DecisionState, DecisionView
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
+from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionCenterScreen,
     DecisionDetailArea,
@@ -34,6 +36,26 @@ def _make_entry(**overrides):
     )
     defaults.update(overrides)
     return EvidenceEntry(**defaults)
+
+
+def _make_governance_entry(**overrides):
+    defaults = dict(
+        policy_id="pol-001",
+        enabled=True,
+        evaluated_at=datetime.datetime(2026, 8, 4, 12, 6, 0),
+    )
+    defaults.update(overrides)
+    return GovernanceEntry(**defaults)
+
+
+def _make_approval_entry(**overrides):
+    defaults = dict(
+        status=ApprovalStatus.APPROVED,
+        approved_by="risk_officer",
+        approved_at=datetime.datetime(2026, 8, 4, 12, 7, 0),
+    )
+    defaults.update(overrides)
+    return ApprovalEntry(**defaults)
 
 
 def test_decision_list_area_reports_empty_state_when_no_decisions():
@@ -114,6 +136,51 @@ def test_decision_detail_area_is_immutable_including_evidence():
     area = DecisionDetailArea(decision=_make_view())
     with pytest.raises(dataclasses.FrozenInstanceError):
         area.evidence = (_make_entry(),)
+
+
+def test_decision_detail_area_defaults_to_no_governance():
+    area = DecisionDetailArea(decision=_make_view())
+
+    assert area.governance == ()
+
+
+def test_decision_detail_area_carries_governance_entries():
+    entry = _make_governance_entry()
+    area = DecisionDetailArea(decision=_make_view(), governance=(entry,))
+
+    assert area.governance == (entry,)
+
+
+def test_decision_detail_area_defaults_to_no_approvals():
+    area = DecisionDetailArea(decision=_make_view())
+
+    assert area.approvals == ()
+
+
+def test_decision_detail_area_carries_approval_entries():
+    entry = _make_approval_entry()
+    area = DecisionDetailArea(decision=_make_view(), approvals=(entry,))
+
+    assert area.approvals == (entry,)
+
+
+def test_decision_detail_area_is_immutable_including_governance_and_approvals():
+    area = DecisionDetailArea(decision=_make_view())
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        area.governance = (_make_governance_entry(),)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        area.approvals = (_make_approval_entry(),)
+
+
+def test_decision_detail_area_with_governance_and_approvals_still_formats_core_decision_fields():
+    area = DecisionDetailArea(
+        decision=_make_view(confidence=0.78, status=DecisionState.DECISION_CREATED),
+        governance=(_make_governance_entry(),),
+        approvals=(_make_approval_entry(),),
+    )
+
+    assert area.confidence_display == "78%"
+    assert area.status_display == "Decision Created"
 
 
 def test_decision_center_screen_composes_list_and_detail_areas():

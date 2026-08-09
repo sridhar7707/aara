@@ -15,6 +15,9 @@ from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.services.sentinel_engine import SentinelEngine
 
 from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
+from applications.trading_intelligence.adapters.sentinel_governance_source import (
+    SentinelGovernanceSource,
+)
 from applications.trading_intelligence.adapters.sentinel_projection_decision_source import (
     SentinelProjectionDecisionSource,
 )
@@ -24,6 +27,9 @@ from applications.trading_intelligence.bootstrap import (
 )
 from applications.trading_intelligence.services.decision_evidence_query_service import (
     DecisionEvidenceQueryService,
+)
+from applications.trading_intelligence.services.decision_governance_query_service import (
+    DecisionGovernanceQueryService,
 )
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
@@ -111,15 +117,20 @@ def test_build_application_read_chain_shares_the_same_projection_repository(monk
 def test_build_application_wires_query_service_and_controller_once(monkeypatch):
     query_service_calls = _track_constructor_calls(monkeypatch, DecisionQueryService)
     evidence_query_service_calls = _track_constructor_calls(monkeypatch, DecisionEvidenceQueryService)
+    governance_query_service_calls = _track_constructor_calls(
+        monkeypatch, DecisionGovernanceQueryService
+    )
     controller_calls = _track_constructor_calls(monkeypatch, DecisionCenterController)
 
     build_application()
 
     assert len(query_service_calls) == 1
     assert len(evidence_query_service_calls) == 1
+    assert len(governance_query_service_calls) == 1
     assert len(controller_calls) == 1
     assert controller_calls[0]["args"][0] is query_service_calls[0]["self"]
     assert controller_calls[0]["args"][1] is evidence_query_service_calls[0]["self"]
+    assert controller_calls[0]["args"][2] is governance_query_service_calls[0]["self"]
 
 
 def test_build_application_wires_evidence_read_chain_off_the_same_repositories(monkeypatch):
@@ -141,6 +152,25 @@ def test_build_application_wires_evidence_read_chain_off_the_same_repositories(m
     assert evidence_source_calls[0]["args"][0] is decision_query_calls[0]["self"]
 
 
+def test_build_application_wires_evidence_and_governance_read_chains_off_the_same_decision_query(
+    monkeypatch,
+):
+    decision_query_calls = _track_constructor_calls(monkeypatch, DecisionQuery)
+    evidence_source_calls = _track_constructor_calls(monkeypatch, SentinelEvidenceSource)
+    governance_source_calls = _track_constructor_calls(monkeypatch, SentinelGovernanceSource)
+
+    build_application()
+
+    assert len(decision_query_calls) == 1
+    decision_query = decision_query_calls[0]["self"]
+
+    assert len(evidence_source_calls) == 1
+    assert evidence_source_calls[0]["args"][0] is decision_query
+
+    assert len(governance_source_calls) == 1
+    assert governance_source_calls[0]["args"][0] is decision_query
+
+
 def test_build_application_does_not_duplicate_the_object_graph(monkeypatch):
     ledger_calls = _track_constructor_calls(monkeypatch, LedgerRepository)
     projection_calls = _track_constructor_calls(monkeypatch, _InMemoryProjectionRepository)
@@ -153,6 +183,10 @@ def test_build_application_does_not_duplicate_the_object_graph(monkeypatch):
     decision_query_calls = _track_constructor_calls(monkeypatch, DecisionQuery)
     evidence_source_calls = _track_constructor_calls(monkeypatch, SentinelEvidenceSource)
     evidence_query_service_calls = _track_constructor_calls(monkeypatch, DecisionEvidenceQueryService)
+    governance_source_calls = _track_constructor_calls(monkeypatch, SentinelGovernanceSource)
+    governance_query_service_calls = _track_constructor_calls(
+        monkeypatch, DecisionGovernanceQueryService
+    )
     controller_calls = _track_constructor_calls(monkeypatch, DecisionCenterController)
 
     build_application()
@@ -168,6 +202,8 @@ def test_build_application_does_not_duplicate_the_object_graph(monkeypatch):
     assert len(decision_query_calls) == 1
     assert len(evidence_source_calls) == 1
     assert len(evidence_query_service_calls) == 1
+    assert len(governance_source_calls) == 1
+    assert len(governance_query_service_calls) == 1
     assert len(controller_calls) == 1
 
     repository_instances = {ledger_calls[0]["self"], projection_calls[0]["self"]}
@@ -194,7 +230,10 @@ def test_build_application_seeded_decisions_are_reachable_by_id():
     hand-built projections standing in for it."""
     ui = build_application()
 
-    symbol, action, status, confidence, _updated, _evidence_rows = ui._render_detail("dec-seed-003")
+    (
+        symbol, action, status, confidence, _updated,
+        _evidence_rows, _governance_rows, _approval_rows,
+    ) = ui._render_detail("dec-seed-003")
 
     assert symbol == "NVDA"
     assert action == "SELL"
@@ -209,8 +248,8 @@ def test_build_application_seeds_evidence_for_decisions_that_had_it_attached():
     seed path without any change to it."""
     ui = build_application()
 
-    *_, evidence_002 = ui._render_detail("dec-seed-002")
-    *_, evidence_003 = ui._render_detail("dec-seed-003")
+    *_, evidence_002, _governance_002, _approval_002 = ui._render_detail("dec-seed-002")
+    *_, evidence_003, _governance_003, _approval_003 = ui._render_detail("dec-seed-003")
 
     assert evidence_002 == [["NEWS_SENTIMENT", "newsapi", "2026-08-08 09:00 UTC"]]
     assert evidence_003 == [["NEWS_SENTIMENT", "newsapi", "2026-08-08 09:00 UTC"]]
@@ -219,6 +258,40 @@ def test_build_application_seeds_evidence_for_decisions_that_had_it_attached():
 def test_build_application_seeded_decision_without_attached_evidence_has_none():
     ui = build_application()
 
-    *_, evidence_rows = ui._render_detail("dec-seed-001")
+    *_, evidence_rows, _governance_rows, _approval_rows = ui._render_detail("dec-seed-001")
 
     assert evidence_rows == []
+
+
+def test_build_application_seeds_governance_and_approval_for_the_fully_approved_decision():
+    """dec-seed-003 is the only seed decision driven through
+    register_policy()/evaluate_policy()/record_approval() in
+    bootstrap.py's _seed_decisions() -- dec-seed-001/002 deliberately are
+    not, so both the "has governance/approval" and "no governance/approval"
+    states are demonstrated by the existing seed path without any change
+    to it."""
+    ui = build_application()
+
+    *_, _evidence_rows, governance_rows, approval_rows = ui._render_detail("dec-seed-003")
+
+    # evaluate_policy() timestamps with datetime.utcnow() (unlike
+    # record_approval(), which uses the seed's fixed `now`), so only
+    # policy_id/enabled are asserted precisely here; evaluated_at is only
+    # checked for well-formed shape.
+    assert len(governance_rows) == 1
+    assert governance_rows[0][0] == "pol-seed-001"
+    assert governance_rows[0][1] == "Yes"
+    assert governance_rows[0][2]  # evaluated_at formatted, non-empty
+    assert approval_rows == [["Approved", "risk_officer", "2026-08-08 09:00 UTC"]]
+
+
+def test_build_application_seeded_decisions_without_governance_or_approval_have_none():
+    ui = build_application()
+
+    *_, _evidence_rows_1, governance_rows_1, approval_rows_1 = ui._render_detail("dec-seed-001")
+    *_, _evidence_rows_2, governance_rows_2, approval_rows_2 = ui._render_detail("dec-seed-002")
+
+    assert governance_rows_1 == []
+    assert approval_rows_1 == []
+    assert governance_rows_2 == []
+    assert approval_rows_2 == []

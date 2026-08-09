@@ -24,12 +24,19 @@ Evidence table: DecisionDetailArea.evidence carries plain EvidenceEntry
 tuples (evidence_type/source/attached_at) -- this module does the same
 List[List[str]] row formatting for them as it already does for the
 Decisions list, keeping DecisionDetailArea itself Gradio-independent.
+
+Governance/Approval tables: DecisionDetailArea.governance/.approvals carry
+plain GovernanceEntry/ApprovalEntry tuples, formatted into
+List[List[str]] rows the same way as evidence -- read-only, no write
+component exists in either table.
 """
 from typing import List, Sequence, Tuple
 
 import gradio as gr
 
+from applications.trading_intelligence.projections.approval_entry import ApprovalEntry
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
+from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
 from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionDetailArea,
@@ -38,9 +45,13 @@ from applications.trading_intelligence.ui.decision_center.screen import (
 
 _LIST_HEADERS = ["Decision ID", "Symbol", "Action", "Status", "Confidence"]
 _EVIDENCE_HEADERS = ["Evidence Type", "Source", "Attached At"]
+_GOVERNANCE_HEADERS = ["Policy ID", "Enabled", "Evaluated At"]
+_APPROVAL_HEADERS = ["Status", "Approved By", "Approved At"]
 _MISSING_VALUE = "-"
 
-_DetailValues = Tuple[str, str, str, str, str, List[List[str]]]
+_DetailValues = Tuple[
+    str, str, str, str, str, List[List[str]], List[List[str]], List[List[str]]
+]
 
 
 class DecisionCenterUI:
@@ -68,10 +79,17 @@ class DecisionCenterUI:
             evidence_output = gr.Dataframe(
                 headers=_EVIDENCE_HEADERS, interactive=False, label="Evidence",
             )
+            governance_output = gr.Dataframe(
+                headers=_GOVERNANCE_HEADERS, interactive=False, label="Governance",
+            )
+            approval_output = gr.Dataframe(
+                headers=_APPROVAL_HEADERS, interactive=False, label="Approval",
+            )
 
             detail_outputs = [
                 symbol_output, action_output, status_output,
                 confidence_output, updated_output, evidence_output,
+                governance_output, approval_output,
             ]
             screen_outputs = [list_output] + detail_outputs
 
@@ -86,7 +104,12 @@ class DecisionCenterUI:
 
         return demo
 
-    def _render_screen(self) -> Tuple[List[List[str]], str, str, str, str, str, List[List[str]]]:
+    def _render_screen(
+        self,
+    ) -> Tuple[
+        List[List[str]], str, str, str, str, str,
+        List[List[str]], List[List[str]], List[List[str]],
+    ]:
         screen = self._controller.load_screen(self._decision_ids)
         list_rows = self._format_list_rows(screen.list_area)
         detail_values = self._format_detail(screen.detail_area)
@@ -128,6 +151,8 @@ class DecisionCenterUI:
             detail_area.confidence_display,
             detail_area.timestamp_display,
             DecisionCenterUI._format_evidence_rows(detail_area.evidence),
+            DecisionCenterUI._format_governance_rows(detail_area.governance),
+            DecisionCenterUI._format_approval_rows(detail_area.approvals),
         )
 
     @staticmethod
@@ -138,8 +163,30 @@ class DecisionCenterUI:
         ]
 
     @staticmethod
+    def _format_governance_rows(governance: Sequence[GovernanceEntry]) -> List[List[str]]:
+        return [
+            [
+                entry.policy_id,
+                "Yes" if entry.enabled else "No",
+                entry.evaluated_at.strftime("%Y-%m-%d %H:%M UTC"),
+            ]
+            for entry in governance
+        ]
+
+    @staticmethod
+    def _format_approval_rows(approvals: Sequence[ApprovalEntry]) -> List[List[str]]:
+        return [
+            [
+                entry.status.value.replace("_", " ").title(),
+                entry.approved_by,
+                entry.approved_at.strftime("%Y-%m-%d %H:%M UTC"),
+            ]
+            for entry in approvals
+        ]
+
+    @staticmethod
     def _empty_detail() -> _DetailValues:
         return (
             _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE,
-            _MISSING_VALUE, _MISSING_VALUE, [],
+            _MISSING_VALUE, _MISSING_VALUE, [], [], [],
         )

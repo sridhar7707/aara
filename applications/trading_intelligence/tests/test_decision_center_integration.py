@@ -38,6 +38,10 @@ from applications.trading_intelligence.services.decision_evidence_query_service 
     DecisionEvidenceQueryService,
     EvidenceSource,
 )
+from applications.trading_intelligence.services.decision_governance_query_service import (
+    DecisionGovernanceQueryService,
+    GovernanceSource,
+)
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.tests.fakes import InMemoryProjectionRepository
 from applications.trading_intelligence.ui.decision_center.controller import (
@@ -52,6 +56,18 @@ class _NoEvidenceSource(EvidenceSource):
     collaborator is a deliberately empty stand-in, not a real source."""
 
     def get_evidence(self, decision_id):
+        return []
+
+
+class _NoGovernanceSource(GovernanceSource):
+    """Same rationale as _NoEvidenceSource above, for governance/approval
+    wiring -- has its own dedicated tests (test_sentinel_governance_source.py,
+    test_decision_governance_query_service.py, test_bootstrap.py)."""
+
+    def get_governance(self, decision_id):
+        return []
+
+    def get_approvals(self, decision_id):
         return []
 
 
@@ -74,7 +90,8 @@ def _build_controller(repository: ProjectionRepository) -> DecisionCenterControl
     source = SentinelProjectionDecisionSource(repository)
     query_service = DecisionQueryService(source)
     evidence_query_service = DecisionEvidenceQueryService(_NoEvidenceSource())
-    return DecisionCenterController(query_service, evidence_query_service)
+    governance_query_service = DecisionGovernanceQueryService(_NoGovernanceSource())
+    return DecisionCenterController(query_service, evidence_query_service, governance_query_service)
 
 
 def test_empty_repository_produces_an_empty_screen():

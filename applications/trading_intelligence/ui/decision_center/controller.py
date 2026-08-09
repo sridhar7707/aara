@@ -16,6 +16,9 @@ from typing import List, Optional
 from applications.trading_intelligence.services.decision_evidence_query_service import (
     DecisionEvidenceQueryService,
 )
+from applications.trading_intelligence.services.decision_governance_query_service import (
+    DecisionGovernanceQueryService,
+)
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionCenterScreen,
@@ -29,9 +32,11 @@ class DecisionCenterController:
         self,
         query_service: DecisionQueryService,
         evidence_query_service: DecisionEvidenceQueryService,
+        governance_query_service: DecisionGovernanceQueryService,
     ):
         self._query_service = query_service
         self._evidence_query_service = evidence_query_service
+        self._governance_query_service = governance_query_service
 
     def load_decisions(self, decision_ids: List[str]) -> DecisionListArea:
         views = self._query_service.list_decision_views(decision_ids)
@@ -42,7 +47,11 @@ class DecisionCenterController:
         if view is None:
             return DecisionDetailArea(decision=None)
         evidence = tuple(self._evidence_query_service.get_evidence(decision_id))
-        return DecisionDetailArea(decision=view, evidence=evidence)
+        governance = tuple(self._governance_query_service.get_governance(decision_id))
+        approvals = tuple(self._governance_query_service.get_approvals(decision_id))
+        return DecisionDetailArea(
+            decision=view, evidence=evidence, governance=governance, approvals=approvals,
+        )
 
     def load_screen(
         self, decision_ids: List[str], selected_id: Optional[str] = None

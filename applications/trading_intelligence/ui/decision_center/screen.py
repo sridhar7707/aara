@@ -10,8 +10,10 @@ docs/products/AARA_TRADING_INTELLIGENCE_DECISION_CENTER_DESIGN.md's layout
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
+from applications.trading_intelligence.projections.approval_entry import ApprovalEntry
 from applications.trading_intelligence.projections.decision_view import DecisionView
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
+from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,8 @@ class DecisionListArea:
 class DecisionDetailArea:
     decision: Optional[DecisionView]
     evidence: Tuple[EvidenceEntry, ...] = field(default=())
+    governance: Tuple[GovernanceEntry, ...] = field(default=())
+    approvals: Tuple[ApprovalEntry, ...] = field(default=())
 
     @property
     def is_empty(self) -> bool:

@@ -2,11 +2,17 @@
 import datetime
 
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
+from applications.trading_intelligence.projections.approval_entry import ApprovalEntry, ApprovalStatus
 from applications.trading_intelligence.projections.decision_view import DecisionState
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
+from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 from applications.trading_intelligence.services.decision_evidence_query_service import (
     DecisionEvidenceQueryService,
     EvidenceSource,
+)
+from applications.trading_intelligence.services.decision_governance_query_service import (
+    DecisionGovernanceQueryService,
+    GovernanceSource,
 )
 from applications.trading_intelligence.services.decision_query_service import (
     DecisionQueryService,
@@ -42,6 +48,22 @@ class _InMemoryEvidenceSource(EvidenceSource):
         return list(self._evidence_by_decision.get(decision_id, []))
 
 
+class _InMemoryGovernanceSource(GovernanceSource):
+    """Fake GovernanceSource -- the real DecisionGovernanceQueryService is
+    used, only its dependency is faked, mirroring _InMemoryEvidenceSource
+    above."""
+
+    def __init__(self, governance_by_decision=None, approvals_by_decision=None):
+        self._governance_by_decision = governance_by_decision or {}
+        self._approvals_by_decision = approvals_by_decision or {}
+
+    def get_governance(self, decision_id):
+        return list(self._governance_by_decision.get(decision_id, []))
+
+    def get_approvals(self, decision_id):
+        return list(self._approvals_by_decision.get(decision_id, []))
+
+
 def _make_contract(**overrides):
     defaults = dict(
         decision_id="dec-001",
@@ -67,12 +89,40 @@ def _make_entry(**overrides):
     return EvidenceEntry(**defaults)
 
 
-def _make_controller(decisions=None, evidence_by_decision=None):
+def _make_governance_entry(**overrides):
+    defaults = dict(
+        policy_id="pol-001",
+        enabled=True,
+        evaluated_at=datetime.datetime(2026, 8, 4, 12, 6, 0),
+    )
+    defaults.update(overrides)
+    return GovernanceEntry(**defaults)
+
+
+def _make_approval_entry(**overrides):
+    defaults = dict(
+        status=ApprovalStatus.APPROVED,
+        approved_by="risk_officer",
+        approved_at=datetime.datetime(2026, 8, 4, 12, 7, 0),
+    )
+    defaults.update(overrides)
+    return ApprovalEntry(**defaults)
+
+
+def _make_controller(
+    decisions=None,
+    evidence_by_decision=None,
+    governance_by_decision=None,
+    approvals_by_decision=None,
+):
     query_service = DecisionQueryService(_InMemoryDecisionSource(decisions or {}))
     evidence_query_service = DecisionEvidenceQueryService(
         _InMemoryEvidenceSource(evidence_by_decision or {})
     )
-    return DecisionCenterController(query_service, evidence_query_service)
+    governance_query_service = DecisionGovernanceQueryService(
+        _InMemoryGovernanceSource(governance_by_decision or {}, approvals_by_decision or {})
+    )
+    return DecisionCenterController(query_service, evidence_query_service, governance_query_service)
 
 
 def test_load_decisions_returns_a_decision_list_area():
@@ -181,7 +231,9 @@ def test_load_decision_detail_does_not_query_evidence_for_a_missing_decision():
 
     query_service = DecisionQueryService(_InMemoryDecisionSource())
     controller = DecisionCenterController(
-        query_service, DecisionEvidenceQueryService(_AssertNotCalledEvidenceSource())
+        query_service,
+        DecisionEvidenceQueryService(_AssertNotCalledEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
     )
 
     detail_area = controller.load_decision_detail("missing-decision")
@@ -213,7 +265,109 @@ def test_load_decisions_does_not_query_evidence():
 
     query_service = DecisionQueryService(_InMemoryDecisionSource({"dec-001": _make_contract()}))
     controller = DecisionCenterController(
-        query_service, DecisionEvidenceQueryService(_AssertNotCalledEvidenceSource())
+        query_service,
+        DecisionEvidenceQueryService(_AssertNotCalledEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+    )
+
+    list_area = controller.load_decisions(["dec-001"])
+
+    assert list_area.is_empty is False
+
+
+def test_load_decision_detail_attaches_governance_from_the_governance_query_service():
+    entry = _make_governance_entry()
+    controller = _make_controller(
+        decisions={"dec-001": _make_contract()},
+        governance_by_decision={"dec-001": [entry]},
+    )
+
+    detail_area = controller.load_decision_detail("dec-001")
+
+    assert detail_area.governance == (entry,)
+
+
+def test_load_decision_detail_returns_empty_governance_when_none_evaluated():
+    controller = _make_controller(decisions={"dec-001": _make_contract()})
+
+    detail_area = controller.load_decision_detail("dec-001")
+
+    assert detail_area.governance == ()
+
+
+def test_load_decision_detail_attaches_approvals_from_the_governance_query_service():
+    entry = _make_approval_entry()
+    controller = _make_controller(
+        decisions={"dec-001": _make_contract()},
+        approvals_by_decision={"dec-001": [entry]},
+    )
+
+    detail_area = controller.load_decision_detail("dec-001")
+
+    assert detail_area.approvals == (entry,)
+
+
+def test_load_decision_detail_returns_empty_approvals_when_none_recorded():
+    controller = _make_controller(decisions={"dec-001": _make_contract()})
+
+    detail_area = controller.load_decision_detail("dec-001")
+
+    assert detail_area.approvals == ()
+
+
+def test_load_decision_detail_does_not_query_governance_for_a_missing_decision():
+    class _AssertNotCalledGovernanceSource(GovernanceSource):
+        def get_governance(self, decision_id):
+            raise AssertionError("governance must not be queried for a missing decision")
+
+        def get_approvals(self, decision_id):
+            raise AssertionError("approvals must not be queried for a missing decision")
+
+    query_service = DecisionQueryService(_InMemoryDecisionSource())
+    controller = DecisionCenterController(
+        query_service,
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_AssertNotCalledGovernanceSource()),
+    )
+
+    detail_area = controller.load_decision_detail("missing-decision")
+
+    assert detail_area.is_empty is True
+    assert detail_area.governance == ()
+    assert detail_area.approvals == ()
+
+
+def test_load_screen_default_selection_includes_governance_and_approvals():
+    """Mirrors test_load_screen_default_selection_includes_evidence: the
+    default (no explicit selected_id) branch must route through the same
+    governance/approval-attaching path as an explicit selection."""
+    governance_entry = _make_governance_entry()
+    approval_entry = _make_approval_entry()
+    controller = _make_controller(
+        decisions={"dec-001": _make_contract()},
+        governance_by_decision={"dec-001": [governance_entry]},
+        approvals_by_decision={"dec-001": [approval_entry]},
+    )
+
+    screen = controller.load_screen(["dec-001"])
+
+    assert screen.detail_area.governance == (governance_entry,)
+    assert screen.detail_area.approvals == (approval_entry,)
+
+
+def test_load_decisions_does_not_query_governance():
+    class _AssertNotCalledGovernanceSource(GovernanceSource):
+        def get_governance(self, decision_id):
+            raise AssertionError("load_decisions must never query governance")
+
+        def get_approvals(self, decision_id):
+            raise AssertionError("load_decisions must never query approvals")
+
+    query_service = DecisionQueryService(_InMemoryDecisionSource({"dec-001": _make_contract()}))
+    controller = DecisionCenterController(
+        query_service,
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_AssertNotCalledGovernanceSource()),
     )
 
     list_area = controller.load_decisions(["dec-001"])
