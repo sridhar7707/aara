@@ -19,11 +19,17 @@ Row selection: gr.Dataframe's `select` event (Gradio 4.44) passes a
 gr.SelectData whose `row_value` is the entire selected row as a 1-D list,
 in the same column order as _LIST_HEADERS -- so row_value[0] is the
 Decision ID without needing a second lookup against the rendered rows.
+
+Evidence table: DecisionDetailArea.evidence carries plain EvidenceEntry
+tuples (evidence_type/source/attached_at) -- this module does the same
+List[List[str]] row formatting for them as it already does for the
+Decisions list, keeping DecisionDetailArea itself Gradio-independent.
 """
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 import gradio as gr
 
+from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
 from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionDetailArea,
@@ -31,9 +37,10 @@ from applications.trading_intelligence.ui.decision_center.screen import (
 )
 
 _LIST_HEADERS = ["Decision ID", "Symbol", "Action", "Status", "Confidence"]
+_EVIDENCE_HEADERS = ["Evidence Type", "Source", "Attached At"]
 _MISSING_VALUE = "-"
 
-_DetailValues = Tuple[str, str, str, str, str]
+_DetailValues = Tuple[str, str, str, str, str, List[List[str]]]
 
 
 class DecisionCenterUI:
@@ -58,10 +65,13 @@ class DecisionCenterUI:
             status_output = gr.Textbox(label="Status", interactive=False)
             confidence_output = gr.Textbox(label="Confidence", interactive=False)
             updated_output = gr.Textbox(label="Last Updated", interactive=False)
+            evidence_output = gr.Dataframe(
+                headers=_EVIDENCE_HEADERS, interactive=False, label="Evidence",
+            )
 
             detail_outputs = [
                 symbol_output, action_output, status_output,
-                confidence_output, updated_output,
+                confidence_output, updated_output, evidence_output,
             ]
             screen_outputs = [list_output] + detail_outputs
 
@@ -76,7 +86,7 @@ class DecisionCenterUI:
 
         return demo
 
-    def _render_screen(self) -> Tuple[List[List[str]], str, str, str, str, str]:
+    def _render_screen(self) -> Tuple[List[List[str]], str, str, str, str, str, List[List[str]]]:
         screen = self._controller.load_screen(self._decision_ids)
         list_rows = self._format_list_rows(screen.list_area)
         detail_values = self._format_detail(screen.detail_area)
@@ -117,8 +127,19 @@ class DecisionCenterUI:
             detail_area.status_display,
             detail_area.confidence_display,
             detail_area.timestamp_display,
+            DecisionCenterUI._format_evidence_rows(detail_area.evidence),
         )
 
     @staticmethod
+    def _format_evidence_rows(evidence: Sequence[EvidenceEntry]) -> List[List[str]]:
+        return [
+            [entry.evidence_type, entry.source, entry.attached_at.strftime("%Y-%m-%d %H:%M UTC")]
+            for entry in evidence
+        ]
+
+    @staticmethod
     def _empty_detail() -> _DetailValues:
-        return (_MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE)
+        return (
+            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE,
+            _MISSING_VALUE, _MISSING_VALUE, [],
+        )

@@ -10,6 +10,7 @@ import datetime
 import gradio as gr
 
 from applications.trading_intelligence.projections.decision_view import DecisionState, DecisionView
+from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.ui.decision_center.gradio_view import DecisionCenterUI
 from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionCenterScreen,
@@ -37,6 +38,16 @@ def _make_view(**overrides):
     )
     defaults.update(overrides)
     return DecisionView(**defaults)
+
+
+def _make_entry(**overrides):
+    defaults = dict(
+        evidence_type="NEWS_SENTIMENT",
+        source="newsapi",
+        attached_at=datetime.datetime(2026, 8, 8, 9, 5, 0),
+    )
+    defaults.update(overrides)
+    return EvidenceEntry(**defaults)
 
 
 class _FakeController:
@@ -87,7 +98,7 @@ def test_render_screen_maps_list_rows_and_detail_fields():
     controller = _FakeController(screen=screen)
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    list_rows, symbol, action, status, confidence, updated = ui._render_screen()
+    list_rows, symbol, action, status, confidence, updated, evidence_rows = ui._render_screen()
 
     assert list_rows == [["dec-001", "AAPL", "BUY", "Approval Recorded", "91%"]]
     assert symbol == "AAPL"
@@ -95,6 +106,7 @@ def test_render_screen_maps_list_rows_and_detail_fields():
     assert status == "Approval Recorded"
     assert confidence == "91%"
     assert updated == "2026-08-08 09:00 UTC"
+    assert evidence_rows == []
 
 
 def test_render_screen_handles_empty_decision_list():
@@ -105,7 +117,7 @@ def test_render_screen_handles_empty_decision_list():
     controller = _FakeController(screen=screen)
     ui = DecisionCenterUI(controller, [])
 
-    list_rows, symbol, action, status, confidence, updated = ui._render_screen()
+    list_rows, symbol, action, status, confidence, updated, evidence_rows = ui._render_screen()
 
     assert list_rows == []
     assert symbol == "-"
@@ -113,6 +125,7 @@ def test_render_screen_handles_empty_decision_list():
     assert status == "-"
     assert confidence == "-"
     assert updated == "-"
+    assert evidence_rows == []
 
 
 def test_render_detail_calls_controller_with_the_given_decision_id():
@@ -132,12 +145,13 @@ def test_render_detail_maps_fields_from_the_returned_decision():
     controller = _FakeController(detail_area=DecisionDetailArea(decision=view))
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    symbol, action, status, confidence, updated = ui._render_detail("dec-001")
+    symbol, action, status, confidence, updated, evidence_rows = ui._render_detail("dec-001")
 
     assert symbol == "NVDA"
     assert action == "SELL"
     assert status == "Evidence Attached"
     assert confidence == "74%"
+    assert evidence_rows == []
 
 
 def test_render_detail_returns_missing_values_for_blank_decision_id():
@@ -146,7 +160,7 @@ def test_render_detail_returns_missing_values_for_blank_decision_id():
 
     result = ui._render_detail("")
 
-    assert result == ("-", "-", "-", "-", "-")
+    assert result == ("-", "-", "-", "-", "-", [])
     assert controller.load_decision_detail_calls == []
 
 
@@ -156,7 +170,7 @@ def test_render_detail_handles_missing_decision():
 
     result = ui._render_detail("missing-decision")
 
-    assert result == ("-", "-", "-", "-", "-")
+    assert result == ("-", "-", "-", "-", "-", [])
 
 
 def test_row_select_calls_controller_with_the_id_from_the_selected_row():
@@ -179,12 +193,15 @@ def test_row_select_renders_the_selected_decision_detail():
     ui = DecisionCenterUI(controller, ["dec-003"])
     row = ["dec-003", "NVDA", "SELL", "Approval Recorded", "91%"]
 
-    symbol, action, status, confidence, updated = ui._on_row_select(_make_select_event(row))
+    symbol, action, status, confidence, updated, evidence_rows = ui._on_row_select(
+        _make_select_event(row)
+    )
 
     assert symbol == "NVDA"
     assert action == "SELL"
     assert status == "Approval Recorded"
     assert confidence == "91%"
+    assert evidence_rows == []
 
 
 def test_row_select_handles_deselection_without_crashing():
@@ -193,7 +210,7 @@ def test_row_select_handles_deselection_without_crashing():
 
     result = ui._on_row_select(_make_select_event(["dec-001"], selected=False))
 
-    assert result == ("-", "-", "-", "-", "-")
+    assert result == ("-", "-", "-", "-", "-", [])
     assert controller.load_decision_detail_calls == []
 
 
@@ -203,5 +220,46 @@ def test_row_select_handles_missing_row_value_without_crashing():
 
     result = ui._on_row_select(_make_select_event(None))
 
-    assert result == ("-", "-", "-", "-", "-")
+    assert result == ("-", "-", "-", "-", "-", [])
     assert controller.load_decision_detail_calls == []
+
+
+def test_render_detail_renders_a_single_evidence_row():
+    view = _make_view()
+    entry = _make_entry(evidence_type="NEWS_SENTIMENT", source="newsapi")
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_rows = ui._render_detail("dec-001")
+
+    assert evidence_rows == [["NEWS_SENTIMENT", "newsapi", "2026-08-08 09:05 UTC"]]
+
+
+def test_render_detail_renders_multiple_evidence_rows_in_order():
+    view = _make_view()
+    entry_a = _make_entry(evidence_type="NEWS_SENTIMENT", source="newsapi")
+    entry_b = _make_entry(
+        evidence_type="PRICE_ACTION", source="alpaca",
+        attached_at=datetime.datetime(2026, 8, 8, 9, 10, 0),
+    )
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, evidence=(entry_a, entry_b))
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_rows = ui._render_detail("dec-001")
+
+    assert evidence_rows == [
+        ["NEWS_SENTIMENT", "newsapi", "2026-08-08 09:05 UTC"],
+        ["PRICE_ACTION", "alpaca", "2026-08-08 09:10 UTC"],
+    ]
+
+
+def test_render_detail_renders_an_empty_evidence_table_for_a_decision_with_no_evidence():
+    view = _make_view()
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=()))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_rows = ui._render_detail("dec-001")
+
+    assert evidence_rows == []

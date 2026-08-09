@@ -34,11 +34,25 @@ from sentinel_engine.repositories.projection_repository import ProjectionReposit
 from applications.trading_intelligence.adapters.sentinel_projection_decision_source import (
     SentinelProjectionDecisionSource,
 )
+from applications.trading_intelligence.services.decision_evidence_query_service import (
+    DecisionEvidenceQueryService,
+    EvidenceSource,
+)
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.tests.fakes import InMemoryProjectionRepository
 from applications.trading_intelligence.ui.decision_center.controller import (
     DecisionCenterController,
 )
+
+
+class _NoEvidenceSource(EvidenceSource):
+    """This file proves the Projection -> Contract -> View chain; evidence
+    wiring has its own dedicated tests (test_sentinel_evidence_source.py,
+    test_decision_evidence_query_service.py, test_bootstrap.py), so this
+    collaborator is a deliberately empty stand-in, not a real source."""
+
+    def get_evidence(self, decision_id):
+        return []
 
 
 def _make_projection(**overrides):
@@ -59,7 +73,8 @@ def _make_projection(**overrides):
 def _build_controller(repository: ProjectionRepository) -> DecisionCenterController:
     source = SentinelProjectionDecisionSource(repository)
     query_service = DecisionQueryService(source)
-    return DecisionCenterController(query_service)
+    evidence_query_service = DecisionEvidenceQueryService(_NoEvidenceSource())
+    return DecisionCenterController(query_service, evidence_query_service)
 
 
 def test_empty_repository_produces_an_empty_screen():

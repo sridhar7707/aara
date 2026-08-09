@@ -7,10 +7,11 @@ testable the same way DecisionView/DecisionContract already are, per
 docs/products/AARA_TRADING_INTELLIGENCE_DECISION_CENTER_DESIGN.md's layout
 (Section 4). No sentinel_engine, bot, dashboard, database, or ledger import.
 """
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
 
 from applications.trading_intelligence.projections.decision_view import DecisionView
+from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class DecisionListArea:
 @dataclass(frozen=True)
 class DecisionDetailArea:
     decision: Optional[DecisionView]
+    evidence: Tuple[EvidenceEntry, ...] = field(default=())
 
     @property
     def is_empty(self) -> bool:

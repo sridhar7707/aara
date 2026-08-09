@@ -5,6 +5,7 @@ import dataclasses
 import pytest
 
 from applications.trading_intelligence.projections.decision_view import DecisionState, DecisionView
+from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionCenterScreen,
     DecisionDetailArea,
@@ -23,6 +24,16 @@ def _make_view(**overrides):
     )
     defaults.update(overrides)
     return DecisionView(**defaults)
+
+
+def _make_entry(**overrides):
+    defaults = dict(
+        evidence_type="NEWS_SENTIMENT",
+        source="newsapi",
+        attached_at=datetime.datetime(2026, 8, 4, 12, 5, 0),
+    )
+    defaults.update(overrides)
+    return EvidenceEntry(**defaults)
 
 
 def test_decision_list_area_reports_empty_state_when_no_decisions():
@@ -72,6 +83,37 @@ def test_decision_detail_area_formats_timestamp():
     )
 
     assert area.timestamp_display == "2026-08-04 12:30 UTC"
+
+
+def test_decision_detail_area_defaults_to_no_evidence():
+    area = DecisionDetailArea(decision=_make_view())
+
+    assert area.evidence == ()
+
+
+def test_decision_detail_area_carries_evidence_entries():
+    entry = _make_entry()
+    area = DecisionDetailArea(decision=_make_view(), evidence=(entry,))
+
+    assert area.evidence == (entry,)
+
+
+def test_decision_detail_area_with_evidence_still_formats_core_decision_fields():
+    entry = _make_entry()
+    area = DecisionDetailArea(
+        decision=_make_view(confidence=0.78, status=DecisionState.DECISION_CREATED),
+        evidence=(entry,),
+    )
+
+    assert area.confidence_display == "78%"
+    assert area.status_display == "Decision Created"
+    assert area.timestamp_display == "2026-08-04 12:00 UTC"
+
+
+def test_decision_detail_area_is_immutable_including_evidence():
+    area = DecisionDetailArea(decision=_make_view())
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        area.evidence = (_make_entry(),)
 
 
 def test_decision_center_screen_composes_list_and_detail_areas():

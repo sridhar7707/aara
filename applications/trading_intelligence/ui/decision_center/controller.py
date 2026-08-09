@@ -13,6 +13,9 @@ wired anywhere in this codebase yet.
 """
 from typing import List, Optional
 
+from applications.trading_intelligence.services.decision_evidence_query_service import (
+    DecisionEvidenceQueryService,
+)
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionCenterScreen,
@@ -22,8 +25,13 @@ from applications.trading_intelligence.ui.decision_center.screen import (
 
 
 class DecisionCenterController:
-    def __init__(self, query_service: DecisionQueryService):
+    def __init__(
+        self,
+        query_service: DecisionQueryService,
+        evidence_query_service: DecisionEvidenceQueryService,
+    ):
         self._query_service = query_service
+        self._evidence_query_service = evidence_query_service
 
     def load_decisions(self, decision_ids: List[str]) -> DecisionListArea:
         views = self._query_service.list_decision_views(decision_ids)
@@ -31,7 +39,10 @@ class DecisionCenterController:
 
     def load_decision_detail(self, decision_id: str) -> DecisionDetailArea:
         view = self._query_service.get_decision_view(decision_id)
-        return DecisionDetailArea(decision=view)
+        if view is None:
+            return DecisionDetailArea(decision=None)
+        evidence = tuple(self._evidence_query_service.get_evidence(decision_id))
+        return DecisionDetailArea(decision=view, evidence=evidence)
 
     def load_screen(
         self, decision_ids: List[str], selected_id: Optional[str] = None
@@ -40,7 +51,7 @@ class DecisionCenterController:
         if selected_id is not None:
             detail_area = self.load_decision_detail(selected_id)
         elif list_area.decisions:
-            detail_area = DecisionDetailArea(decision=list_area.decisions[0])
+            detail_area = self.load_decision_detail(list_area.decisions[0].decision_id)
         else:
             detail_area = DecisionDetailArea(decision=None)
         return DecisionCenterScreen(list_area=list_area, detail_area=detail_area)

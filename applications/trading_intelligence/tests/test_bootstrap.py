@@ -7,18 +7,23 @@ returned DecisionCenterUI never exposes its repositories/services directly,
 so verifying "exactly one shared instance" requires observing construction
 itself rather than introspecting the final graph.
 """
+from sentinel_engine.queries.decision_query import DecisionQuery
 from sentinel_engine.repositories.ledger_repository import LedgerRepository
 from sentinel_engine.services.decision_service import DecisionService
 from sentinel_engine.services.evidence_service import EvidenceService
 from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.services.sentinel_engine import SentinelEngine
 
+from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
 from applications.trading_intelligence.adapters.sentinel_projection_decision_source import (
     SentinelProjectionDecisionSource,
 )
 from applications.trading_intelligence.bootstrap import (
     _InMemoryProjectionRepository,
     build_application,
+)
+from applications.trading_intelligence.services.decision_evidence_query_service import (
+    DecisionEvidenceQueryService,
 )
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
@@ -105,13 +110,35 @@ def test_build_application_read_chain_shares_the_same_projection_repository(monk
 
 def test_build_application_wires_query_service_and_controller_once(monkeypatch):
     query_service_calls = _track_constructor_calls(monkeypatch, DecisionQueryService)
+    evidence_query_service_calls = _track_constructor_calls(monkeypatch, DecisionEvidenceQueryService)
     controller_calls = _track_constructor_calls(monkeypatch, DecisionCenterController)
 
     build_application()
 
     assert len(query_service_calls) == 1
+    assert len(evidence_query_service_calls) == 1
     assert len(controller_calls) == 1
     assert controller_calls[0]["args"][0] is query_service_calls[0]["self"]
+    assert controller_calls[0]["args"][1] is evidence_query_service_calls[0]["self"]
+
+
+def test_build_application_wires_evidence_read_chain_off_the_same_repositories(monkeypatch):
+    ledger_calls = _track_constructor_calls(monkeypatch, LedgerRepository)
+    projection_calls = _track_constructor_calls(monkeypatch, _InMemoryProjectionRepository)
+    decision_query_calls = _track_constructor_calls(monkeypatch, DecisionQuery)
+    evidence_source_calls = _track_constructor_calls(monkeypatch, SentinelEvidenceSource)
+
+    build_application()
+
+    ledger_repository = ledger_calls[0]["self"]
+    projection_repository = projection_calls[0]["self"]
+
+    assert len(decision_query_calls) == 1
+    assert decision_query_calls[0]["args"][0] is ledger_repository
+    assert decision_query_calls[0]["args"][1] is projection_repository
+
+    assert len(evidence_source_calls) == 1
+    assert evidence_source_calls[0]["args"][0] is decision_query_calls[0]["self"]
 
 
 def test_build_application_does_not_duplicate_the_object_graph(monkeypatch):
@@ -123,6 +150,9 @@ def test_build_application_does_not_duplicate_the_object_graph(monkeypatch):
     sentinel_engine_calls = _track_constructor_calls(monkeypatch, SentinelEngine)
     source_calls = _track_constructor_calls(monkeypatch, SentinelProjectionDecisionSource)
     query_service_calls = _track_constructor_calls(monkeypatch, DecisionQueryService)
+    decision_query_calls = _track_constructor_calls(monkeypatch, DecisionQuery)
+    evidence_source_calls = _track_constructor_calls(monkeypatch, SentinelEvidenceSource)
+    evidence_query_service_calls = _track_constructor_calls(monkeypatch, DecisionEvidenceQueryService)
     controller_calls = _track_constructor_calls(monkeypatch, DecisionCenterController)
 
     build_application()
@@ -135,6 +165,9 @@ def test_build_application_does_not_duplicate_the_object_graph(monkeypatch):
     assert len(sentinel_engine_calls) == 1
     assert len(source_calls) == 1
     assert len(query_service_calls) == 1
+    assert len(decision_query_calls) == 1
+    assert len(evidence_source_calls) == 1
+    assert len(evidence_query_service_calls) == 1
     assert len(controller_calls) == 1
 
     repository_instances = {ledger_calls[0]["self"], projection_calls[0]["self"]}
@@ -161,9 +194,31 @@ def test_build_application_seeded_decisions_are_reachable_by_id():
     hand-built projections standing in for it."""
     ui = build_application()
 
-    symbol, action, status, confidence, _updated = ui._render_detail("dec-seed-003")
+    symbol, action, status, confidence, _updated, _evidence_rows = ui._render_detail("dec-seed-003")
 
     assert symbol == "NVDA"
     assert action == "SELL"
     assert status == "Approval Recorded"
     assert confidence == "91%"
+
+
+def test_build_application_seeds_evidence_for_decisions_that_had_it_attached():
+    """dec-seed-002/003 have evidence attached via engine.attach_evidence()
+    in _seed_decisions(); dec-seed-001 deliberately does not, so both the
+    "has evidence" and "no evidence" states are demonstrated by the existing
+    seed path without any change to it."""
+    ui = build_application()
+
+    *_, evidence_002 = ui._render_detail("dec-seed-002")
+    *_, evidence_003 = ui._render_detail("dec-seed-003")
+
+    assert evidence_002 == [["NEWS_SENTIMENT", "newsapi", "2026-08-08 09:00 UTC"]]
+    assert evidence_003 == [["NEWS_SENTIMENT", "newsapi", "2026-08-08 09:00 UTC"]]
+
+
+def test_build_application_seeded_decision_without_attached_evidence_has_none():
+    ui = build_application()
+
+    *_, evidence_rows = ui._render_detail("dec-seed-001")
+
+    assert evidence_rows == []

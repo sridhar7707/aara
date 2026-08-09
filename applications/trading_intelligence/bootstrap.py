@@ -35,6 +35,7 @@ from sentinel_engine.governance.approval_status import ApprovalStatus
 from sentinel_engine.governance.policy import Policy
 from sentinel_engine.ledger.ledger import LedgerStore
 from sentinel_engine.projections.decision_projection import DecisionProjection
+from sentinel_engine.queries.decision_query import DecisionQuery
 from sentinel_engine.repositories.ledger_repository import LedgerRepository
 from sentinel_engine.repositories.projection_repository import ProjectionRepository
 from sentinel_engine.services.decision_service import DecisionService
@@ -42,8 +43,12 @@ from sentinel_engine.services.evidence_service import EvidenceService
 from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.services.sentinel_engine import SentinelEngine
 
+from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
 from applications.trading_intelligence.adapters.sentinel_projection_decision_source import (
     SentinelProjectionDecisionSource,
+)
+from applications.trading_intelligence.services.decision_evidence_query_service import (
+    DecisionEvidenceQueryService,
 )
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
@@ -138,6 +143,11 @@ def build_application() -> DecisionCenterUI:
 
     source = SentinelProjectionDecisionSource(projection_repository)
     query_service = DecisionQueryService(source)
-    controller = DecisionCenterController(query_service)
+
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+    evidence_source = SentinelEvidenceSource(decision_query)
+    evidence_query_service = DecisionEvidenceQueryService(evidence_source)
+
+    controller = DecisionCenterController(query_service, evidence_query_service)
 
     return DecisionCenterUI(controller, decision_ids)

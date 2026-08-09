@@ -19,10 +19,13 @@ _SUBPACKAGES = [
     "applications.trading_intelligence.contracts.decision_contract",
     "applications.trading_intelligence.adapters",
     "applications.trading_intelligence.adapters.sentinel_projection_decision_source",
+    "applications.trading_intelligence.adapters.sentinel_evidence_source",
     "applications.trading_intelligence.projections",
     "applications.trading_intelligence.projections.decision_view",
+    "applications.trading_intelligence.projections.evidence_entry",
     "applications.trading_intelligence.services",
     "applications.trading_intelligence.services.decision_query_service",
+    "applications.trading_intelligence.services.decision_evidence_query_service",
 ]
 
 

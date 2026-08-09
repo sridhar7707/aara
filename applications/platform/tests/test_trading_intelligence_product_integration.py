@@ -36,6 +36,10 @@ from applications.trading_intelligence.adapters.sentinel_projection_decision_sou
     SentinelProjectionDecisionSource,
 )
 from applications.trading_intelligence.product import TRADING_INTELLIGENCE_PRODUCT
+from applications.trading_intelligence.services.decision_evidence_query_service import (
+    DecisionEvidenceQueryService,
+    EvidenceSource,
+)
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.tests.fakes import InMemoryProjectionRepository
 from applications.trading_intelligence.ui.decision_center.controller import (
@@ -44,6 +48,18 @@ from applications.trading_intelligence.ui.decision_center.controller import (
 from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.projections.decision_projection import DecisionProjection
 from sentinel_engine.repositories.projection_repository import ProjectionRepository
+
+
+class _NoEvidenceSource(EvidenceSource):
+    """This file proves NavigationItem -> DecisionCenterController
+    construction, not evidence wiring (which has its own dedicated tests
+    under applications/trading_intelligence/) -- a deliberately empty
+    stand-in, not a real source, matching the pattern already established in
+    applications/trading_intelligence/tests/test_decision_center_integration.py."""
+
+    def get_evidence(self, decision_id):
+        return []
+
 
 _DECISION_CENTER_WORKSPACE = Workspace(
     workspace_id="trading_intelligence.decision_center",
@@ -223,7 +239,8 @@ def test_navigation_item_can_be_used_to_construct_decision_center_experience():
     )
     source = SentinelProjectionDecisionSource(repository)
     query_service = DecisionQueryService(source)
-    controller = DecisionCenterController(query_service)
+    evidence_query_service = DecisionEvidenceQueryService(_NoEvidenceSource())
+    controller = DecisionCenterController(query_service, evidence_query_service)
 
     screen = controller.load_screen(["dec-001"])
 
@@ -263,7 +280,9 @@ def test_navigation_driven_construction_performs_no_writes():
             raise AssertionError("no layer in this chain may call ProjectionRepository.save()")
 
     source = SentinelProjectionDecisionSource(_AssertNoSaveRepository())
-    controller = DecisionCenterController(DecisionQueryService(source))
+    controller = DecisionCenterController(
+        DecisionQueryService(source), DecisionEvidenceQueryService(_NoEvidenceSource())
+    )
 
     controller.load_screen(["dec-001"])
 
