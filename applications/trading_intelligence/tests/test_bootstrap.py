@@ -231,14 +231,15 @@ def test_build_application_seeded_decisions_are_reachable_by_id():
     ui = build_application()
 
     (
-        symbol, action, status, confidence, _updated,
-        _evidence_rows, _governance_rows, _approval_rows,
+        header, lifecycle, confidence, _updated,
+        _evidence_html, _governance_html, _approval_html,
     ) = ui._render_detail("dec-seed-003")
 
-    assert symbol == "NVDA"
-    assert action == "SELL"
-    assert status == "Approval Recorded"
+    assert "NVDA" in header
+    assert "SELL" in header
     assert confidence == "91%"
+    assert 'class="stage active"><span class="dot"></span><span class="label">Approval</span>' \
+        in lifecycle
 
 
 def test_build_application_seeds_evidence_for_decisions_that_had_it_attached():
@@ -251,16 +252,18 @@ def test_build_application_seeds_evidence_for_decisions_that_had_it_attached():
     *_, evidence_002, _governance_002, _approval_002 = ui._render_detail("dec-seed-002")
     *_, evidence_003, _governance_003, _approval_003 = ui._render_detail("dec-seed-003")
 
-    assert evidence_002 == [["NEWS_SENTIMENT", "newsapi", "2026-08-08 09:00 UTC"]]
-    assert evidence_003 == [["NEWS_SENTIMENT", "newsapi", "2026-08-08 09:00 UTC"]]
+    for evidence_html in (evidence_002, evidence_003):
+        assert "NEWS_SENTIMENT" in evidence_html
+        assert "newsapi" in evidence_html
+        assert "2026-08-08 09:00 UTC" in evidence_html
 
 
 def test_build_application_seeded_decision_without_attached_evidence_has_none():
     ui = build_application()
 
-    *_, evidence_rows, _governance_rows, _approval_rows = ui._render_detail("dec-seed-001")
+    *_, evidence_html, _governance_html, _approval_html = ui._render_detail("dec-seed-001")
 
-    assert evidence_rows == []
+    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
 
 
 def test_build_application_seeds_governance_and_approval_for_the_fully_approved_decision():
@@ -272,26 +275,31 @@ def test_build_application_seeds_governance_and_approval_for_the_fully_approved_
     to it."""
     ui = build_application()
 
-    *_, _evidence_rows, governance_rows, approval_rows = ui._render_detail("dec-seed-003")
+    *_, _evidence_html, governance_html, approval_html = ui._render_detail("dec-seed-003")
 
     # evaluate_policy() timestamps with datetime.utcnow() (unlike
     # record_approval(), which uses the seed's fixed `now`), so only
     # policy_id/enabled are asserted precisely here; evaluated_at is only
-    # checked for well-formed shape.
-    assert len(governance_rows) == 1
-    assert governance_rows[0][0] == "pol-seed-001"
-    assert governance_rows[0][1] == "Yes"
-    assert governance_rows[0][2]  # evaluated_at formatted, non-empty
-    assert approval_rows == [["Approved", "risk_officer", "2026-08-08 09:00 UTC"]]
+    # checked for well-formed presence.
+    assert "pol-seed-001" in governance_html
+    assert "Yes" in governance_html
+    assert "UTC" in governance_html
+    assert "Approved" in approval_html
+    assert "risk_officer" in approval_html
+    assert "2026-08-08 09:00 UTC" in approval_html
 
 
 def test_build_application_seeded_decisions_without_governance_or_approval_have_none():
     ui = build_application()
 
-    *_, _evidence_rows_1, governance_rows_1, approval_rows_1 = ui._render_detail("dec-seed-001")
-    *_, _evidence_rows_2, governance_rows_2, approval_rows_2 = ui._render_detail("dec-seed-002")
+    *_, _evidence_html_1, governance_html_1, approval_html_1 = ui._render_detail("dec-seed-001")
+    *_, _evidence_html_2, governance_html_2, approval_html_2 = ui._render_detail("dec-seed-002")
 
-    assert governance_rows_1 == []
-    assert approval_rows_1 == []
-    assert governance_rows_2 == []
-    assert approval_rows_2 == []
+    assert governance_html_1 == (
+        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+    )
+    assert approval_html_1 == '<div class="aara-empty-message">No approval recorded.</div>'
+    assert governance_html_2 == (
+        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+    )
+    assert approval_html_2 == '<div class="aara-empty-message">No approval recorded.</div>'

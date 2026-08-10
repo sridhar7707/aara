@@ -18,6 +18,7 @@ _MODULES = [
     "applications.trading_intelligence.ui.decision_center.screen",
     "applications.trading_intelligence.ui.decision_center.mock_data",
     "applications.trading_intelligence.ui.decision_center.controller",
+    "applications.trading_intelligence.ui.decision_center.theme",
 ]
 
 

@@ -4,6 +4,12 @@ Uses a fake DecisionCenterController -- no real query service/adapter/
 sentinel_engine wiring -- since this file only tests Gradio-facing
 rendering/mapping, not the controller itself (already tested in
 test_decision_center_controller.py).
+
+Evidence/Governance/Approval and the decision header/lifecycle track are
+HTML fragments (see gradio_view.py's Visual Pass rewrite) -- these tests
+assert on the presence and order of key text content within them rather
+than matching a byte-exact HTML string, since exact markup is an
+implementation detail, not the contract.
 """
 import datetime
 
@@ -13,7 +19,11 @@ from applications.trading_intelligence.projections.approval_entry import Approva
 from applications.trading_intelligence.projections.decision_view import DecisionState, DecisionView
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
-from applications.trading_intelligence.ui.decision_center.gradio_view import DecisionCenterUI
+from applications.trading_intelligence.ui.decision_center.gradio_view import (
+    _WHY_RATIONALE_HTML,
+    _WHY_RATIONALE_MESSAGE,
+    DecisionCenterUI,
+)
 from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionCenterScreen,
     DecisionDetailArea,
@@ -89,6 +99,11 @@ class _FakeController:
         return self._detail_area
 
 
+def _assert_index_order(html, *substrings):
+    positions = [html.index(s) for s in substrings]
+    assert positions == sorted(positions), f"expected order {substrings} in {html!r}"
+
+
 def test_decision_center_ui_can_be_constructed():
     controller = _FakeController()
     ui = DecisionCenterUI(controller, ["dec-001"])
@@ -122,19 +137,26 @@ def test_render_screen_maps_list_rows_and_detail_fields():
     ui = DecisionCenterUI(controller, ["dec-001"])
 
     (
-        list_rows, symbol, action, status, confidence, updated,
-        evidence_rows, governance_rows, approval_rows,
+        list_rows, header, lifecycle, conviction, updated,
+        evidence_html, governance_html, approval_html,
     ) = ui._render_screen()
 
-    assert list_rows == [["dec-001", "AAPL", "BUY", "Approval Recorded", "91%"]]
-    assert symbol == "AAPL"
-    assert action == "BUY"
-    assert status == "Approval Recorded"
-    assert confidence == "91%"
+    assert list_rows == [[
+        "dec-001", "AAPL",
+        '<span class="aara-list-action-badge action-buy">BUY</span>',
+        "Approval Recorded", "91%",
+    ]]
+    assert "AAPL" in header
+    assert "BUY" in header
+    assert "dec-001" not in header
+    assert "Approval" in lifecycle
+    assert conviction == "91%"
     assert updated == "2026-08-08 09:00 UTC"
-    assert evidence_rows == []
-    assert governance_rows == []
-    assert approval_rows == []
+    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
+    assert governance_html == (
+        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+    )
+    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
 
 
 def test_render_screen_handles_empty_decision_list():
@@ -146,19 +168,18 @@ def test_render_screen_handles_empty_decision_list():
     ui = DecisionCenterUI(controller, [])
 
     (
-        list_rows, symbol, action, status, confidence, updated,
-        evidence_rows, governance_rows, approval_rows,
+        list_rows, header, lifecycle, conviction, updated,
+        evidence_html, governance_html, approval_html,
     ) = ui._render_screen()
 
     assert list_rows == []
-    assert symbol == "-"
-    assert action == "-"
-    assert status == "-"
-    assert confidence == "-"
+    assert header == ""
+    assert lifecycle == "-"
+    assert conviction == "-"
     assert updated == "-"
-    assert evidence_rows == []
-    assert governance_rows == []
-    assert approval_rows == []
+    assert evidence_html == ""
+    assert governance_html == ""
+    assert approval_html == ""
 
 
 def test_render_detail_calls_controller_with_the_given_decision_id():
@@ -179,36 +200,60 @@ def test_render_detail_maps_fields_from_the_returned_decision():
     ui = DecisionCenterUI(controller, ["dec-001"])
 
     (
-        symbol, action, status, confidence, updated,
-        evidence_rows, governance_rows, approval_rows,
+        header, lifecycle, conviction, updated,
+        evidence_html, governance_html, approval_html,
     ) = ui._render_detail("dec-001")
 
-    assert symbol == "NVDA"
-    assert action == "SELL"
-    assert status == "Evidence Attached"
-    assert confidence == "74%"
-    assert evidence_rows == []
-    assert governance_rows == []
-    assert approval_rows == []
+    assert "NVDA" in header
+    assert "SELL" in header
+    assert "Evidence" in lifecycle
+    assert conviction == "74%"
+    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
+    assert governance_html == (
+        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+    )
+    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
 
 
-def test_render_detail_returns_missing_values_for_blank_decision_id():
+def test_render_detail_returns_blank_state_for_blank_decision_id():
     controller = _FakeController()
     ui = DecisionCenterUI(controller, ["dec-001"])
 
     result = ui._render_detail("")
 
-    assert result == ("-", "-", "-", "-", "-", [], [], [])
+    assert result == ("", "-", "-", "-", "", "", "")
     assert controller.load_decision_detail_calls == []
 
 
-def test_render_detail_handles_missing_decision():
+def test_render_detail_shows_not_found_message_for_a_missing_decision():
     controller = _FakeController(detail_area=DecisionDetailArea(decision=None))
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    result = ui._render_detail("missing-decision")
+    header, lifecycle, conviction, updated, evidence, governance, approval = (
+        ui._render_detail("missing-decision")
+    )
 
-    assert result == ("-", "-", "-", "-", "-", [], [], [])
+    assert "No decision found for this ID." in header
+    assert lifecycle == "-"
+    assert conviction == "-"
+    assert updated == "-"
+    assert evidence == ""
+    assert governance == ""
+    assert approval == ""
+
+
+def test_missing_decision_and_blank_selection_render_different_headers():
+    """A real lookup miss must be distinguishable from nothing being
+    selected -- EMPTY (blank textbox) != NOT FOUND (searched and missed)."""
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=None))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    blank_header = ui._render_detail("")[0]
+    missing_header = ui._render_detail("does-not-exist")[0]
+
+    assert blank_header == ""
+    assert "No decision found for this ID." in missing_header
+    assert blank_header != missing_header
 
 
 def test_render_detail_shows_a_message_when_the_decision_read_fails():
@@ -218,18 +263,17 @@ def test_render_detail_shows_a_message_when_the_decision_read_fails():
     ui = DecisionCenterUI(controller, ["dec-001"])
 
     (
-        symbol, action, status, confidence, updated,
-        evidence_rows, governance_rows, approval_rows,
+        header, lifecycle, conviction, updated,
+        evidence_html, governance_html, approval_html,
     ) = ui._render_detail("dec-001")
 
-    assert symbol == "Unable to load this decision."
-    assert action == "-"
-    assert status == "-"
-    assert confidence == "-"
+    assert "Unable to load this decision." in header
+    assert lifecycle == "-"
+    assert conviction == "-"
     assert updated == "-"
-    assert evidence_rows == []
-    assert governance_rows == []
-    assert approval_rows == []
+    assert evidence_html == ""
+    assert governance_html == ""
+    assert approval_html == ""
 
 
 def test_render_detail_shows_a_message_when_evidence_read_fails_but_decision_still_renders():
@@ -242,14 +286,17 @@ def test_render_detail_shows_a_message_when_evidence_read_fails_but_decision_sti
     ui = DecisionCenterUI(controller, ["dec-001"])
 
     (
-        symbol, action, status, confidence, updated,
-        evidence_rows, governance_rows, approval_rows,
+        header, lifecycle, conviction, updated,
+        evidence_html, governance_html, approval_html,
     ) = ui._render_detail("dec-001")
 
-    assert symbol == "AAPL"
-    assert evidence_rows == [["Evidence is temporarily unavailable.", "-", "-"]]
-    assert governance_rows == []
-    assert approval_rows == []
+    assert "AAPL" in header
+    assert "Evidence is temporarily unavailable." in evidence_html
+    assert 'class="aara-error-message"' in evidence_html
+    assert governance_html == (
+        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+    )
+    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
 
 
 def test_render_detail_shows_a_message_when_governance_read_fails():
@@ -261,11 +308,11 @@ def test_render_detail_shows_a_message_when_governance_read_fails():
     )
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    *_rest, evidence_rows, governance_rows, approval_rows = ui._render_detail("dec-001")
+    *_rest, evidence_html, governance_html, approval_html = ui._render_detail("dec-001")
 
-    assert governance_rows == [["Governance information is temporarily unavailable.", "-", "-"]]
-    assert evidence_rows == []
-    assert approval_rows == []
+    assert "Governance information is temporarily unavailable." in governance_html
+    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
+    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
 
 
 def test_render_detail_shows_a_message_when_approvals_read_fails():
@@ -277,11 +324,13 @@ def test_render_detail_shows_a_message_when_approvals_read_fails():
     )
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    *_rest, evidence_rows, governance_rows, approval_rows = ui._render_detail("dec-001")
+    *_rest, evidence_html, governance_html, approval_html = ui._render_detail("dec-001")
 
-    assert approval_rows == [["Approval information is temporarily unavailable.", "-", "-"]]
-    assert evidence_rows == []
-    assert governance_rows == []
+    assert "Approval information is temporarily unavailable." in approval_html
+    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
+    assert governance_html == (
+        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+    )
 
 
 def test_row_select_calls_controller_with_the_id_from_the_selected_row():
@@ -305,17 +354,19 @@ def test_row_select_renders_the_selected_decision_detail():
     row = ["dec-003", "NVDA", "SELL", "Approval Recorded", "91%"]
 
     (
-        symbol, action, status, confidence, updated,
-        evidence_rows, governance_rows, approval_rows,
+        header, lifecycle, conviction, updated,
+        evidence_html, governance_html, approval_html,
     ) = ui._on_row_select(_make_select_event(row))
 
-    assert symbol == "NVDA"
-    assert action == "SELL"
-    assert status == "Approval Recorded"
-    assert confidence == "91%"
-    assert evidence_rows == []
-    assert governance_rows == []
-    assert approval_rows == []
+    assert "NVDA" in header
+    assert "SELL" in header
+    assert "Approval" in lifecycle
+    assert conviction == "91%"
+    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
+    assert governance_html == (
+        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+    )
+    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
 
 
 def test_row_select_handles_deselection_without_crashing():
@@ -324,7 +375,7 @@ def test_row_select_handles_deselection_without_crashing():
 
     result = ui._on_row_select(_make_select_event(["dec-001"], selected=False))
 
-    assert result == ("-", "-", "-", "-", "-", [], [], [])
+    assert result == ("", "-", "-", "-", "", "", "")
     assert controller.load_decision_detail_calls == []
 
 
@@ -334,22 +385,25 @@ def test_row_select_handles_missing_row_value_without_crashing():
 
     result = ui._on_row_select(_make_select_event(None))
 
-    assert result == ("-", "-", "-", "-", "-", [], [], [])
+    assert result == ("", "-", "-", "-", "", "", "")
     assert controller.load_decision_detail_calls == []
 
 
-def test_render_detail_renders_a_single_evidence_row():
+def test_render_detail_renders_a_single_evidence_card():
     view = _make_view()
     entry = _make_entry(evidence_type="NEWS_SENTIMENT", source="newsapi")
     controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    *_, evidence_rows, _governance_rows, _approval_rows = ui._render_detail("dec-001")
+    *_, evidence_html, _governance_html, _approval_html = ui._render_detail("dec-001")
 
-    assert evidence_rows == [["NEWS_SENTIMENT", "newsapi", "2026-08-08 09:05 UTC"]]
+    assert "NEWS_SENTIMENT" in evidence_html
+    assert "newsapi" in evidence_html
+    assert "2026-08-08 09:05 UTC" in evidence_html
+    assert 'class="aara-record-card"' in evidence_html
 
 
-def test_render_detail_renders_multiple_evidence_rows_in_order():
+def test_render_detail_renders_multiple_evidence_cards_in_order():
     view = _make_view()
     entry_a = _make_entry(evidence_type="NEWS_SENTIMENT", source="newsapi")
     entry_b = _make_entry(
@@ -361,25 +415,22 @@ def test_render_detail_renders_multiple_evidence_rows_in_order():
     )
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    *_, evidence_rows, _governance_rows, _approval_rows = ui._render_detail("dec-001")
+    *_, evidence_html, _governance_html, _approval_html = ui._render_detail("dec-001")
 
-    assert evidence_rows == [
-        ["NEWS_SENTIMENT", "newsapi", "2026-08-08 09:05 UTC"],
-        ["PRICE_ACTION", "alpaca", "2026-08-08 09:10 UTC"],
-    ]
+    _assert_index_order(evidence_html, "NEWS_SENTIMENT", "PRICE_ACTION")
 
 
-def test_render_detail_renders_an_empty_evidence_table_for_a_decision_with_no_evidence():
+def test_render_detail_renders_an_empty_evidence_message_for_a_decision_with_no_evidence():
     view = _make_view()
     controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=()))
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    *_, evidence_rows, _governance_rows, _approval_rows = ui._render_detail("dec-001")
+    *_, evidence_html, _governance_html, _approval_html = ui._render_detail("dec-001")
 
-    assert evidence_rows == []
+    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
 
 
-def test_render_detail_renders_a_single_governance_row():
+def test_render_detail_renders_a_single_governance_card():
     view = _make_view()
     entry = _make_governance_entry(policy_id="pol-max-pos", enabled=True)
     controller = _FakeController(
@@ -387,9 +438,11 @@ def test_render_detail_renders_a_single_governance_row():
     )
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    *_, _evidence_rows, governance_rows, _approval_rows = ui._render_detail("dec-001")
+    *_, _evidence_html, governance_html, _approval_html = ui._render_detail("dec-001")
 
-    assert governance_rows == [["pol-max-pos", "Yes", "2026-08-08 09:06 UTC"]]
+    assert "pol-max-pos" in governance_html
+    assert "Yes" in governance_html
+    assert "2026-08-08 09:06 UTC" in governance_html
 
 
 def test_render_detail_renders_a_disabled_policy_as_no():
@@ -400,12 +453,13 @@ def test_render_detail_renders_a_disabled_policy_as_no():
     )
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    *_, _evidence_rows, governance_rows, _approval_rows = ui._render_detail("dec-001")
+    *_, _evidence_html, governance_html, _approval_html = ui._render_detail("dec-001")
 
-    assert governance_rows == [["pol-001", "No", "2026-08-08 09:06 UTC"]]
+    assert "pol-001" in governance_html
+    assert "No" in governance_html
 
 
-def test_render_detail_renders_multiple_governance_rows_in_order():
+def test_render_detail_renders_multiple_governance_cards_in_order():
     view = _make_view()
     entry_a = _make_governance_entry(policy_id="pol-001")
     entry_b = _make_governance_entry(
@@ -416,25 +470,24 @@ def test_render_detail_renders_multiple_governance_rows_in_order():
     )
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    *_, _evidence_rows, governance_rows, _approval_rows = ui._render_detail("dec-001")
+    *_, _evidence_html, governance_html, _approval_html = ui._render_detail("dec-001")
 
-    assert governance_rows == [
-        ["pol-001", "Yes", "2026-08-08 09:06 UTC"],
-        ["pol-002", "Yes", "2026-08-08 09:08 UTC"],
-    ]
+    _assert_index_order(governance_html, "pol-001", "pol-002")
 
 
-def test_render_detail_renders_an_empty_governance_table_for_a_decision_with_no_governance():
+def test_render_detail_renders_an_empty_governance_message_for_a_decision_with_no_governance():
     view = _make_view()
     controller = _FakeController(detail_area=DecisionDetailArea(decision=view, governance=()))
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    *_, _evidence_rows, governance_rows, _approval_rows = ui._render_detail("dec-001")
+    *_, _evidence_html, governance_html, _approval_html = ui._render_detail("dec-001")
 
-    assert governance_rows == []
+    assert governance_html == (
+        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+    )
 
 
-def test_render_detail_renders_a_single_approval_row():
+def test_render_detail_renders_a_single_approval_card():
     view = _make_view()
     entry = _make_approval_entry(status=ApprovalStatus.APPROVED, approved_by="risk_officer")
     controller = _FakeController(
@@ -442,9 +495,11 @@ def test_render_detail_renders_a_single_approval_row():
     )
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    *_, _evidence_rows, _governance_rows, approval_rows = ui._render_detail("dec-001")
+    *_, _evidence_html, _governance_html, approval_html = ui._render_detail("dec-001")
 
-    assert approval_rows == [["Approved", "risk_officer", "2026-08-08 09:07 UTC"]]
+    assert "Approved" in approval_html
+    assert "risk_officer" in approval_html
+    assert "2026-08-08 09:07 UTC" in approval_html
 
 
 def test_render_detail_renders_a_rejected_approval():
@@ -455,19 +510,36 @@ def test_render_detail_renders_a_rejected_approval():
     )
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    *_, _evidence_rows, _governance_rows, approval_rows = ui._render_detail("dec-001")
+    *_, _evidence_html, _governance_html, approval_html = ui._render_detail("dec-001")
 
-    assert approval_rows == [["Rejected", "risk_officer", "2026-08-08 09:07 UTC"]]
+    assert "Rejected" in approval_html
 
 
-def test_render_detail_renders_an_empty_approval_table_for_a_decision_with_no_approvals():
+def test_approval_card_does_not_render_the_fabricated_authorization_recorded_label():
+    """V4: 'Authorization Recorded' was V3 presentation copy with no
+    ApprovalEntry field behind it -- only real entry data (the status
+    verdict, approved_by, approved_at) may appear on the card."""
+    view = _make_view()
+    entry = _make_approval_entry(status=ApprovalStatus.APPROVED, approved_by="risk_officer")
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, approvals=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, _evidence_html, _governance_html, approval_html = ui._render_detail("dec-001")
+
+    assert "Authorization Recorded" not in approval_html
+    assert "Approved" in approval_html
+    assert "risk_officer" in approval_html
+    assert "2026-08-08 09:07 UTC" in approval_html
+
+
+def test_render_detail_renders_an_empty_approval_message_for_a_decision_with_no_approvals():
     view = _make_view()
     controller = _FakeController(detail_area=DecisionDetailArea(decision=view, approvals=()))
     ui = DecisionCenterUI(controller, ["dec-001"])
 
-    *_, _evidence_rows, _governance_rows, approval_rows = ui._render_detail("dec-001")
+    *_, _evidence_html, _governance_html, approval_html = ui._render_detail("dec-001")
 
-    assert approval_rows == []
+    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
 
 
 def test_row_select_renders_governance_and_approval_for_the_selected_decision():
@@ -482,12 +554,13 @@ def test_row_select_renders_governance_and_approval_for_the_selected_decision():
     ui = DecisionCenterUI(controller, ["dec-003"])
     row = ["dec-003", "NVDA", "SELL", "Approval Recorded", "91%"]
 
-    *_, _evidence_rows, governance_rows, approval_rows = ui._on_row_select(
+    *_, _evidence_html, governance_html, approval_html = ui._on_row_select(
         _make_select_event(row)
     )
 
-    assert governance_rows == [["pol-001", "Yes", "2026-08-08 09:06 UTC"]]
-    assert approval_rows == [["Approved", "risk_officer", "2026-08-08 09:07 UTC"]]
+    assert "pol-001" in governance_html
+    assert "Approved" in approval_html
+    assert "risk_officer" in approval_html
 
 
 def test_render_detail_renders_governance_and_approval_from_manual_lookup():
@@ -501,7 +574,118 @@ def test_render_detail_renders_governance_and_approval_from_manual_lookup():
     )
     ui = DecisionCenterUI(controller, ["dec-002"])
 
-    *_, _evidence_rows, governance_rows, approval_rows = ui._render_detail("dec-002")
+    *_, _evidence_html, governance_html, approval_html = ui._render_detail("dec-002")
 
-    assert governance_rows == [["pol-001", "Yes", "2026-08-08 09:06 UTC"]]
-    assert approval_rows == [["Approved", "risk_officer", "2026-08-08 09:07 UTC"]]
+    assert "pol-001" in governance_html
+    assert "Approved" in approval_html
+    assert "risk_officer" in approval_html
+
+
+def test_lifecycle_track_marks_all_four_stages_for_approval_recorded():
+    view = _make_view(status=DecisionState.APPROVAL_RECORDED)
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    lifecycle = ui._render_detail("dec-001")[1]
+
+    for label in ("Created", "Evidence", "Governance", "Approval"):
+        assert label in lifecycle
+    assert lifecycle.count('class="stage complete"') == 3
+    assert lifecycle.count('class="stage active"') == 1
+
+
+def test_lifecycle_track_reflects_decision_created_as_the_first_stage():
+    view = _make_view(status=DecisionState.DECISION_CREATED)
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    lifecycle = ui._render_detail("dec-001")[1]
+
+    assert 'class="stage active"><span class="dot"></span><span class="label">Created</span>' \
+        in lifecycle
+
+
+def test_decision_header_escapes_symbol_and_never_exposes_the_raw_decision_id():
+    """The header shows only symbol + action ('NVDA · SELL'); decision_id is
+    an internal identifier (used for row selection, controller/service
+    lookups, and audit correlation) and must never appear in user-facing
+    HTML, regardless of its content -- see AI-approved UX correction,
+    2026-08-10."""
+    view = _make_view(symbol="<script>alert(1)</script>", decision_id="dec-should-not-render")
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    header = ui._render_detail("dec-001")[0]
+
+    assert "<script>" not in header
+    assert "&lt;script&gt;" in header
+    assert "dec-should-not-render" not in header
+
+
+def test_evidence_card_escapes_html_in_entry_values():
+    view = _make_view()
+    entry = _make_entry(evidence_type="<img src=x onerror=alert(1)>", source="newsapi")
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_html, _governance_html, _approval_html = ui._render_detail("dec-001")
+
+    assert "<img" not in evidence_html
+    assert "&lt;img" in evidence_html
+
+
+def test_action_badge_reflects_buy_sell_and_hold():
+    for action, css_class in (("BUY", "action-buy"), ("SELL", "action-sell"), ("HOLD", "action-hold")):
+        view = _make_view(action=action)
+        controller = _FakeController(detail_area=DecisionDetailArea(decision=view))
+        ui = DecisionCenterUI(controller, ["dec-001"])
+
+        header = ui._render_detail("dec-001")[0]
+
+        assert css_class in header
+        assert action in header
+
+
+def test_list_rows_render_the_action_column_as_a_badge_for_each_action():
+    """The Decisions gr.Dataframe renders its Action column through
+    datatype="markdown" (V3) -- list_rows must carry the same restrained
+    badge markup as the hero, not a plain string, for every BUY/SELL/HOLD
+    value, and it must not disturb column 0 (decision_id), which
+    _on_row_select depends on via evt.row_value[0]."""
+    for action, css_class in (("BUY", "action-buy"), ("SELL", "action-sell"), ("HOLD", "action-hold")):
+        view = _make_view(action=action)
+        screen = DecisionCenterScreen(
+            list_area=DecisionListArea(decisions=[view]),
+            detail_area=DecisionDetailArea(decision=view),
+        )
+        controller = _FakeController(screen=screen)
+        ui = DecisionCenterUI(controller, ["dec-001"])
+
+        list_rows = ui._render_screen()[0]
+
+        assert list_rows[0][0] == "dec-001"
+        assert list_rows[0][2] == f'<span class="aara-list-action-badge {css_class}">{action}</span>'
+
+
+def test_why_rationale_is_the_exact_fixed_placeholder_text():
+    """V4: the Why?/Rationale section is a static, decision-independent
+    block -- no LLM call, no inferred copy, no backend/domain contract.
+    Render exactly this sentence, verbatim, for every decision."""
+    assert _WHY_RATIONALE_MESSAGE == "Decision rationale is not yet captured for this decision."
+    assert _WHY_RATIONALE_HTML == (
+        '<div class="aara-disclosure-message">'
+        "Decision rationale is not yet captured for this decision.</div>"
+    )
+
+
+def test_why_rationale_block_is_present_in_the_built_layout():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    assert _WHY_RATIONALE_HTML in html_values
