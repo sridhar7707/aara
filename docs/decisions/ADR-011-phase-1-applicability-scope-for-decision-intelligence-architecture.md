@@ -1,6 +1,6 @@
 # ADR-011: Phase 1 Applicability Scope for the Decision Intelligence Architecture
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-11
 
 ## Context
