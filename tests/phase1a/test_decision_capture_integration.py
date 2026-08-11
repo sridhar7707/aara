@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from unittest.mock import Mock
 
 import pytest
 
@@ -362,6 +363,35 @@ def test_handle_exits_ensemble_sell_writes_executed_sell(trades_db, ledger_conn,
     assert row is not None
     assert row[1] == "SELL"
     assert row[2] == "EXECUTED"
+
+
+def test_handle_exits_sells_when_fred_macro_unavailable(trades_db, ledger_conn, chain, monkeypatch):
+    """ADR-010 invariant: FRED/macro availability cannot affect an existing
+    position's exit path. _handle_exits() takes no macro/halt parameter and
+    has no macro import, so an exit must complete unchanged even when the
+    macro accessor would raise -- and that accessor must never be touched."""
+    macro_mock = Mock(side_effect=RuntimeError("FRED unavailable"))
+    monkeypatch.setattr("bot.db.macro_cache.get_macro", macro_mock)
+
+    class _FakeSellClient:
+        def sell(self, symbol, qty, limit_price=None):
+            return {"order_id": "ord-fred-down"}
+
+        def wait_for_fill(self, order_id, timeout_secs=12):
+            return 1.0
+
+    positions = {"AAPL": _FakePosition(avg_entry_price=100.0, qty=1.0, unrealized_plpc=0.0)}
+    _handle_exits(
+        trades_db, client=_FakeSellClient(), risk=_NeverExitRisk(), symbol="AAPL", positions=positions,
+        sell_order_syms=set(), current_price=110.0, current_atr=0.0,
+        regime_name="TRENDING_UP", portfolio_value=10000.0, action=2, pdt_exempt=True,
+        stop_fired_today=set(), ledger_ctx=_exit_ledger_ctx(ledger_conn, chain),
+    )
+    row = _latest_decision(ledger_conn, "AAPL")
+    assert row is not None
+    assert row[1] == "SELL"
+    assert row[2] == "EXECUTED"
+    macro_mock.assert_not_called()
 
 
 def test_handle_exits_none_ledger_ctx_is_noop(trades_db):
