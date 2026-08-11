@@ -59,24 +59,42 @@ def _compute_from_raw(raw: dict) -> dict:
     return {"score": score, "cap": cap, "halt": halt}
 
 
-def _get_cached() -> dict:
-    """Returns cached macro dict, refreshing if older than TTL."""
+def _get_cached(*, force_refresh: bool = False) -> dict:
+    """Returns cached macro dict, refreshing if older than TTL.
+
+    A still-valid (within-TTL) cached value is returned without
+    re-fetching — unless `force_refresh` is True, set by a caller whose own,
+    separately-anchored TTL clock has already decided a refresh is due
+    (namely bot/db/macro_cache.py's SQLite cache). That caller's TTL
+    boundary is authoritative: once it decides a refresh is due, this
+    function must not silently satisfy that request by handing back an
+    in-process value that merely happens to still be within its own,
+    independently-tracked TTL window — otherwise the two clocks can renew
+    each other without either one ever actually reaching FRED.
+
+    Once a refresh is actually attempted (cache empty/past TTL, or
+    force_refresh=True), a failed fetch is NOT papered over with a stale or
+    default value — the underlying exception propagates so the caller can
+    treat macro state as genuinely unknown, rather than indistinguishable
+    from "calm market." The TTL clock (_MACRO_TS) only advances on a
+    successful fetch, so a failed refresh can never make a stale in-process
+    value look fresh.
+    """
     global _MACRO_CACHE, _MACRO_TS
     now = time.time()
     with _CACHE_LOCK:
-        if _MACRO_CACHE and (now - _MACRO_TS) < _MACRO_TTL:
+        if not force_refresh and _MACRO_CACHE and (now - _MACRO_TS) < _MACRO_TTL:
             return _MACRO_CACHE
         try:
             raw = _fetch_macro_raw()
-            _MACRO_CACHE = _compute_from_raw(raw)
         except Exception as e:
             _emsg = str(e).lower()
             if any(p in _emsg for p in ("rate limit", "too many", "429", "quota")):
-                logger.warning(f"[API RATE LIMIT] FRED API rate-limited — using cached macro data: {e}")
+                logger.warning(f"[API RATE LIMIT] FRED API rate-limited — no valid cached macro data to fall back on: {e}")
             else:
-                logger.warning(f"FRED macro fetch failed: {e}")
-            if not _MACRO_CACHE:
-                _MACRO_CACHE = {"score": 0.5, "cap": 1.0, "halt": False}
+                logger.warning(f"FRED macro fetch failed — no valid cached macro data to fall back on: {e}")
+            raise
+        _MACRO_CACHE = _compute_from_raw(raw)
         _MACRO_TS = now
         return _MACRO_CACHE
 

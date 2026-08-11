@@ -14,7 +14,11 @@ _TTL = 4 * 3600  # 4-hour cache for macro data
 
 
 def get_macro(con: sqlite3.Connection) -> tuple[float, float, bool]:
-    """Return (score, cap, halt). halt=True means VIX >= MACRO_HALT_VIX."""
+    """Return (score, cap, halt). halt=True means VIX >= MACRO_HALT_VIX,
+    OR macro data is unavailable (no valid within-TTL cache and the due
+    refresh attempt failed) — both cases must block BUY eligibility, so
+    both surface as halt=True to the existing, unmodified Gate 0 check.
+    """
     now  = time.time()
     rows = {r[0]: (float(r[1]), r[2])
             for r in con.execute("SELECT key, value, cached_at FROM macro_cache")}
@@ -27,14 +31,21 @@ def get_macro(con: sqlite3.Connection) -> tuple[float, float, bool]:
         except (ValueError, TypeError):
             pass
     try:
-        result = _get_macro_cached()
+        # force_refresh=True: this branch only runs once our own SQLite TTL
+        # has decided a refresh is due — that decision is authoritative, so
+        # _get_cached() must not silently satisfy it from a still-valid
+        # in-process value without actually consulting FRED.
+        result = _get_macro_cached(force_refresh=True)
     except Exception as e:
-        logger.warning(f"Macro fetch failed — using neutral defaults: {e}")
-        result = {"score": 0.5, "cap": 1.0, "halt": False}
+        logger.warning(f"FRED macro data unavailable — blocking BUY eligibility: {e}")
         tg.send(
             f"⚠️ <b>FRED macro data unavailable</b> — {e}\n"
-            "VIX/yield-curve circuit breaker is disabled. Market halt protection off."
+            "No valid macro data — BUY eligibility blocked until FRED recovers."
         )
+        # Do not persist this failure state: writing it with a fresh
+        # cached_at would make the next read treat it as a valid
+        # within-TTL cache, masking the outage for up to 4 more hours.
+        return 0.5, 1.0, True
     ts = datetime.now(timezone.utc).isoformat()
     for key in ("score", "cap", "halt"):
         con.execute(
