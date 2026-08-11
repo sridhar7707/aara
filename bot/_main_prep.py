@@ -14,6 +14,10 @@ import bot.monitor.telegram_bot as tg
 from bot.execution.alpaca_client import AlpacaClient
 from bot.risk.risk_manager import RiskManager
 from bot._main_db import _get_macro_from_db, _record_snapshot, _save_risk_state
+from bot.db.macro_cache import (
+    get_macro_halt_reason as _get_macro_halt_reason_from_db,
+    REASON_DATA_UNAVAILABLE,
+)
 from bot._main_market import (
     _compute_sentiments, _load_premarket_sentiment, _prefetch_earnings_parallel, prefetch_bars,
 )
@@ -79,10 +83,22 @@ def prepare_cycle_context(
         _save_risk_state(con, risk)
 
     macro_score, macro_cap, macro_halt = _get_macro_from_db(con)
+    macro_halt_reason = _get_macro_halt_reason_from_db(con)
     _logger.info(f"Macro: score={macro_score:.2f}, cap={macro_cap:.1f}x, halt={macro_halt}")
     if macro_halt:
-        _logger.warning("VIX emergency halt active — no new buys this cycle")
-        tg.alert_vix_halt()  # fires every cycle — VIX crisis events warrant repeated alerts
+        # Amendment 1 to ADR-010: macro_halt=True has two causes — a genuine VIX
+        # breach, or FRED/macro data being unavailable (fail-closed). Only the
+        # former is a "VIX halt"; the latter already got its own, accurate
+        # Telegram alert from bot/db/macro_cache.py::get_macro() at the point of
+        # failure, so alert_vix_halt() must not also fire for it. If reason is
+        # None (no observational metadata yet — e.g. a within-TTL cached halt
+        # written before this amendment shipped), default to the pre-amendment
+        # behavior rather than staying silent about an active halt.
+        if macro_halt_reason == REASON_DATA_UNAVAILABLE:
+            _logger.warning("Macro data unavailable — no new buys this cycle (FRED outage, not a VIX breach)")
+        else:
+            _logger.warning("VIX emergency halt active — no new buys this cycle")
+            tg.alert_vix_halt()  # fires every cycle — VIX crisis events warrant repeated alerts
 
     # Weekly loss circuit breaker alert — sent once per week when limit is first hit
     if not risk.check_weekly_loss(portfolio_value) and not risk.weekly_halt_alerted:

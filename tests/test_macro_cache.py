@@ -35,7 +35,38 @@ def test_get_macro_fetches_and_persists_on_empty_cache(con, monkeypatch):
     score, cap, halt = macro_cache.get_macro(con)
     assert (score, cap, halt) == (0.7, 0.5, True)
     rows = {r[0]: float(r[1]) for r in con.execute("SELECT key, value FROM macro_cache")}
-    assert rows == {"score": 0.7, "cap": 0.5, "halt": 1.0}
+    assert rows == {"score": 0.7, "cap": 0.5, "halt": 1.0,
+                     "halt_reason": float(macro_cache.REASON_VIX_THRESHOLD)}
+
+
+# --- Amendment 1 to ADR-010: observational halt-reason metadata ---
+
+def test_get_macro_success_no_halt_writes_reason_none(con, monkeypatch):
+    monkeypatch.setattr(macro_cache, "_get_macro_cached",
+                         lambda **_: {"score": 0.6, "cap": 1.0, "halt": False})
+    macro_cache.get_macro(con)
+    assert macro_cache.get_macro_halt_reason(con) == macro_cache.REASON_NONE
+
+
+def test_get_macro_genuine_vix_halt_writes_reason_vix_threshold(con, monkeypatch):
+    monkeypatch.setattr(macro_cache, "_get_macro_cached",
+                         lambda **_: {"score": 0.1, "cap": 0.5, "halt": True})
+    macro_cache.get_macro(con)
+    assert macro_cache.get_macro_halt_reason(con) == macro_cache.REASON_VIX_THRESHOLD
+
+
+def test_get_macro_fetch_failure_writes_reason_data_unavailable(con, monkeypatch):
+    def _boom(**_):
+        raise RuntimeError("FRED unreachable")
+    monkeypatch.setattr(macro_cache, "_get_macro_cached", _boom)
+    monkeypatch.setattr(macro_cache.tg, "send", lambda *a, **k: None)
+
+    macro_cache.get_macro(con)
+    assert macro_cache.get_macro_halt_reason(con) == macro_cache.REASON_DATA_UNAVAILABLE
+
+
+def test_get_macro_halt_reason_none_when_never_recorded(con):
+    assert macro_cache.get_macro_halt_reason(con) is None
 
 
 def test_get_macro_returns_fresh_cache_without_refetch(con, monkeypatch):
@@ -72,18 +103,38 @@ def test_get_macro_blocks_buy_when_no_valid_cache_and_fetch_fails(con, monkeypat
 
 
 def test_get_macro_does_not_persist_failure_state(con, monkeypatch):
-    # Writing the failure state to the DB with a fresh cached_at would make
-    # the next read treat it as a valid within-TTL cache, masking the
-    # outage for up to another 4 hours — the DB-layer analogue of the
-    # in-process _MACRO_CACHE guardrail in bot/strategy/macro.py.
+    # Writing score/cap/halt to the DB with a fresh cached_at would make the
+    # next read treat them as a valid within-TTL cache, masking the outage
+    # for up to another 4 hours — the DB-layer analogue of the in-process
+    # _MACRO_CACHE guardrail in bot/strategy/macro.py. The observational
+    # halt_reason row (Amendment 1 to ADR-010) is deliberately exempt from
+    # this guardrail — see test_get_macro_fetch_failure_writes_reason_data_unavailable
+    # and test_get_macro_halt_reason_write_never_advances_score_freshness.
     def _boom(**_):
         raise RuntimeError("FRED unreachable")
     monkeypatch.setattr(macro_cache, "_get_macro_cached", _boom)
     monkeypatch.setattr(macro_cache.tg, "send", lambda *a, **k: None)
 
     macro_cache.get_macro(con)
-    rows = list(con.execute("SELECT key, value, cached_at FROM macro_cache"))
-    assert rows == []
+    rows = {r[0]: r[2] for r in con.execute("SELECT key, value, cached_at FROM macro_cache")}
+    assert "score" not in rows
+    assert "cap" not in rows
+    assert "halt" not in rows
+
+
+def test_get_macro_halt_reason_write_never_advances_score_freshness(con, monkeypatch):
+    # Seed an expired score/cap/halt cache, but a very fresh halt_reason row
+    # (as if a failure was just recorded on a prior call). The stale
+    # score/cap/halt must still be treated as expired -- halt_reason's own
+    # freshness must never leak into the score/cap TTL decision.
+    _seed(con, score=0.3, cap=1.0, halt=False, age_seconds=macro_cache._TTL + 1)
+    macro_cache._write_halt_reason(con, macro_cache.REASON_NONE)
+    con.commit()
+
+    monkeypatch.setattr(macro_cache, "_get_macro_cached",
+                         lambda **_: {"score": 0.9, "cap": 0.2, "halt": False})
+    score, cap, halt = macro_cache.get_macro(con)
+    assert (score, cap, halt) == (0.9, 0.2, False)  # refetched despite fresh halt_reason
 
 
 def test_get_macro_retries_every_call_while_fred_stays_down(con, monkeypatch):
@@ -153,7 +204,11 @@ def test_get_macro_forces_real_fred_consult_when_sqlite_expired_even_with_valid_
     assert len(calls) == 1  # FRED was actually consulted, not silently skipped
     assert halt is True     # failed refresh blocks BUY
     rows_after = {r[0]: r[2] for r in con.execute("SELECT key, value, cached_at FROM macro_cache")}
-    assert rows_after == rows_before  # DB timestamp not renewed by the failed attempt
+    # score/cap/halt's own cached_at values are untouched by the failed attempt
+    # (the observational halt_reason row, Amendment 1 to ADR-010, is a separate
+    # key that's expected to change here -- see test_get_macro_halt_reason_write_never_advances_score_freshness).
+    for key in ("score", "cap", "halt"):
+        assert rows_after[key] == rows_before[key]
 
 
 def test_get_macro_renews_from_genuinely_fresh_fetch_when_sqlite_expired_even_with_valid_inprocess_cache(con, monkeypatch):

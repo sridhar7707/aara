@@ -15,6 +15,7 @@ import pytest
 
 import bot._main_db as main_db
 import bot._main_prep as prep
+from bot.db.macro_cache import REASON_DATA_UNAVAILABLE, REASON_NONE, REASON_VIX_THRESHOLD
 from bot.risk.risk_manager import RiskManager
 from config import DAILY_LOSS_LIMIT_PCT, DAILY_LOSS_WARNING_PCT, WEEKLY_LOSS_LIMIT_PCT
 
@@ -45,6 +46,7 @@ def _stub_market_and_telegram(monkeypatch):
     monkeypatch.setattr(prep.tg, "alert_risk_warning", lambda pv, pnl: calls["risk_warning"].append((pv, pnl)))
     monkeypatch.setattr(prep.tg, "alert_weekly_loss_limit", lambda pv, pnl: calls["weekly_loss"].append((pv, pnl)))
     monkeypatch.setattr(prep, "_get_macro_from_db", lambda con: (0.5, 1.0, False))
+    monkeypatch.setattr(prep, "_get_macro_halt_reason_from_db", lambda con: REASON_NONE)
     monkeypatch.setattr(prep, "_load_premarket_sentiment", lambda: ({"AAPL": 0.1}, "2026-07-29T12:00:00+00:00"))
     monkeypatch.setattr(prep, "prefetch_bars", lambda syms, client: {})
     monkeypatch.setattr(prep, "_compute_sentiments", lambda syms, premarket: {"AAPL": 0.1})
@@ -103,6 +105,7 @@ def test_halt_state_not_restored_when_breach_was_a_prior_day(con, _stub_market_a
 
 def test_macro_halt_triggers_vix_alert(con, _stub_market_and_telegram, monkeypatch):
     monkeypatch.setattr(prep, "_get_macro_from_db", lambda con: (0.9, 0.0, True))
+    monkeypatch.setattr(prep, "_get_macro_halt_reason_from_db", lambda con: REASON_VIX_THRESHOLD)
     risk = RiskManager()
     result = _call(con, _FakeClient(), risk)
     assert len(_stub_market_and_telegram["vix_halt"]) == 1
@@ -113,6 +116,30 @@ def test_macro_no_halt_does_not_alert(con, _stub_market_and_telegram):
     risk = RiskManager()
     _call(con, _FakeClient(), risk)
     assert _stub_market_and_telegram["vix_halt"] == []
+
+
+def test_macro_data_unavailable_halt_does_not_trigger_vix_alert(con, _stub_market_and_telegram, monkeypatch):
+    # Amendment 1 to ADR-010: a FRED-unavailable halt must not fire the
+    # VIX-specific alert -- the accurate alert already went out from
+    # bot/db/macro_cache.py::get_macro() at the point of failure.
+    monkeypatch.setattr(prep, "_get_macro_from_db", lambda con: (0.5, 1.0, True))
+    monkeypatch.setattr(prep, "_get_macro_halt_reason_from_db", lambda con: REASON_DATA_UNAVAILABLE)
+    risk = RiskManager()
+    result = _call(con, _FakeClient(), risk)
+    assert _stub_market_and_telegram["vix_halt"] == []
+    assert result[2:5] == (0.5, 1.0, True)  # BUY gate still sees halt=True — fail-closed unaffected
+
+
+def test_macro_halt_with_unknown_reason_defaults_to_vix_alert(con, _stub_market_and_telegram, monkeypatch):
+    # Migration-day edge case: a within-TTL score/cap/halt row written before
+    # this amendment shipped has no corresponding halt_reason row yet.
+    # Default to the pre-amendment behavior (alert) rather than staying
+    # silent about an active halt.
+    monkeypatch.setattr(prep, "_get_macro_from_db", lambda con: (0.9, 0.0, True))
+    monkeypatch.setattr(prep, "_get_macro_halt_reason_from_db", lambda con: None)
+    risk = RiskManager()
+    _call(con, _FakeClient(), risk)
+    assert len(_stub_market_and_telegram["vix_halt"]) == 1
 
 
 def test_daily_loss_warning_zone_alerts_and_persists(con, _stub_market_and_telegram):

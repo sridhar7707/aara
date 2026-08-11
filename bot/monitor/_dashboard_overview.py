@@ -10,6 +10,7 @@ import pandas as pd
 
 from config import DAILY_LOSS_LIMIT_PCT, WEEKLY_LOSS_LIMIT_PCT
 from bot.monitor._dashboard_state import _last_sync
+from bot.db.macro_cache import HALT_REASON_KEY, REASON_DATA_UNAVAILABLE
 
 _TEXT   = "#111827"
 _MUTED  = "#6b7280"
@@ -177,6 +178,9 @@ def get_overview() -> dict:
         "day_trades_used":  day_trade_dates.count(today),
         "macro_score":      mc.get("score", 0.5),
         "macro_halt":       bool(mc.get("halt", 0)),
+        # Amendment 1 to ADR-010: None means no macro evaluation has ever been
+        # recorded (true cold start) — distinct from a recorded REASON_NONE.
+        "macro_halt_reason": int(mc[HALT_REASON_KEY]) if HALT_REASON_KEY in mc else None,
         "emergency_halt":   Path("data/HALT_TRADING").exists(),
         "daily_limit_hit":  is_today  and daily_start  and day_pnl  <= -DAILY_LOSS_LIMIT_PCT,
         "weekly_limit_hit": is_this_week and weekly_start and week_pnl <= -WEEKLY_LOSS_LIMIT_PCT,
@@ -191,8 +195,19 @@ def overview_md(d: dict) -> str:
     if "_error" in d:
         return f"⚠️ {d['_error']}\n\n_{_EMPTY_HINT}_"
 
+    # Amendment 1 to ADR-010: distinguish a genuine VIX halt from FRED/macro
+    # data being unavailable, and distinguish both from having no macro
+    # evaluation on record at all — the latter must never be shown as a
+    # confirmed "ACTIVE" state, since the dashboard has no evidence either way.
+    macro_reason = d.get("macro_halt_reason")
+    macro_status = (
+        "🟠 DATA UNAVAILABLE"     if macro_reason == REASON_DATA_UNAVAILABLE else
+        "🔴 VIX HALT"             if d["macro_halt"]      else
+        "⚪ MACRO STATUS UNKNOWN" if macro_reason is None else
+        None
+    )
     status = "🔴 EMERGENCY HALT" if d["emergency_halt"] else (
-             "🔴 VIX HALT"        if d["macro_halt"]      else (
+             macro_status if macro_status is not None else (
              "🔴 DAILY LIMIT HIT" if d["daily_limit_hit"] else (
              "🟡 WEEKLY LIMIT"    if d["weekly_limit_hit"] else "🟢 ACTIVE")))
 
