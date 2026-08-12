@@ -34,6 +34,10 @@ database/duckdb/*.duckdb
 # Playwright UI-check screenshots (tests/check_ui.py) — local dev artifacts only
 tests/snapshots/playwright/
 
+# Playwright MCP browser-automation scratch directory (ad hoc browser tool
+# output — traces/snapshots from interactive review sessions, not source)
+.playwright-mcp/
+
 # HuggingFace model download cache (temp directory, not source-controlled)
 models/hf_fresh/
 
