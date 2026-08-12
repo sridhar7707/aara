@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"c:\\Users\\ksri7\\projects\\ai-trading-bot\" && python tests/requirements_tracker.py && git add docs/REQUIREMENTS.md tests/req_snapshots/req_state.json 2>/dev/null || true",
+            "command": "cd \"c:\\Users\\ksri7\\projects\\ai-trading-bot\" && python tests/requirements_tracker.py 2>/dev/null || true",
             "if": "Bash(git commit*)",
             "shell": "bash",
             "timeout": 30,
