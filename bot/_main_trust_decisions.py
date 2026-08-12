@@ -24,6 +24,8 @@ import bot.trust_ledger.risk as risk_ledger
 from bot.risk.risk_manager import RiskManager
 from bot.strategy.ensemble import ensemble_confidence
 from bot.strategy.model_output_adapter import build_model_outputs
+from sentinel_engine.adapters.evidence_adapter import to_evidence_records
+from sentinel_engine.composition.evidence import get_evidence_service
 
 
 @dataclass
@@ -80,6 +82,11 @@ def record_decision_safe(
             constitution.check_and_log(trust_conn, decision_row, risk)
         except Exception as e:
             logger.warning(f"trust ledger constitution check failed for {asset}: {e}")
+        try:
+            for evidence in to_evidence_records(decision_row["model_outputs"]):
+                get_evidence_service().associate_evidence(decision_row["decision_id"], evidence)
+        except Exception as e:
+            logger.warning(f"trust ledger evidence integration failed for {asset}: {e}")
     except decisions.DuplicateDecisionError as e:
         logger.warning(f"trust ledger duplicate decision blocked for {asset}: {e}")
     except Exception as e:
