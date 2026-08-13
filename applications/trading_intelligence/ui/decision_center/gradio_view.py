@@ -357,8 +357,8 @@ _PAGE_HEADER_HTML = (
     '<div class="aara-page-subtitle">Governed investment decisions</div>'
 )
 
-_LIST_HEADERS = ["Decision ID", "Symbol", "Action", "Status", "Confidence"]
-_LIST_DATATYPES = ["str", "str", "markdown", "str", "str"]
+_LIST_HEADERS = ["Decision ID", "Symbol", "Action", "Status", "Confidence", "Last Updated"]
+_LIST_DATATYPES = ["str", "str", "markdown", "str", "str", "str"]
 _MISSING_VALUE = "-"
 
 _DECISION_READ_ERROR_MESSAGE = "Unable to load this decision."
@@ -532,6 +532,7 @@ class DecisionCenterUI:
                 DecisionCenterUI._list_action_badge_html(view.action),
                 view.status.value.replace("_", " ").title(),
                 f"{view.confidence * 100:.0f}%",
+                view.updated_at.strftime("%Y-%m-%d %H:%M UTC"),
             ]
             for view in list_area.decisions
         ]

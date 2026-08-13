@@ -192,7 +192,7 @@ def test_render_screen_maps_list_rows_and_detail_fields():
     assert list_rows == [[
         "dec-001", "AAPL",
         '<span class="aara-list-action-badge action-buy">BUY</span>',
-        "Approval Recorded", "91%",
+        "Approval Recorded", "91%", "2026-08-08 09:00 UTC",
     ]]
     assert list_empty_html == ""
     assert "AAPL" in header
