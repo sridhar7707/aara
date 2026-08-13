@@ -27,6 +27,13 @@ decision.
   `status`, `updated_at`.
 - **`ProjectionRepository(ABC)`** — abstract `save`/`get`. No backend
   implementation exists anywhere in the codebase.
+- **Existing in-process read accessors:**
+  `sentinel_engine.services.decision_service.DecisionService.get_projection(decision_id)`
+  and `sentinel_engine.services.sentinel_engine.SentinelEngine.get_decision_projection(decision_id)`
+  already exist. Both return `Optional[DecisionProjection]`, delegating down
+  to `ProjectionRepository.get()` (`SentinelEngine.get_decision_projection()`
+  → `DecisionService.get_projection()` → `ProjectionRepository.get()`).
+  Neither has any production caller today.
 - **`LedgerStore(ABC)`** — abstract `append`/`read_all`. No backend
   implementation exists anywhere in the codebase.
 - **Current absence of backend wiring:** all 82 `sentinel_engine` tests run
@@ -72,9 +79,12 @@ Trading Intelligence.
 - **Benefits:** decouples consumers from `sentinel_engine`'s internal
   repository details; a single interface could later serve Wealth Intelligence
   too, matching the platform's "one engine, many products" model.
-- **Risks:** requires building a new component that doesn't exist today; if
-  implemented as a network API, adds latency/availability concerns not present
-  in an in-process call.
+- **Risks:** a minimal in-process version of this already exists —
+  `SentinelEngine.get_decision_projection()` → `DecisionService.get_projection()`
+  (see §1) — with zero production consumers today. Building it out further
+  (Trading-Intelligence-facing contracts, or a network API) would still
+  require new work; if implemented as a network API, adds latency/availability
+  concerns not present in an in-process call.
 - **Dependency impact:** still one-way, but through a narrower, purpose-built
   interface — better isolation, at the cost of new `sentinel_engine` code.
 - **Rollback difficulty:** medium — a new `sentinel_engine`-side component
@@ -85,6 +95,13 @@ Trading Intelligence.
   decision) arguably doesn't touch what ADR-004 defers — but this is a
   judgment call, not a clear yes, since ADR-004's exact scope wasn't written
   with this option in mind.
+
+**Documentation correction:** this document's original §1 Current State and
+Option B analysis omitted the existing `DecisionService.get_projection()`/
+`SentinelEngine.get_decision_projection()` read accessors (see §1). This is a
+factual correction only — it does not reopen or change the Option A
+recommendation in Section 3; Option A's own stated reasoning does not depend
+on this prior omission.
 
 ### Option C: Sentinel exports immutable snapshots consumed by Trading Intelligence
 
