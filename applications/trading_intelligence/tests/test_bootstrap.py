@@ -232,7 +232,7 @@ def test_build_application_seeded_decisions_are_reachable_by_id():
     ui = build_application()
 
     (
-        header, lifecycle, confidence, _updated,
+        header, lifecycle, confidence, _updated, _status,
         _evidence_html, _governance_html, _approval_html,
     ) = ui._render_detail("dec-seed-003")
 
@@ -319,7 +319,7 @@ def test_build_application_seeds_a_decision_awaiting_approval_after_governance()
     ui = build_application()
 
     (
-        header, lifecycle, confidence, _updated,
+        header, lifecycle, confidence, _updated, _status,
         evidence_html, governance_html, approval_html,
     ) = ui._render_detail("dec-seed-004")
 

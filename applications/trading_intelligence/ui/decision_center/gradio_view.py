@@ -391,7 +391,7 @@ _LIFECYCLE_STAGES = [
     (DecisionState.APPROVAL_RECORDED, "Approval"),
 ]
 
-_DetailValues = Tuple[str, str, str, str, str, str, str]
+_DetailValues = Tuple[str, str, str, str, str, str, str, str]
 
 
 class DecisionCenterUI:
@@ -454,6 +454,10 @@ class DecisionCenterUI:
                             label="Last Updated", interactive=False,
                             elem_classes=["aara-field-value"],
                         )
+                        status_output = gr.Textbox(
+                            label="Status", interactive=False,
+                            elem_classes=["aara-field-value"],
+                        )
                     gr.Markdown(
                         '<h3 class="aara-eyebrow">Why?</h3>', elem_classes=["aara-section-label"],
                     )
@@ -479,7 +483,7 @@ class DecisionCenterUI:
 
             detail_outputs = [
                 header_output, lifecycle_output, conviction_output, updated_output,
-                evidence_output, governance_output, approval_output,
+                status_output, evidence_output, governance_output, approval_output,
             ]
             screen_outputs = [list_output, list_empty_output] + detail_outputs
             # Session-scoped (per Gradio Blocks session, not a self attribute --
@@ -502,7 +506,7 @@ class DecisionCenterUI:
 
     def _render_screen(
         self, selected_id: Optional[str] = None,
-    ) -> Tuple[List[List[str]], str, str, str, str, str, str, str, str]:
+    ) -> Tuple[List[List[str]], str, str, str, str, str, str, str, str, str]:
         screen = self._controller.load_screen(self._decision_ids, selected_id)
         list_rows = self._format_list_rows(screen.list_area)
         list_empty_message = self._format_list_empty_message_html(screen.list_area)
@@ -517,7 +521,7 @@ class DecisionCenterUI:
 
     def _on_row_select(
         self, evt: gr.SelectData,
-    ) -> Tuple[Optional[str], str, str, str, str, str, str, str]:
+    ) -> Tuple[Optional[str], str, str, str, str, str, str, str, str]:
         if not evt.selected or not evt.row_value:
             return (None,) + self._empty_detail()
         decision_id = evt.row_value[0]
@@ -589,6 +593,7 @@ class DecisionCenterUI:
             DecisionCenterUI._lifecycle_track_html(decision.status),
             detail_area.confidence_display,
             detail_area.timestamp_display,
+            detail_area.status_display,
             DecisionCenterUI._format_evidence_html(detail_area),
             DecisionCenterUI._format_governance_html(detail_area),
             DecisionCenterUI._format_approval_html(detail_area),
@@ -772,18 +777,18 @@ class DecisionCenterUI:
 
     @staticmethod
     def _empty_detail() -> _DetailValues:
-        return ("", _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "")
+        return ("", _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "")
 
     @staticmethod
     def _missing_decision_detail() -> _DetailValues:
         return (
             DecisionCenterUI._missing_decision_header_html(),
-            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "",
+            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "",
         )
 
     @staticmethod
     def _decision_error_detail() -> _DetailValues:
         return (
             DecisionCenterUI._decision_error_header_html(),
-            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "",
+            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "",
         )
