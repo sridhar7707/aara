@@ -246,16 +246,21 @@ def test_build_application_seeds_evidence_for_decisions_that_had_it_attached():
     """dec-seed-002/003 have evidence attached via engine.attach_evidence()
     in _seed_decisions(); dec-seed-001 deliberately does not, so both the
     "has evidence" and "no evidence" states are demonstrated by the existing
-    seed path without any change to it."""
+    seed path without any change to it. dec-seed-002/003 each attach
+    evidence at their own distinct timestamp (staggered seed data), so each
+    is asserted against its own value rather than one shared literal."""
     ui = build_application()
 
     *_, evidence_002, _governance_002, _approval_002 = ui._render_detail("dec-seed-002")
     *_, evidence_003, _governance_003, _approval_003 = ui._render_detail("dec-seed-003")
 
-    for evidence_html in (evidence_002, evidence_003):
-        assert "NEWS_SENTIMENT" in evidence_html
-        assert "newsapi" in evidence_html
-        assert "2026-08-08 09:00 UTC" in evidence_html
+    assert "NEWS_SENTIMENT" in evidence_002
+    assert "newsapi" in evidence_002
+    assert "2026-08-08 08:52 UTC" in evidence_002
+
+    assert "NEWS_SENTIMENT" in evidence_003
+    assert "newsapi" in evidence_003
+    assert "2026-08-08 09:11 UTC" in evidence_003
 
 
 def test_build_application_seeded_decision_without_attached_evidence_has_none():
@@ -278,15 +283,15 @@ def test_build_application_seeds_governance_and_approval_for_the_fully_approved_
     *_, _evidence_html, governance_html, approval_html = ui._render_detail("dec-seed-003")
 
     # evaluate_policy() timestamps with datetime.utcnow() (unlike
-    # record_approval(), which uses the seed's fixed `now`), so only
-    # policy_id/enabled are asserted precisely here; evaluated_at is only
-    # checked for well-formed presence.
+    # record_approval(), which uses the seed's own fixed approval
+    # timestamp), so only policy_id/enabled are asserted precisely here;
+    # evaluated_at is only checked for well-formed presence.
     assert "pol-seed-001" in governance_html
     assert "Yes" in governance_html
     assert "UTC" in governance_html
     assert "Approved" in approval_html
     assert "risk_officer" in approval_html
-    assert "2026-08-08 09:00 UTC" in approval_html
+    assert "2026-08-08 09:34 UTC" in approval_html
 
 
 def test_build_application_seeded_decisions_without_governance_or_approval_have_none():

@@ -1,7 +1,10 @@
 # Trading Intelligence UI
 
-**Status:** Ownership boundary only. No screens, components, React files, CSS,
-API wiring, or data connections exist yet.
+**Status:** Decision Center (`decision_center/`) is implemented and runnable
+-- the only screen built so far, wired to real query services (see
+`decision_center/README.md`). Portfolio Intelligence and Risk Intelligence
+exist only as non-interactive "Coming Soon" items in the application
+shell's navigation bar; neither has a screen, component, or backing code.
 
 ## What this is
 
@@ -12,14 +15,19 @@ to locate Trading Intelligence UI work at
 protected implementation) and not `sentinel/frontend/` (Sentinel's own
 governance-oriented surface).
 
-## Where future screens live
+## Where screens live
 
-Future screens live under this directory, one subdirectory per screen. The
-first is `decision_center/` (see `decision_center/README.md`), per
-`docs/products/AARA_TRADING_INTELLIGENCE_DECISION_CENTER_DESIGN.md`. Additional
-screens (Morning Brief, Portfolio Intelligence, Risk Intelligence, Performance
-& Learning, Settings — per `docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md`)
-are expected to follow the same pattern once designed.
+Each screen lives under this directory in its own subdirectory. Decision
+Center (`decision_center/`, see its own README) is the first, and so far
+only, screen built this way, per
+`docs/products/AARA_TRADING_INTELLIGENCE_DECISION_CENTER_DESIGN.md`.
+Additional screens named in
+`docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md` (Morning
+Brief, Portfolio Intelligence, Risk Intelligence, Performance & Learning,
+Settings) remain undesigned and unbuilt. Portfolio Intelligence and Risk
+Intelligence are named today only as "Coming Soon" items in the shell's own
+navigation bar (`decision_center/gradio_view.py`'s `_SHELL_NAV_HTML`) --
+that is presentation only, not an implemented screen.
 
 ## Dependency rule
 

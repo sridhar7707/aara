@@ -204,6 +204,20 @@ footer { display: none !important; }
 .aara-shell-nav-list .nav-item.muted {
   color: var(--color-text-secondary);
   opacity: 0.55;
+  cursor: default;
+}
+/* Coming Soon badge: no separate typographic treatment (uppercase/
+   letter-spacing/opacity all inherit from .nav-item.muted above) so it
+   reads as part of the same muted label, not a competing element. Only
+   already-defined tokens are used -- no new custom property. */
+.aara-shell-nav-list .nav-item.muted .aara-nav-badge {
+  display: inline-block;
+  margin-left: var(--space-xs);
+  padding: 1px 6px;
+  border-radius: var(--radius-badge);
+  background: var(--color-border-subtle);
+  color: var(--color-text-secondary);
+  vertical-align: middle;
 }
 
 /* ==========================================================================
@@ -230,13 +244,21 @@ footer { display: none !important; }
   margin-top: var(--space-xs);
 }
 
-/* Section labels inside the detail column (Decision Intelligence / Evidence /
-   Governance / Approval) reuse the same eyebrow treatment, smaller. */
+/* Section labels inside the detail column (Evidence / Governance & Policy /
+   Approval, etc.) -- compact institutional micro-labels: small, wider
+   tracking than the page-level eyebrow, distinct from the larger
+   "Decision Intelligence" group label below. margin-top is deliberately 0
+   -- Gradio's own default Column gap between stacked blocks is already
+   16px (--layout-gap, confirmed against the installed gradio package's
+   compiled theme CSS), so an additional top margin here would compound
+   into a much larger gap than intended; that single 16px gap is now the
+   only source of the ~16px rhythm between detail-panel sections. */
 .aara-section-label h2.aara-eyebrow,
 .aara-section-label h3.aara-eyebrow {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-text-secondary);
-  margin: var(--space-md) 0 var(--space-xs) 0;
+  letter-spacing: 0.08em;
+  margin: 0 0 var(--space-xs) 0;
 }
 .aara-section-label--group h2.aara-eyebrow {
   font-size: 13px;
@@ -355,9 +377,12 @@ footer { display: none !important; }
 
 /* Selection: Gradio's own hardcoded orange box-shadow on the clicked
    td.focus (see module docstring) -- suppressed and replaced with an
-   intentional whole-row gold tint + left accent via :has(), applied
-   identically for mouse (.focus) and keyboard (:focus-visible) so the two
-   input methods look the same. */
+   intentional whole-row navy surface tint + a 3px navy left indicator,
+   applied identically for mouse (.focus) and keyboard (:focus-visible) so
+   the two input methods look the same (Detail Panel Polish pass:
+   recolored from V3's gold treatment to navy, reusing the exact navy RGB
+   triple already used for this table's own :hover tint and for
+   --shadow-card -- no new color). */
 .aara-decisions-table table tbody td.focus,
 .aara-decisions-table table tbody td:focus-visible {
   box-shadow: none !important;
@@ -365,11 +390,11 @@ footer { display: none !important; }
 }
 .aara-decisions-table table tbody tr[slot="tbody"]:has(td.focus) td,
 .aara-decisions-table table tbody tr[slot="tbody"]:has(td:focus-visible) td {
-  background: rgba(200, 164, 93, 0.14) !important;
+  background: rgba(11, 31, 58, 0.08) !important;
 }
 .aara-decisions-table table tbody tr[slot="tbody"]:has(td.focus) td:first-child,
 .aara-decisions-table table tbody tr[slot="tbody"]:has(td:focus-visible) td:first-child {
-  box-shadow: inset 3px 0 0 var(--color-gold-accent) !important;
+  box-shadow: inset 3px 0 0 var(--color-navy-primary) !important;
 }
 
 /* Action column badge (BUY/SELL/HOLD), rendered as markdown by the
@@ -441,7 +466,14 @@ footer { display: none !important; }
    .aara-field-value above never addressed (it only strips each input's own
    border). elem_classes=["aara-hero-metrics"] on that Row (gradio_view.py)
    gives this a stable, narrowly-scoped hook instead of stripping every
-   ".form" panel in the app. */
+   ".form" panel in the app.
+
+   Header-to-metrics spacing (~12px): .aara-decision-header's own bottom
+   padding (below) contributes 4px, Gradio's default 16px Column gap
+   contributes another 16px, so this negative top margin pulls the metrics
+   row back up by 8px -- net 4 + 16 - 8 = 12px -- the same negative-margin
+   technique .aara-shell-header already uses to cancel unwanted default
+   spacing, not a new one. */
 .aara-hero-metrics,
 .aara-hero-metrics.form,
 .aara-hero-metrics > .form {
@@ -450,7 +482,7 @@ footer { display: none !important; }
   background: transparent !important;
   border-radius: 0 !important;
   padding: 0 !important;
-  margin: var(--space-xs) 0 0 0 !important;
+  margin: -8px 0 0 0 !important;
 }
 /* Gradio's own ".form" gives grouped Textbox siblings a 1px gap by default
    (a hairline meant for visually-joined form fields) -- too tight for two
@@ -467,9 +499,12 @@ footer { display: none !important; }
 }
 
 /* Decision identity header ("hero") -- the single source of identity; no
-   redundant Symbol/Action fields repeat these values below it. */
+   redundant Symbol/Action fields repeat these values below it. Bottom
+   padding reduced from --space-md (16px) to --space-xs (4px) as part of
+   tightening header-to-metrics spacing -- see .aara-hero-metrics's own
+   comment for the full 12px accounting. */
 .aara-decision-header {
-  padding: var(--space-sm) 0 var(--space-md) 0;
+  padding: var(--space-sm) 0 var(--space-xs) 0;
 }
 .aara-decision-header .identity-line {
   font-size: 28px;
@@ -491,12 +526,15 @@ footer { display: none !important; }
   font-weight: 500;
 }
 
-/* BUY/SELL/HOLD badge -- subtle tint, never color alone (text always present). */
+/* BUY/SELL/HOLD badge -- subtle tint, never color alone (text always
+   present). Compacted slightly (13px -> 12px, 8px -> 7px horizontal
+   padding) as part of the Detail Panel Polish pass so it reads as an
+   understated institutional label rather than a retail-style pill. */
 .aara-action-badge {
   display: inline-block;
-  padding: 2px var(--space-sm);
+  padding: 2px 7px;
   border-radius: var(--radius-badge);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -554,29 +592,35 @@ footer { display: none !important; }
 }
 .aara-lifecycle-track .connector.complete { background: var(--lifecycle-complete); }
 
-/* Evidence / Governance & Policy / Approval -- compact ledger rows (V4
-   visual correction). V3's boxed record cards (white panel, border,
-   border-left accent, radius, shadow) read as a stack of separate
-   dashboard cards; V4 requires the Decision Brief to read as one
-   continuous institutional document instead. Same DOM structure as V3
-   (record_card_html's header/fields markup is unchanged -- see
-   gradio_view.py) -- only the box is removed and the layout reflows into
-   a dense, single-line-per-entry row separated by a hairline rule instead
-   of a card boundary. min-width on the header keeps the fields column
-   starting at roughly the same horizontal position down the list, a
-   ledger/register alignment cue that a stack of independently-sized cards
-   couldn't offer. */
-.aara-record-list { display: flex; flex-direction: column; }
+/* Evidence / Governance & Policy / Approval -- distinct subtle record-card
+   surfaces (Detail Panel Polish pass, superseding V4's hairline-separated
+   ledger-row treatment). record_card_html's header/fields markup is
+   unchanged (see gradio_view.py) -- only the surface treatment changed:
+   each section's cards get their own low-alpha background tint via the
+   aara-record-list--{evidence,governance,approval} wrapper class
+   _record_list_html now emits, composed only from RGB triples already
+   present in :root (no new custom property, no new base color):
+   --action-hold-bg's gray for Evidence, gold's RGB for Governance, navy's
+   RGB for Approval. Internal padding is ~12px (was 7px 0) now that each
+   card is a real, if subtle, surface rather than a borderless row; the
+   border-bottom hairline that used to separate rows is replaced by a
+   small gap between cards instead. min-width on the header keeps the
+   fields column starting at roughly the same horizontal position down
+   the list, a ledger/register alignment cue independent of the surface
+   change. */
+.aara-record-list { display: flex; flex-direction: column; gap: var(--space-xs); }
+.aara-record-list--evidence .aara-record-card { background: var(--action-hold-bg); }
+.aara-record-list--governance .aara-record-card { background: rgba(200, 164, 93, 0.08); }
+.aara-record-list--approval .aara-record-card { background: rgba(11, 31, 58, 0.05); }
 .aara-record-card {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   column-gap: var(--space-lg);
   row-gap: 2px;
-  padding: 7px 0;
-  border-bottom: 1px solid var(--color-border-subtle);
+  padding: 12px;
+  border-radius: var(--radius-card);
 }
-.aara-record-list .aara-record-card:last-child { border-bottom: none; }
 .aara-record-card-header {
   display: flex;
   align-items: baseline;
@@ -589,18 +633,36 @@ footer { display: none !important; }
   font-weight: 600;
   color: var(--color-text-primary);
 }
+/* State pill: BUY/SELL/HOLD-style compact background pill (Detail Panel
+   Polish pass), not bare colored text -- text label always carries the
+   meaning (Attached/Evaluated/Approved/Rejected), color is never the only
+   signal, per FORBIDDEN_UI_PATTERNS.md. Backgrounds reuse the exact same
+   tokens the action badges already use (--action-buy-bg/--action-sell-bg)
+   plus the same neutral gray as Evidence's own card surface above -- no
+   new color introduced. */
 .aara-record-card-state {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: var(--radius-badge);
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 /* Neutral: Evidence/Governance's Attached/Evaluated describe that a record
-   exists, not a verdict. Positive/negative: an approval's real verdict --
-   the label text carries the meaning, color is never the only signal. */
-.aara-record-card-state--neutral { color: var(--color-text-secondary); }
-.aara-record-card-state--positive { color: var(--color-emerald-secondary); }
-.aara-record-card-state--negative { color: var(--color-navy-primary); }
+   exists, not a verdict. Positive/negative: an approval's real verdict. */
+.aara-record-card-state--neutral {
+  background: var(--action-hold-bg);
+  color: var(--color-text-secondary);
+}
+.aara-record-card-state--positive {
+  background: var(--action-buy-bg);
+  color: var(--color-emerald-secondary);
+}
+.aara-record-card-state--negative {
+  background: var(--action-sell-bg);
+  color: var(--color-navy-primary);
+}
 .aara-record-card-fields {
   display: flex;
   flex-wrap: wrap;
@@ -632,19 +694,31 @@ footer { display: none !important; }
   color: var(--color-text-secondary);
   padding: var(--space-sm) 0;
 }
-/* Why?/Rationale disclosure (V4): a statement about a real, current system
-   limitation -- not an empty-list state (contrast .aara-empty-message
-   above, used when a section genuinely has no records) and not an error
-   (contrast .aara-error-message below, which keeps its red/navy alert
-   treatment). The thin neutral rule reads as a deliberate margin note
-   within the document, using the same hairline language as the ledger
-   rows above rather than any warning color. */
+/* Why?/Rationale disclosure: an intentional, two-line muted empty state --
+   not an empty-list state (contrast .aara-empty-message above, used when a
+   section genuinely has no records) and not an error (contrast
+   .aara-error-message below, which keeps its red/navy alert treatment).
+   The thin neutral rule reads as a deliberate margin note within the
+   document, using the same hairline language as the ledger rows above
+   rather than any warning color. Title/body are two distinct lines (Detail
+   Panel Polish pass) -- gradio_view.py's own docstring covers why this is
+   still 100% static, decision-independent copy, not real rationale data. */
 .aara-disclosure-message {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-xs) 0 var(--space-xs) var(--space-sm);
+  border-left: 2px solid var(--color-border-subtle);
+}
+.aara-disclosure-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.aara-disclosure-body {
   font-size: 13px;
   font-style: italic;
   color: var(--color-text-secondary);
-  padding: var(--space-xs) 0 var(--space-xs) var(--space-sm);
-  border-left: 2px solid var(--color-border-subtle);
 }
 .aara-error-message {
   font-size: 13px;

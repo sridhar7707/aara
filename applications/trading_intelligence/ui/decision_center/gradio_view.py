@@ -142,6 +142,76 @@ anywhere else in the app) and _WHY_RATIONALE_HTML's class changing from
 aara-empty-message to the new aara-disclosure-message (same fixed text,
 distinct treatment so it reads as a deliberate disclosure rather than an
 empty-list state).
+
+Detail Panel Polish pass (2026-08-12), gradio_view.py + theme.py:
+
+- Section rhythm: Gradio's own default Column gap between stacked blocks
+  is 16px (`--layout-gap`, confirmed by inspecting the installed `gradio`
+  package's compiled default theme CSS -- not assumed). Each section
+  label's own former `margin-top: var(--space-md)` (another 16px) stacked
+  on top of that gap, giving ~32px between sections; removed so Gradio's
+  existing 16px gap is the single source of the ~16px section rhythm,
+  instead of two independent margins compounding.
+- Header-to-metrics spacing tightened to ~12px via a small explicit
+  negative margin on `.aara-hero-metrics`, offsetting the same 16px
+  Column gap plus the header block's own reduced bottom padding -- the
+  same negative-margin technique `.aara-shell-header` already uses, not a
+  new pattern.
+- Record cards (Evidence/Governance & Policy/Approval): `_record_list_html`
+  now takes a `section_variant` string and wraps its non-empty-cards
+  output in an additional `aara-record-list--{variant}` class --
+  `_record_card_html`'s own `aara-record-card` class string is untouched,
+  so existing tests asserting `'class="aara-record-card"'` as a substring
+  are unaffected. Each section gets its own subtle background tint
+  composed only from RGB triples already present in `:root`
+  (`--action-hold-bg`'s gray for Evidence, gold's RGB for Governance,
+  navy's RGB for Approval, each at a low alpha already precedented
+  elsewhere in this file) -- no new custom property, no new base color.
+- Selected decision row: recolored from the V3 gold treatment to a
+  subtle navy surface tint + a 3px navy left indicator (was gold),
+  reusing the same navy RGB triple already used for the row hover state
+  and `--shadow-card`. Both the mouse (`:has(td.focus)`) and keyboard
+  (`:has(td:focus-visible)`) selectors are still both present and
+  restyled identically, so keyboard selection parity (V3.1's own fix) is
+  unchanged.
+- Section labels: tightened to a smaller, wider-tracked micro-label
+  treatment (11px, more letter-spacing) distinct from the larger
+  "Decision Intelligence" group label above them, which is unchanged.
+- Approval's state pill (`aara-record-card-state`) gains the same subtle
+  background-pill treatment BUY/SELL/HOLD already use (reusing
+  `--action-buy-bg`/`--action-sell-bg` exactly, plus a neutral gray for
+  Evidence/Governance's own "Attached"/"Evaluated" pills) instead of
+  being bare colored text -- still text-label-first per
+  FORBIDDEN_UI_PATTERNS.md's "color is never the only signal" rule, now
+  visually consistent with the rest of the badge family. The hero action
+  badge (`.aara-action-badge`) is compacted slightly (13px -> 12px,
+  8px -> 7px horizontal padding) to match.
+- Why?/Rationale: replaced the single-sentence disclosure with a two-line
+  empty state ("Rationale not captured" / "The decision thesis has not
+  yet been recorded.") -- still 100% static and decision-independent,
+  still no rationale/thesis data of any kind invented or read from
+  anywhere; only the presentation of the same "nothing here yet" fact
+  changed.
+
+Nav Coming Soon pass (2026-08-12), markup here + theme.py: the two muted
+nav items (Portfolio Intelligence, Risk Intelligence) previously read as
+plain dimmed text with no explanation for why they don't respond to a
+click. Each now carries a small "Coming Soon" badge (_NAV_COMING_SOON_LABEL)
+alongside its label -- still inside the same non-interactive <span
+class="nav-item muted">, not a link/button, so no tabindex, href, or click
+handler is added and no change to keyboard tab order occurs (a <span> was
+never focusable to begin with). theme.py adds `cursor: default` to
+.nav-item.muted as an explicit reinforcement, not a fix -- inline <span>s
+already have no pointer cursor by default, and no :hover rule has ever
+existed for .nav-item, so hover already implied nothing before this pass
+either. The badge itself styles with tokens already defined in :root
+(--space-xs, --radius-badge, --color-border-subtle, --color-text-secondary)
+-- no new custom property introduced -- and inherits .nav-item's own
+uppercase/letter-spacing/opacity rather than defining its own, so it reads
+as part of the same muted label rather than a competing element. Sized to
+stay within the nav item's own line-height (9px badge text against the
+label's 13px), so .aara-shell-nav's height is unchanged from before this
+pass -- confirmed by inspection, not by adding an explicit height.
 """
 import base64
 import html
@@ -273,11 +343,13 @@ _SHELL_IDENTITY_HTML = (
     '<div class="aara-shell-descriptor">Trading Intelligence</div>'
     "</div>"
 )
+_NAV_COMING_SOON_LABEL = "Coming Soon"
+_NAV_COMING_SOON_BADGE_HTML = f'<span class="aara-nav-badge">{_NAV_COMING_SOON_LABEL}</span>'
 _SHELL_NAV_HTML = (
     '<nav class="aara-shell-nav-list">'
     '<span class="nav-item active">Decision Center</span>'
-    '<span class="nav-item muted">Portfolio Intelligence</span>'
-    '<span class="nav-item muted">Risk Intelligence</span>'
+    f'<span class="nav-item muted">Portfolio Intelligence{_NAV_COMING_SOON_BADGE_HTML}</span>'
+    f'<span class="nav-item muted">Risk Intelligence{_NAV_COMING_SOON_BADGE_HTML}</span>'
     "</nav>"
 )
 _PAGE_HEADER_HTML = (
@@ -299,11 +371,15 @@ _GOVERNANCE_ERROR_MESSAGE = "Governance information is temporarily unavailable."
 _APPROVAL_ERROR_MESSAGE = "Approval information is temporarily unavailable."
 
 # Static, not decision-dependent -- see module docstring's V4 Decision Brief
-# pass note. Rendered verbatim for every decision and never wired into
-# detail_outputs/_DetailValues.
-_WHY_RATIONALE_MESSAGE = "Decision rationale is not yet captured for this decision."
+# and Detail Panel Polish pass notes. Rendered verbatim for every decision
+# and never wired into detail_outputs/_DetailValues.
+_WHY_RATIONALE_TITLE = "Rationale not captured"
+_WHY_RATIONALE_BODY = "The decision thesis has not yet been recorded."
 _WHY_RATIONALE_HTML = (
-    f'<div class="aara-disclosure-message">{html.escape(_WHY_RATIONALE_MESSAGE)}</div>'
+    '<div class="aara-disclosure-message">'
+    f'<div class="aara-disclosure-title">{html.escape(_WHY_RATIONALE_TITLE)}</div>'
+    f'<div class="aara-disclosure-body">{html.escape(_WHY_RATIONALE_BODY)}</div>'
+    "</div>"
 )
 
 _ACTION_BADGE_CLASSES = {"BUY": "action-buy", "SELL": "action-sell", "HOLD": "action-hold"}
@@ -502,7 +578,7 @@ class DecisionCenterUI:
             )
             for entry in detail_area.evidence
         ]
-        return DecisionCenterUI._record_list_html(cards, _EVIDENCE_EMPTY_MESSAGE)
+        return DecisionCenterUI._record_list_html(cards, _EVIDENCE_EMPTY_MESSAGE, "evidence")
 
     @staticmethod
     def _format_governance_html(detail_area: DecisionDetailArea) -> str:
@@ -520,7 +596,7 @@ class DecisionCenterUI:
             )
             for entry in detail_area.governance
         ]
-        return DecisionCenterUI._record_list_html(cards, _GOVERNANCE_EMPTY_MESSAGE)
+        return DecisionCenterUI._record_list_html(cards, _GOVERNANCE_EMPTY_MESSAGE, "governance")
 
     @staticmethod
     def _format_approval_html(detail_area: DecisionDetailArea) -> str:
@@ -538,7 +614,7 @@ class DecisionCenterUI:
             )
             for entry in detail_area.approvals
         ]
-        return DecisionCenterUI._record_list_html(cards, _APPROVAL_EMPTY_MESSAGE)
+        return DecisionCenterUI._record_list_html(cards, _APPROVAL_EMPTY_MESSAGE, "approval")
 
     @staticmethod
     def _decision_header_html(decision: DecisionView) -> str:
@@ -646,10 +722,17 @@ class DecisionCenterUI:
         )
 
     @staticmethod
-    def _record_list_html(cards: List[str], empty_message: str) -> str:
+    def _record_list_html(cards: List[str], empty_message: str, section_variant: str) -> str:
+        """section_variant is an internal, fixed literal ("evidence"/
+        "governance"/"approval"), never domain data, so it is interpolated
+        unescaped -- the same treatment _record_card_html already gives its
+        own state_variant parameter."""
         if not cards:
             return f'<div class="aara-empty-message">{html.escape(empty_message)}</div>'
-        return '<div class="aara-record-list">' + "".join(cards) + "</div>"
+        return (
+            f'<div class="aara-record-list aara-record-list--{section_variant}">'
+            + "".join(cards) + "</div>"
+        )
 
     @staticmethod
     def _error_message_html(message: str) -> str:

@@ -20,8 +20,12 @@ from applications.trading_intelligence.projections.decision_view import Decision
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 from applications.trading_intelligence.ui.decision_center.gradio_view import (
+    _NAV_COMING_SOON_BADGE_HTML,
+    _NAV_COMING_SOON_LABEL,
+    _SHELL_NAV_HTML,
+    _WHY_RATIONALE_BODY,
     _WHY_RATIONALE_HTML,
-    _WHY_RATIONALE_MESSAGE,
+    _WHY_RATIONALE_TITLE,
     DecisionCenterUI,
 )
 from applications.trading_intelligence.ui.decision_center.screen import (
@@ -542,6 +546,37 @@ def test_render_detail_renders_an_empty_approval_message_for_a_decision_with_no_
     assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
 
 
+def test_evidence_governance_approval_record_lists_carry_distinct_section_variant_classes():
+    """Detail Panel Polish pass: each section's non-empty record list gets
+    its own aara-record-list--{section} wrapper class so theme.py can give
+    each a distinct subtle surface -- Evidence/Governance/Approval must
+    each carry their own variant and never another section's."""
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(
+            decision=view,
+            evidence=(_make_entry(),),
+            governance=(_make_governance_entry(),),
+            approvals=(_make_approval_entry(),),
+        )
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_html, governance_html, approval_html = ui._render_detail("dec-001")
+
+    assert "aara-record-list--evidence" in evidence_html
+    assert "aara-record-list--governance" not in evidence_html
+    assert "aara-record-list--approval" not in evidence_html
+
+    assert "aara-record-list--governance" in governance_html
+    assert "aara-record-list--evidence" not in governance_html
+    assert "aara-record-list--approval" not in governance_html
+
+    assert "aara-record-list--approval" in approval_html
+    assert "aara-record-list--evidence" not in approval_html
+    assert "aara-record-list--governance" not in approval_html
+
+
 def test_row_select_renders_governance_and_approval_for_the_selected_decision():
     view = _make_view(decision_id="dec-003", symbol="NVDA")
     governance_entry = _make_governance_entry()
@@ -668,13 +703,18 @@ def test_list_rows_render_the_action_column_as_a_badge_for_each_action():
 
 
 def test_why_rationale_is_the_exact_fixed_placeholder_text():
-    """V4: the Why?/Rationale section is a static, decision-independent
-    block -- no LLM call, no inferred copy, no backend/domain contract.
-    Render exactly this sentence, verbatim, for every decision."""
-    assert _WHY_RATIONALE_MESSAGE == "Decision rationale is not yet captured for this decision."
+    """The Why?/Rationale section is a static, decision-independent
+    two-line empty state -- no LLM call, no inferred copy, no
+    backend/domain contract. Render exactly this title and body,
+    verbatim, for every decision."""
+    assert _WHY_RATIONALE_TITLE == "Rationale not captured"
+    assert _WHY_RATIONALE_BODY == "The decision thesis has not yet been recorded."
     assert _WHY_RATIONALE_HTML == (
         '<div class="aara-disclosure-message">'
-        "Decision rationale is not yet captured for this decision.</div>"
+        '<div class="aara-disclosure-title">Rationale not captured</div>'
+        '<div class="aara-disclosure-body">'
+        "The decision thesis has not yet been recorded.</div>"
+        "</div>"
     )
 
 
@@ -689,3 +729,46 @@ def test_why_rationale_block_is_present_in_the_built_layout():
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
     assert _WHY_RATIONALE_HTML in html_values
+
+
+def test_nav_coming_soon_badge_is_the_exact_fixed_label():
+    """The two muted nav items (Portfolio Intelligence, Risk Intelligence)
+    each carry a fixed 'Coming Soon' badge -- no per-decision or
+    per-session variation, matching _WHY_RATIONALE_HTML's own
+    fixed-text-lock rationale."""
+    assert _NAV_COMING_SOON_LABEL == "Coming Soon"
+    assert _NAV_COMING_SOON_BADGE_HTML == '<span class="aara-nav-badge">Coming Soon</span>'
+
+
+def test_shell_nav_has_exactly_one_active_item_and_two_muted_coming_soon_items():
+    assert _SHELL_NAV_HTML.count('class="nav-item active"') == 1
+    assert _SHELL_NAV_HTML.count('class="nav-item muted"') == 2
+    assert _SHELL_NAV_HTML.count(_NAV_COMING_SOON_BADGE_HTML) == 2
+    assert "Decision Center" in _SHELL_NAV_HTML
+    assert "Portfolio Intelligence" in _SHELL_NAV_HTML
+    assert "Risk Intelligence" in _SHELL_NAV_HTML
+
+
+def test_shell_nav_muted_items_remain_non_interactive():
+    """Coming Soon must never imply clickability -- no link, button,
+    tabindex, or click/href attribute anywhere in the nav markup; every
+    item stays a plain, non-focusable <span>, unchanged in kind by this
+    pass."""
+    assert "<a " not in _SHELL_NAV_HTML
+    assert "<button" not in _SHELL_NAV_HTML
+    assert "href=" not in _SHELL_NAV_HTML
+    assert "tabindex" not in _SHELL_NAV_HTML
+    assert "onclick" not in _SHELL_NAV_HTML
+
+
+def test_shell_nav_block_is_present_in_the_built_layout():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    assert _SHELL_NAV_HTML in html_values

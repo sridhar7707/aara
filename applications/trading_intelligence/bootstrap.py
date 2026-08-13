@@ -87,39 +87,56 @@ def _seed_decisions(engine: SentinelEngine) -> List[str]:
     """Drive three decisions through the real Sentinel Engine write path,
     each stopped at a different lifecycle stage, so the first visible
     Decision Center screen demonstrates DecisionState's full range with
-    genuine engine-produced data rather than hand-built projections."""
-    now = datetime(2026, 8, 8, 9, 0, 0)
+    genuine engine-produced data rather than hand-built projections.
+
+    Each decision gets its own fixed timestamp(s), staggered across a single
+    illustrative trading morning and advancing chronologically within a
+    decision's own lifecycle (create -> evidence -> approval), rather than
+    every event across all three decisions sharing one identical instant --
+    still fully deterministic (fixed datetime literals, no randomness), just
+    no longer visually flat. confidence is similarly given a genuine spread
+    (0.54 / 0.71 / 0.91) instead of clustering in the 60-90% band. Governance
+    evaluation's own displayed timestamp remains real-clock
+    (GovernanceService.evaluate_policy() stamps datetime.utcnow() internally,
+    not a caller-supplied value) -- unaffected by any of this, and out of
+    scope to change without touching sentinel_engine."""
     decision_ids: List[str] = []
 
     # dec-seed-001: DECISION_CREATED only.
+    created_001 = datetime(2026, 8, 8, 8, 12, 0)
     engine.create_decision(Decision(
         decision_id="dec-seed-001", symbol="AAPL", action="BUY",
-        timestamp=now, confidence=0.82,
+        timestamp=created_001, confidence=0.71,
         evidence_reference="evidence-seed-001", risk_reference="risk-seed-001",
     ))
     decision_ids.append("dec-seed-001")
 
     # dec-seed-002: through EVIDENCE_ATTACHED.
+    created_002 = datetime(2026, 8, 8, 8, 47, 0)
+    evidence_attached_002 = datetime(2026, 8, 8, 8, 52, 0)
     engine.create_decision(Decision(
         decision_id="dec-seed-002", symbol="MSFT", action="HOLD",
-        timestamp=now, confidence=0.61,
+        timestamp=created_002, confidence=0.54,
         evidence_reference="evidence-seed-002", risk_reference="risk-seed-002",
     ))
     engine.attach_evidence("dec-seed-002", Evidence(
         evidence_id="ev-seed-002", evidence_type="NEWS_SENTIMENT", source="newsapi",
-        data={"score": 0.58}, collected_at=now,
+        data={"score": 0.58}, collected_at=evidence_attached_002,
     ))
     decision_ids.append("dec-seed-002")
 
     # dec-seed-003: through APPROVAL_RECORDED (full lifecycle).
+    created_003 = datetime(2026, 8, 8, 9, 5, 0)
+    evidence_attached_003 = datetime(2026, 8, 8, 9, 11, 0)
+    approved_003 = datetime(2026, 8, 8, 9, 34, 0)
     engine.create_decision(Decision(
         decision_id="dec-seed-003", symbol="NVDA", action="SELL",
-        timestamp=now, confidence=0.91,
+        timestamp=created_003, confidence=0.91,
         evidence_reference="evidence-seed-003", risk_reference="risk-seed-003",
     ))
     engine.attach_evidence("dec-seed-003", Evidence(
         evidence_id="ev-seed-003", evidence_type="NEWS_SENTIMENT", source="newsapi",
-        data={"score": 0.74}, collected_at=now,
+        data={"score": 0.74}, collected_at=evidence_attached_003,
     ))
     engine.register_policy(Policy(
         policy_id="pol-seed-001", name="max_position_size",
@@ -129,7 +146,7 @@ def _seed_decisions(engine: SentinelEngine) -> List[str]:
     engine.evaluate_policy("dec-seed-003", "pol-seed-001")
     engine.record_approval(Approval(
         approval_id="apr-seed-001", decision_id="dec-seed-003",
-        status=ApprovalStatus.APPROVED, approved_by="risk_officer", timestamp=now,
+        status=ApprovalStatus.APPROVED, approved_by="risk_officer", timestamp=approved_003,
     ))
     decision_ids.append("dec-seed-003")
 

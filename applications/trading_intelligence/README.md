@@ -1,7 +1,12 @@
 # AARA Trading Intelligence
 
-**Status:** Application boundary skeleton only. No adapters, services, or data
-connections are implemented. This package currently contains no behavior.
+**Status:** Runnable application. Decision Center (`ui/decision_center/`) is
+the one implemented screen, wired end-to-end to a real Sentinel Engine read
+path through this package's own adapters/query services (see the Structure
+table below). Bootstrap (`bootstrap.py`) seeds a handful of deterministic,
+illustrative decisions in memory -- there is no persistent backend, live
+trading, real market data, or production-readiness claim behind it; see
+`ui/decision_center/README.md` for exactly what is and isn't built.
 
 ## What this is
 
@@ -47,13 +52,16 @@ introduces none either.
 
 | Directory | Purpose | Status |
 |---|---|---|
-| `contracts/` | Trading-Intelligence-specific data contracts, distinct from `sentinel_engine`'s own contracts | Placeholder only — no contracts defined |
-| `adapters/` | Read-only translation from `bot/`-shaped data into `sentinel_engine` contracts (candidate, risk, execution, outcome — per `docs/platform/TRADING_INTELLIGENCE_EVENT_MODEL.md` Section 6) | Placeholder only — no adapters implemented. `sentinel_engine/adapters/decision_adapter.py` already exists on the Sentinel Engine side and is not duplicated here. |
-| `projections/` | Trading-Intelligence-specific read models, if any prove necessary beyond `sentinel_engine.projections.DecisionProjection` | Placeholder only — no projections defined |
-| `services/` | Internal services (signal/screening, decision-orchestration, execution — conceptually parallel to `sentinel_engine`'s `DecisionService`/`EvidenceService`/`GovernanceService` pattern) | Placeholder only — no services implemented |
+| `contracts/` | Trading-Intelligence-specific data contracts (`DecisionContract`, `TradingIntelligenceReadError`), distinct from `sentinel_engine`'s own contracts | Implemented |
+| `adapters/` | Read-only adapters wrapping `sentinel_engine`'s `ProjectionRepository`/`DecisionQuery` (`SentinelProjectionDecisionSource`, `SentinelEvidenceSource`, `SentinelGovernanceSource`) | Implemented, read-only. No production adapter exists yet for `bot/`-shaped candidate/execution/outcome data (per `docs/platform/TRADING_INTELLIGENCE_EVENT_MODEL.md` Section 6) -- only the Decision Center read path above. |
+| `projections/` | Trading-Intelligence-owned read models for the UI (`DecisionView`, `EvidenceEntry`, `GovernanceEntry`, `ApprovalEntry`) | Implemented |
+| `services/` | Query-service boundary between adapters and the UI controller (`DecisionQueryService`, `DecisionEvidenceQueryService`, `DecisionGovernanceQueryService`) | Implemented |
 
 ## Roadmap
 
 See `docs/implementation/AARA_TRADING_INTELLIGENCE_IMPLEMENTATION_ROADMAP.md` for
-what comes after this skeleton, and which future steps require their own ADR or
-are blocked by Phase 1A validation (`docs/decisions/ADR-004-sentinel-ledger-ownership-strategy.md`).
+product surfaces beyond Decision Center (Portfolio Intelligence, Risk
+Intelligence, and the rest of `docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md`'s
+screen list -- today, navigation-bar-only placeholders with no screen or
+backing code), and for the persistent-backend decision still gated by
+`docs/decisions/ADR-004-sentinel-ledger-ownership-strategy.md`.
