@@ -112,6 +112,11 @@ jobs:
           shutil.copytree("scripts", staging / "scripts",
                           ignore=shutil.ignore_patterns("__pycache__"))
 
+          # analytics package (dashboard/components/phase2_preview.py imports
+          # analytics.regime_views at module load — required for the Space to boot)
+          shutil.copytree("analytics", staging / "analytics",
+                          ignore=shutil.ignore_patterns("__pycache__"))
+
           # config.py + minimal Space-only requirements (no ML/trading packages)
           shutil.copy("config.py",               staging / "config.py")
           shutil.copy("requirements_space.txt",  staging / "requirements.txt")
