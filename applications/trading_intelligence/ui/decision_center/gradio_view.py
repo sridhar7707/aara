@@ -431,6 +431,13 @@ class DecisionCenterUI:
                         label="Decisions", show_label=False, height=340,
                         elem_classes=["aara-decisions-table"],
                     )
+                    # Quiet message below the (still-rendered, headers-only)
+                    # table when there are zero decisions -- reuses the same
+                    # aara-empty-message treatment the Evidence/Governance/
+                    # Approval sections already use, so no new CSS class or
+                    # theme.py change is needed. Empty string when the list is
+                    # non-empty, per _format_list_empty_message_html below.
+                    list_empty_output = gr.HTML()
 
                 with gr.Column(scale=4, elem_classes=["aara-detail-column"]):
                     gr.Markdown(
@@ -474,7 +481,7 @@ class DecisionCenterUI:
                 header_output, lifecycle_output, conviction_output, updated_output,
                 evidence_output, governance_output, approval_output,
             ]
-            screen_outputs = [list_output] + detail_outputs
+            screen_outputs = [list_output, list_empty_output] + detail_outputs
             # Session-scoped (per Gradio Blocks session, not a self attribute --
             # see this module's own docstring on why DecisionCenterUI holds no
             # mutable state on self) so Refresh can re-select the decision the
@@ -495,11 +502,12 @@ class DecisionCenterUI:
 
     def _render_screen(
         self, selected_id: Optional[str] = None,
-    ) -> Tuple[List[List[str]], str, str, str, str, str, str, str]:
+    ) -> Tuple[List[List[str]], str, str, str, str, str, str, str, str]:
         screen = self._controller.load_screen(self._decision_ids, selected_id)
         list_rows = self._format_list_rows(screen.list_area)
+        list_empty_message = self._format_list_empty_message_html(screen.list_area)
         detail_values = self._format_detail(screen.detail_area)
-        return (list_rows,) + detail_values
+        return (list_rows, list_empty_message) + detail_values
 
     def _render_detail(self, decision_id: str) -> _DetailValues:
         if not decision_id:
@@ -527,6 +535,16 @@ class DecisionCenterUI:
             ]
             for view in list_area.decisions
         ]
+
+    @staticmethod
+    def _format_list_empty_message_html(list_area: DecisionListArea) -> str:
+        """DecisionListArea.empty_state_message is already computed and
+        tested (screen.py/controller.py/integration tests) -- this only
+        renders it. None (list is non-empty) maps to "", so the message
+        never appears alongside real rows."""
+        if list_area.empty_state_message is None:
+            return ""
+        return f'<div class="aara-empty-message">{html.escape(list_area.empty_state_message)}</div>'
 
     @staticmethod
     def _list_action_badge_html(action: str) -> str:

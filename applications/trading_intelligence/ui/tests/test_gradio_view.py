@@ -185,7 +185,7 @@ def test_render_screen_maps_list_rows_and_detail_fields():
     ui = DecisionCenterUI(controller, ["dec-001"])
 
     (
-        list_rows, header, lifecycle, conviction, updated,
+        list_rows, list_empty_html, header, lifecycle, conviction, updated,
         evidence_html, governance_html, approval_html,
     ) = ui._render_screen()
 
@@ -194,6 +194,7 @@ def test_render_screen_maps_list_rows_and_detail_fields():
         '<span class="aara-list-action-badge action-buy">BUY</span>',
         "Approval Recorded", "91%",
     ]]
+    assert list_empty_html == ""
     assert "AAPL" in header
     assert "BUY" in header
     assert "dec-001" not in header
@@ -216,11 +217,12 @@ def test_render_screen_handles_empty_decision_list():
     ui = DecisionCenterUI(controller, [])
 
     (
-        list_rows, header, lifecycle, conviction, updated,
+        list_rows, list_empty_html, header, lifecycle, conviction, updated,
         evidence_html, governance_html, approval_html,
     ) = ui._render_screen()
 
     assert list_rows == []
+    assert list_empty_html == '<div class="aara-empty-message">No decisions recorded yet.</div>'
     assert header == ""
     assert lifecycle == "-"
     assert conviction == "-"
