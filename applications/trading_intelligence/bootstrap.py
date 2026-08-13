@@ -84,22 +84,30 @@ class _InMemoryProjectionRepository(ProjectionRepository):
 
 
 def _seed_decisions(engine: SentinelEngine) -> List[str]:
-    """Drive three decisions through the real Sentinel Engine write path,
+    """Drive four decisions through the real Sentinel Engine write path,
     each stopped at a different lifecycle stage, so the first visible
     Decision Center screen demonstrates DecisionState's full range with
-    genuine engine-produced data rather than hand-built projections.
+    genuine engine-produced data rather than hand-built projections --
+    dec-seed-004 (added to reach GOVERNANCE_EVALUATED) closes the one
+    terminal-status gap the three original seeds left: none of them ever
+    displayed GOVERNANCE_EVALUATED as a decision's *current* status, only
+    as a passed-through stage inside dec-seed-003's own journey.
 
     Each decision gets its own fixed timestamp(s), staggered across a single
     illustrative trading morning and advancing chronologically within a
-    decision's own lifecycle (create -> evidence -> approval), rather than
-    every event across all three decisions sharing one identical instant --
-    still fully deterministic (fixed datetime literals, no randomness), just
-    no longer visually flat. confidence is similarly given a genuine spread
-    (0.54 / 0.71 / 0.91) instead of clustering in the 60-90% band. Governance
-    evaluation's own displayed timestamp remains real-clock
-    (GovernanceService.evaluate_policy() stamps datetime.utcnow() internally,
-    not a caller-supplied value) -- unaffected by any of this, and out of
-    scope to change without touching sentinel_engine."""
+    decision's own lifecycle (create -> evidence -> governance -> approval),
+    rather than every event across all decisions sharing one identical
+    instant -- still fully deterministic (fixed datetime literals, no
+    randomness), just no longer visually flat. confidence is similarly
+    given a genuine spread (0.54 / 0.71 / 0.83 / 0.91) instead of clustering
+    in the 60-90% band. Governance evaluation's own displayed timestamp
+    remains real-clock (GovernanceService.evaluate_policy() stamps
+    datetime.utcnow() internally, not a caller-supplied value) -- unaffected
+    by any of this, and out of scope to change without touching
+    sentinel_engine. dec-seed-004 reuses "pol-seed-001" (already registered
+    while seeding dec-seed-003, and GovernanceService's policy registry is
+    shared across the whole engine instance for this function's duration)
+    rather than registering a second, functionally-identical policy."""
     decision_ids: List[str] = []
 
     # dec-seed-001: DECISION_CREATED only.
@@ -149,6 +157,22 @@ def _seed_decisions(engine: SentinelEngine) -> List[str]:
         status=ApprovalStatus.APPROVED, approved_by="risk_officer", timestamp=approved_003,
     ))
     decision_ids.append("dec-seed-003")
+
+    # dec-seed-004: through GOVERNANCE_EVALUATED only -- governance passed,
+    # awaiting approval. No record_approval() call.
+    created_004 = datetime(2026, 8, 8, 9, 40, 0)
+    evidence_attached_004 = datetime(2026, 8, 8, 9, 46, 0)
+    engine.create_decision(Decision(
+        decision_id="dec-seed-004", symbol="GOOGL", action="BUY",
+        timestamp=created_004, confidence=0.83,
+        evidence_reference="evidence-seed-004", risk_reference="risk-seed-004",
+    ))
+    engine.attach_evidence("dec-seed-004", Evidence(
+        evidence_id="ev-seed-004", evidence_type="NEWS_SENTIMENT", source="newsapi",
+        data={"score": 0.69}, collected_at=evidence_attached_004,
+    ))
+    engine.evaluate_policy("dec-seed-004", "pol-seed-001")
+    decision_ids.append("dec-seed-004")
 
     return decision_ids
 

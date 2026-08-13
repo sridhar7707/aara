@@ -215,11 +215,12 @@ def test_build_application_seeds_three_decisions_across_the_full_decision_state_
 
     list_rows, *_detail = ui._render_screen()
 
-    assert len(list_rows) == 3
+    assert len(list_rows) == 4
     statuses = {row[0]: row[3] for row in list_rows}
     assert statuses["dec-seed-001"] == "Decision Created"
     assert statuses["dec-seed-002"] == "Evidence Attached"
     assert statuses["dec-seed-003"] == "Approval Recorded"
+    assert statuses["dec-seed-004"] == "Governance Evaluated"
 
 
 def test_build_application_seeded_decisions_are_reachable_by_id():
@@ -273,11 +274,11 @@ def test_build_application_seeded_decision_without_attached_evidence_has_none():
 
 def test_build_application_seeds_governance_and_approval_for_the_fully_approved_decision():
     """dec-seed-003 is the only seed decision driven through
-    register_policy()/evaluate_policy()/record_approval() in
-    bootstrap.py's _seed_decisions() -- dec-seed-001/002 deliberately are
-    not, so both the "has governance/approval" and "no governance/approval"
-    states are demonstrated by the existing seed path without any change
-    to it."""
+    record_approval() in bootstrap.py's _seed_decisions() -- dec-seed-004
+    also reaches evaluate_policy() but deliberately stops before
+    record_approval(), and dec-seed-001/002 reach neither -- so "has
+    governance and approval", "has governance but not approval", and "has
+    neither" are all demonstrated by the existing seed path."""
     ui = build_application()
 
     *_, _evidence_html, governance_html, approval_html = ui._render_detail("dec-seed-003")
@@ -308,3 +309,26 @@ def test_build_application_seeded_decisions_without_governance_or_approval_have_
         '<div class="aara-empty-message">No governance evaluation recorded.</div>'
     )
     assert approval_html_2 == '<div class="aara-empty-message">No approval recorded.</div>'
+
+
+def test_build_application_seeds_a_decision_awaiting_approval_after_governance():
+    """dec-seed-004 stops at GOVERNANCE_EVALUATED -- governance passed, no
+    record_approval() call -- the one DecisionState terminal-status gap
+    the original three seeds left uncovered (see _seed_decisions()'s own
+    docstring)."""
+    ui = build_application()
+
+    (
+        header, lifecycle, confidence, _updated,
+        evidence_html, governance_html, approval_html,
+    ) = ui._render_detail("dec-seed-004")
+
+    assert "GOOGL" in header
+    assert "BUY" in header
+    assert confidence == "83%"
+    assert 'class="stage active"><span class="dot"></span><span class="label">Governance</span>' \
+        in lifecycle
+    assert "NEWS_SENTIMENT" in evidence_html
+    assert "pol-seed-001" in governance_html
+    assert "Yes" in governance_html
+    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
