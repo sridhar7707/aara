@@ -131,6 +131,50 @@ def test_render_screen_calls_controller_with_known_decision_ids():
     assert controller.load_screen_calls == [(["dec-001", "dec-002"], None)]
 
 
+def test_render_screen_forwards_an_explicit_selected_id_to_the_controller():
+    """The Refresh button passes its selected_decision_id gr.State value as
+    _render_screen's selected_id argument -- this asserts that argument
+    reaches DecisionCenterController.load_screen() unchanged, exactly the
+    same forwarding DecisionCenterController itself already has full
+    coverage for (test_decision_center_controller.py's
+    test_load_screen_selects_explicit_decision_when_given)."""
+    view = _make_view()
+    screen = DecisionCenterScreen(
+        list_area=DecisionListArea(decisions=[view]),
+        detail_area=DecisionDetailArea(decision=view),
+    )
+    controller = _FakeController(screen=screen)
+    ui = DecisionCenterUI(controller, ["dec-001", "dec-002"])
+
+    ui._render_screen("dec-002")
+
+    assert controller.load_screen_calls == [(["dec-001", "dec-002"], "dec-002")]
+
+
+def test_refresh_after_row_select_preserves_the_selected_decision():
+    """Simulates the real Refresh wiring end to end: _on_row_select's
+    returned decision_id is exactly what the selected_decision_id gr.State
+    holds and what Refresh's click handler then passes back into
+    _render_screen -- closing the gap where Refresh used to always reset
+    the detail panel to the first decision in the list."""
+    selected_view = _make_view(decision_id="dec-002", symbol="MSFT")
+    detail_area = DecisionDetailArea(decision=selected_view)
+    controller = _FakeController(detail_area=detail_area)
+    ui = DecisionCenterUI(controller, ["dec-001", "dec-002"])
+    row = ["dec-002", "MSFT", "HOLD", "Decision Created", "82%"]
+
+    select_result = ui._on_row_select(_make_select_event(row))
+    selected_decision_id = select_result[0]
+
+    controller._screen = DecisionCenterScreen(
+        list_area=DecisionListArea(decisions=[selected_view]), detail_area=detail_area,
+    )
+    ui._render_screen(selected_decision_id)
+
+    assert selected_decision_id == "dec-002"
+    assert controller.load_screen_calls == [(["dec-001", "dec-002"], "dec-002")]
+
+
 def test_render_screen_maps_list_rows_and_detail_fields():
     view = _make_view(status=DecisionState.APPROVAL_RECORDED, confidence=0.91)
     screen = DecisionCenterScreen(
@@ -358,10 +402,11 @@ def test_row_select_renders_the_selected_decision_detail():
     row = ["dec-003", "NVDA", "SELL", "Approval Recorded", "91%"]
 
     (
-        header, lifecycle, conviction, updated,
+        decision_id, header, lifecycle, conviction, updated,
         evidence_html, governance_html, approval_html,
     ) = ui._on_row_select(_make_select_event(row))
 
+    assert decision_id == "dec-003"
     assert "NVDA" in header
     assert "SELL" in header
     assert "Approval" in lifecycle
@@ -379,7 +424,7 @@ def test_row_select_handles_deselection_without_crashing():
 
     result = ui._on_row_select(_make_select_event(["dec-001"], selected=False))
 
-    assert result == ("", "-", "-", "-", "", "", "")
+    assert result == (None, "", "-", "-", "-", "", "", "")
     assert controller.load_decision_detail_calls == []
 
 
@@ -389,7 +434,7 @@ def test_row_select_handles_missing_row_value_without_crashing():
 
     result = ui._on_row_select(_make_select_event(None))
 
-    assert result == ("", "-", "-", "-", "", "", "")
+    assert result == (None, "", "-", "-", "-", "", "", "")
     assert controller.load_decision_detail_calls == []
 
 

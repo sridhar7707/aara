@@ -217,7 +217,7 @@ import base64
 import html
 import io
 import pathlib
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import gradio as gr
 from PIL import Image as PILImage
@@ -475,18 +475,28 @@ class DecisionCenterUI:
                 evidence_output, governance_output, approval_output,
             ]
             screen_outputs = [list_output] + detail_outputs
+            # Session-scoped (per Gradio Blocks session, not a self attribute --
+            # see this module's own docstring on why DecisionCenterUI holds no
+            # mutable state on self) so Refresh can re-select the decision the
+            # user had open instead of always falling back to the first row.
+            selected_decision_id = gr.State(None)
 
-            refresh_button.click(fn=self._render_screen, inputs=None, outputs=screen_outputs)
+            refresh_button.click(
+                fn=self._render_screen, inputs=[selected_decision_id], outputs=screen_outputs,
+            )
             demo.load(fn=self._render_screen, inputs=None, outputs=screen_outputs)
 
-            list_output.select(fn=self._on_row_select, inputs=None, outputs=detail_outputs)
+            list_output.select(
+                fn=self._on_row_select, inputs=None,
+                outputs=[selected_decision_id] + detail_outputs,
+            )
 
         return demo
 
     def _render_screen(
-        self,
+        self, selected_id: Optional[str] = None,
     ) -> Tuple[List[List[str]], str, str, str, str, str, str, str]:
-        screen = self._controller.load_screen(self._decision_ids)
+        screen = self._controller.load_screen(self._decision_ids, selected_id)
         list_rows = self._format_list_rows(screen.list_area)
         detail_values = self._format_detail(screen.detail_area)
         return (list_rows,) + detail_values
@@ -497,10 +507,13 @@ class DecisionCenterUI:
         detail_area = self._controller.load_decision_detail(decision_id)
         return self._format_looked_up_detail(detail_area)
 
-    def _on_row_select(self, evt: gr.SelectData) -> _DetailValues:
+    def _on_row_select(
+        self, evt: gr.SelectData,
+    ) -> Tuple[Optional[str], str, str, str, str, str, str, str]:
         if not evt.selected or not evt.row_value:
-            return self._empty_detail()
-        return self._render_detail(evt.row_value[0])
+            return (None,) + self._empty_detail()
+        decision_id = evt.row_value[0]
+        return (decision_id,) + self._render_detail(decision_id)
 
     @staticmethod
     def _format_list_rows(list_area: DecisionListArea) -> List[List[str]]:
