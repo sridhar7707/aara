@@ -8,3 +8,31 @@
 # the one already-verified version avoids introducing an unverified third
 # Gradio/Python combination across the two new Spaces.
 gradio==4.44.1
+
+# Verified via a clean pip dependency-resolution dry-run against this exact
+# file (--ignore-installed --python-version 3.10 --only-binary=:all:, i.e.
+# not reusing local site-packages, matching the actual ZeroGPU Space
+# runtime) -- not copied blindly from Trading Intelligence's requirements.
+# The dry-run confirmed the identical unpinned resolution:
+# huggingface_hub-1.27.0 and starlette-1.6.0, driven entirely by
+# gradio==4.44.1's own loose constraints (huggingface-hub>=0.19.3 with no
+# ceiling; fastapi<1.0 with no floor, whose own unpinned resolution
+# (fastapi-0.141.1) declares starlette>=0.46.0 with no ceiling) -- the same
+# chain that broke Trading Intelligence's Space, independent of any
+# Wealth-specific code. Pillow was NOT pinned: it resolved cleanly to
+# 10.4.0 in the same dry-run with no incompatibility, and
+# investor_workspace.py has no direct PIL/pillow usage to protect.
+#
+# huggingface_hub==0.36.2: the exact last release still exporting
+# HfFolder, which gradio/oauth.py imports at startup (removed at 1.0.0
+# and every release since -- verified against GitHub source).
+huggingface_hub==0.36.2
+
+# starlette==0.52.1: the exact latest release still containing the
+# isinstance(args[0], str) shim in TemplateResponse that correctly
+# unpacks gradio/routes.py's deprecated
+# TemplateResponse(name, context_dict) call (removed starting at 1.0.0,
+# which is what caused Trading Intelligence's confirmed
+# "TypeError: unhashable type: 'dict'" -- verified against starlette
+# source, not assumed to apply here without the dry-run above).
+starlette==0.52.1
