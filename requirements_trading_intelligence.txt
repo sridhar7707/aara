@@ -11,3 +11,13 @@
 # this pin without re-verifying that behavior against the new version.
 gradio==4.44.1
 pillow>=10.4.0
+
+# gradio==4.44.1 declares only huggingface-hub>=0.19.3 (no upper bound), so
+# an unpinned install picks up the latest huggingface_hub -- which removed
+# HfFolder starting at 1.0.0 (verified against GitHub source at each tag:
+# present through v0.36.2, gone at v1.0.0 and every release since). gradio
+# 4.44.1 imports HfFolder internally (gradio/oauth.py) and crashes on start
+# without it -- confirmed via the actual HF Space runtime traceback
+# (ImportError: cannot import name 'HfFolder' from 'huggingface_hub').
+# 0.36.2 is the narrowest pin: the exact last release that still has it.
+huggingface_hub==0.36.2
