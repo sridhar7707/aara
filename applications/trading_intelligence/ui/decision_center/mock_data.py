@@ -1,10 +1,15 @@
-"""Mock data provider for Decision Center V1.
+"""Mock data provider, kept available for demos of the current shipped
+Decision Center (V4).
 
 No real service wiring, no sentinel_engine/bot/dashboard/database/ledger
-import -- hardcoded DecisionView objects only, per
+import -- hardcoded DecisionView objects only, originally per
 docs/products/AARA_TRADING_INTELLIGENCE_DECISION_CENTER_DESIGN.md Section 8,
 Phase 1 ("Mock UI: hardcoded DecisionView objects, no real service wiring").
-Not connected to DecisionQueryService or any Sentinel Engine data.
+Not connected to DecisionQueryService, SentinelAuditSource, or any Sentinel
+Engine data -- DecisionView carries no evidence/governance/approval/audit
+fields itself (those are separate projections the real, wired app assembles
+through the controller), so this file's scope is unchanged by V2-V4's
+additions.
 
 DecisionState is imported from applications.trading_intelligence.projections.
 decision_view (which already depends on it for DecisionView.status), not

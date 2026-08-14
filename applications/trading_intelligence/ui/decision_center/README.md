@@ -21,16 +21,20 @@ shipped -- see "Current state" below for what's actually here).
 - **`controller.py`** — `DecisionCenterController`, the only place in `ui/`
   allowed to call Trading Intelligence's query services
   (`DecisionQueryService`, `DecisionEvidenceQueryService`,
-  `DecisionGovernanceQueryService`). Read failures in evidence/governance/
-  approval are caught independently per concern and reported as
-  `ReadStatus.ERROR`, never as an exception reaching the UI.
+  `DecisionGovernanceQueryService`) and, for audit trail only, the
+  `SentinelAuditSource` adapter directly (see the module's own docstring for
+  why audit trail skips the query-service layer). Read failures in
+  evidence/governance/approval/audit trail are caught independently per
+  concern and reported as `ReadStatus.ERROR`, never as an exception reaching
+  the UI.
 - **`gradio_view.py`** — `DecisionCenterUI`, the Gradio `Blocks` shell:
   application header/nav, decision list (mouse- and keyboard-selectable,
-  with a refresh button), and decision detail (identity header,
-  confidence shown as "Conviction", lifecycle journey, evidence,
-  governance & policy, approval, and empty/error states for each section).
-  The "Why?/Rationale" panel is a fixed, decision-independent placeholder
-  string -- no rationale/thesis data model exists anywhere in this codebase.
+  with a refresh button, and an approval Verdict column), and decision
+  detail (identity header, confidence shown as "Conviction", lifecycle
+  journey, evidence, governance & policy, approval, audit trail, and
+  empty/error states for each section). The "Why?/Rationale" panel is a
+  fixed, decision-independent placeholder string -- no rationale/thesis
+  data model exists anywhere in this codebase.
 - **`theme.py`** — CSS for the above, built from `brand/design_system/`'s
   existing design tokens; introduces no new brand colors.
 - **`mock_data.py`** — a standalone set of hardcoded `DecisionView` objects,
@@ -41,14 +45,15 @@ shipped -- see "Current state" below for what's actually here).
 ## Current state
 
 - Runnable via `python -m applications.trading_intelligence.main` (or
-  `bootstrap.build_application()`), which seeds three illustrative decisions
+  `bootstrap.build_application()`), which seeds five illustrative decisions
   through the real Sentinel Engine write path
   (`DecisionService`/`EvidenceService`/`GovernanceService`) and reads them
   back through the adapter/query-service chain above -- the same path a real
   data source would use.
-- Decision list, decision detail, confidence/conviction, lifecycle journey,
-  evidence, governance & policy, approval, refresh, and mouse/keyboard
-  decision selection are all implemented and covered by tests.
+- Decision list (including an approval Verdict column), decision detail,
+  confidence/conviction, lifecycle journey, evidence, governance & policy,
+  approval, audit trail, refresh, and mouse/keyboard decision selection are
+  all implemented and covered by tests.
 - Portfolio Intelligence and Risk Intelligence are navigation-bar-only
   "Coming Soon" placeholders (see `ui/README.md`); Risk Intelligence has no
   `RiskEvaluation` contract or reader anywhere in this codebase.

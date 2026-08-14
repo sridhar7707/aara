@@ -3,10 +3,12 @@
 **Status:** Runnable application. Decision Center (`ui/decision_center/`) is
 the one implemented screen, wired end-to-end to a real Sentinel Engine read
 path through this package's own adapters/query services (see the Structure
-table below). Bootstrap (`bootstrap.py`) seeds a handful of deterministic,
-illustrative decisions in memory -- there is no persistent backend, live
-trading, real market data, or production-readiness claim behind it; see
-`ui/decision_center/README.md` for exactly what is and isn't built.
+table below) -- including a read-only Audit Trail panel and a Decision List
+approval Verdict column. Bootstrap (`bootstrap.py`) seeds a handful of
+deterministic, illustrative decisions in memory -- there is no persistent
+backend, live trading, real market data, or production-readiness claim
+behind it; see `ui/decision_center/README.md` for exactly what is and isn't
+built.
 
 ## What this is
 
@@ -53,8 +55,8 @@ introduces none either.
 | Directory | Purpose | Status |
 |---|---|---|
 | `contracts/` | Trading-Intelligence-specific data contracts (`DecisionContract`, `TradingIntelligenceReadError`), distinct from `sentinel_engine`'s own contracts | Implemented |
-| `adapters/` | Read-only adapters wrapping `sentinel_engine`'s `ProjectionRepository`/`DecisionQuery` (`SentinelProjectionDecisionSource`, `SentinelEvidenceSource`, `SentinelGovernanceSource`) | Implemented, read-only. No production adapter exists yet for `bot/`-shaped candidate/execution/outcome data (per `docs/platform/TRADING_INTELLIGENCE_EVENT_MODEL.md` Section 6) -- only the Decision Center read path above. |
-| `projections/` | Trading-Intelligence-owned read models for the UI (`DecisionView`, `EvidenceEntry`, `GovernanceEntry`, `ApprovalEntry`) | Implemented |
+| `adapters/` | Read-only adapters wrapping `sentinel_engine`'s `ProjectionRepository`/`DecisionQuery` (`SentinelProjectionDecisionSource`, `SentinelEvidenceSource`, `SentinelGovernanceSource`, `SentinelAuditSource`) | Implemented, read-only. No production adapter exists yet for `bot/`-shaped candidate/execution/outcome data (per `docs/platform/TRADING_INTELLIGENCE_EVENT_MODEL.md` Section 6) -- only the Decision Center read path above. |
+| `projections/` | Trading-Intelligence-owned read models for the UI (`DecisionView`, `EvidenceEntry`, `GovernanceEntry`, `ApprovalEntry`, `AuditEntry`) | Implemented |
 | `services/` | Query-service boundary between adapters and the UI controller (`DecisionQueryService`, `DecisionEvidenceQueryService`, `DecisionGovernanceQueryService`) | Implemented |
 
 ## Roadmap
