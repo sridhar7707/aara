@@ -1,15 +1,23 @@
 # Wealth Intelligence Boundary
 
-**Status:** Draft — target-state description, not an implementation plan.
-**Scope:** Documents boundaries only. No code moves, import changes, or
-refactors accompany this document (per `ADR-024`, which authorizes only
-directional decisions, and consistent with `docs/platform/TRADING_INTELLIGENCE_BOUNDARY.md`'s
-own scope discipline).
+**Status:** Current-state boundary description — records both the two
+relocations already completed and ratified (`ADR-025`) and the remaining
+directional-only, not-yet-implemented dispositions (`ADR-024`); no longer a
+purely forward-looking target-state description.
+**Scope:** Documents boundaries only. This document itself makes no code
+change — the relocations it records were made separately, by commit
+`81e071b`, and ratified by `ADR-025`; any further move, rename, or refactor
+still requires its own separate authorization (per `ADR-024`'s and
+`ADR-025`'s own non-authorization clauses), consistent with
+`docs/platform/TRADING_INTELLIGENCE_BOUNDARY.md`'s own scope discipline.
 
 **Authority:** `ADR-015` (module classification), `ADR-022` (product-facing
 UI ownership), `ADR-024` (directional disposition of the four `ADR-015`-classified
 modules — this document is the boundary artifact `ADR-024` §2.5 requires
-before or alongside implementation of §2.1/§2.2/§2.4). Structurally mirrors
+before or alongside implementation of §2.1/§2.2/§2.4), `ADR-025` (ratifies
+the §2.1/§2.4 relocation of `investor_workspace.py`/`investor_presenter.py`
+already completed by commit `81e071b`, correcting this document's earlier
+physical-location claims for those two modules only). Structurally mirrors
 `docs/platform/TRADING_INTELLIGENCE_BOUNDARY.md` (Product #1's boundary
 document), per `ADR-015` §12's citation of it as structural precedent.
 
@@ -41,20 +49,19 @@ application.** Verified against current code:
 | Decision-activity aggregation query | `queries/morning_brief_query.py` | `MorningBriefQuery`/`MorningBrief` — per `ADR-024` §2.2, **directionally Core** (engine-level, product-neutral behavior), but its current name and shape remain Wealth-flavored; **no rename or relocation is authorized yet** (`ADR-024` §7.2) |
 | Decision Center read query | `queries/decision_center_query.py` | `DecisionCenterQuery`/`DecisionCenterView` — per `ADR-024` §2.3, remains in the engine, **not promoted to a shared canonical query**; duplicated in spirit by Trading Intelligence's own independent Decision Center implementation; may only converge through a future ADR |
 
-**Physically resident in `sentinel_engine/` today, but directionally
-product code per `ADR-024` (not yet relocated — no move authorized by this
-document or by `ADR-024` itself):**
+**Relocated out of `sentinel_engine/` into `applications/wealth_intelligence/`,
+per `ADR-025` (ratifying commit `81e071b`):**
 
-| Module | Current path | `ADR-024` direction |
+| Module | Current path | Relocation authority (`ADR-024` direction, `ADR-025` ratification) |
 |---|---|---|
-| `InvestorWorkspaceFacade` | `sentinel_engine/application/investor_workspace.py` | Directionally Wealth product code (`ADR-024` §2.1) |
-| `InvestorPresenter` | `sentinel_engine/presentation/investor_presenter.py` | Directionally Wealth product code (`ADR-024` §2.4, relocation authorized in direction only) |
+| `InvestorWorkspaceFacade` | `applications/wealth_intelligence/application/investor_workspace.py` | Wealth product code, relocated (`ADR-024` §2.1 direction, `ADR-025` ratification) |
+| `InvestorPresenter` | `applications/wealth_intelligence/presentation/investor_presenter.py` | Wealth product code, relocated (`ADR-024` §2.4 direction, `ADR-025` ratification) |
 
 Both packages (`sentinel_engine/application/`, `sentinel_engine/presentation/`)
-contain exactly one substantive module each today — if/when a future
-implementation change relocates these two, both packages become empty
-except for their (currently empty) `__init__.py`; that is an implementation
-detail for a future change, not decided here.
+are now empty except for their `__init__.py` — the relocation described
+above (commit `81e071b`, ratified by `ADR-025`) has already occurred.
+Whether to delete the now-empty packages is a separate, undecided
+follow-up, not addressed here.
 
 ## 2. Wealth Intelligence Product Responsibilities
 
@@ -75,16 +82,16 @@ Responsibilities, mapped to what currently implements them:
 | Investor workspace UI (Gradio) | `applications/wealth_intelligence/ui/investor_workspace.py` |
 | Application composition | `applications/wealth_intelligence/bootstrap.py` (the one place that constructs `sentinel_engine` repositories, services, and the read-side object graph for this product) |
 | Runtime entry point | `applications/wealth_intelligence/main.py` |
-| Investor-facing view-model mapping | `InvestorPresenter` — directionally this product's own responsibility (`ADR-024` §2.4), physically still in `sentinel_engine/presentation/` today |
-| Investor-facing read-access facade | `InvestorWorkspaceFacade` — directionally this product's own responsibility (`ADR-024` §2.1), physically still in `sentinel_engine/application/` today |
+| Investor-facing view-model mapping | `InvestorPresenter` — this product's own code (`ADR-024` §2.4 direction, `ADR-025` ratification), now at `applications/wealth_intelligence/presentation/investor_presenter.py` |
+| Investor-facing read-access facade | `InvestorWorkspaceFacade` — this product's own code (`ADR-024` §2.1 direction, `ADR-025` ratification), now at `applications/wealth_intelligence/application/investor_workspace.py` |
 
 **`ADR-024` disposition summary for the four `ADR-015`-classified modules**
 (directional only — no code moved by this document):
 
-| Module | `ADR-015` classification | `ADR-024` direction |
+| Module | `ADR-015` classification | Disposition (`ADR-024` direction; `ADR-025` where relocated) |
 |---|---|---|
-| `investor_presenter.py` | B — Product-specific | Wealth product code; relocation authorized in direction only |
-| `investor_workspace.py` | C — Transitional | Wealth product code; not genericized |
+| `investor_presenter.py` | B — Product-specific | Wealth product code; relocated to `applications/wealth_intelligence/` (`ADR-025`) |
+| `investor_workspace.py` | C — Transitional | Wealth product code; relocated to `applications/wealth_intelligence/` (`ADR-025`) |
 | `morning_brief_query.py` | C — Transitional, leaning toward future Core | Generic Core; stays in `sentinel_engine/`; no rename/move authorized yet |
 | `decision_center_query.py` | C/D — Transitional, leaning toward future Core | Duplication stands; not promoted to shared/canonical; may only converge via a future ADR |
 
@@ -155,13 +162,12 @@ products' deployed Spaces.
   boundary. Verified today: `applications/wealth_intelligence/bootstrap.py`
   imports five `sentinel_engine` modules; nothing in `sentinel_engine`
   imports `applications/wealth_intelligence`.
-- Two of the four `ADR-015`-classified modules currently violate the
+- Two of the four `ADR-015`-classified modules previously violated the
   "engine owns no product-specific presentation code" principle
   (`ADR-007`'s stated boundary, `ADR-022`'s accepted UI-ownership
-  decision) by physically residing in `sentinel_engine/`. `ADR-024`
-  records the direction to correct this; **this document does not correct
-  it** — no file is moved, renamed, or refactored here, consistent with
-  `ADR-024`'s own non-authorization.
+  decision) by physically residing in `sentinel_engine/`. That was
+  corrected by commit `81e071b` and ratified by `ADR-025`; both modules
+  now reside in `applications/wealth_intelligence/`, reflected above.
 - Adapters/facades remain the only mechanism permitted to cross the
   boundary once relocation occurs — the same principle
   `TRADING_INTELLIGENCE_BOUNDARY.md` §7 already states for Product #1.
@@ -170,8 +176,11 @@ products' deployed Spaces.
 
 ## 6. Unresolved Decisions
 
-- Exact destination module path for `investor_presenter.py` and
-  `investor_workspace.py` if/when relocated (`ADR-024` §7.1, §7.5).
+- ~~Exact destination module path for `investor_presenter.py` and
+  `investor_workspace.py`~~ — resolved:
+  `applications/wealth_intelligence/presentation/investor_presenter.py` and
+  `applications/wealth_intelligence/application/investor_workspace.py`
+  (`ADR-025`).
 - New name and exact module location for the generalized
   `morning_brief_query.py` (`ADR-024` §7.2) — no rename is currently
   authorized or required.
