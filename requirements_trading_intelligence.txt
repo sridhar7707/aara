@@ -21,3 +21,16 @@ pillow>=10.4.0
 # (ImportError: cannot import name 'HfFolder' from 'huggingface_hub').
 # 0.36.2 is the narrowest pin: the exact last release that still has it.
 huggingface_hub==0.36.2
+
+# gradio==4.44.1 declares no direct starlette pin; it depends on fastapi<1.0,
+# and unpinned fastapi (0.141.1) pulls starlette>=0.46.0's latest -- 1.6.0,
+# which dropped the deprecated TemplateResponse(name, context_dict) calling
+# convention gradio/routes.py:432 uses (starlette>=1.0.0 keeps only the new
+# TemplateResponse(request, name, context) signature). Confirmed directly
+# against starlette source: 0.52.1's TemplateResponse still special-cases
+# `isinstance(args[0], str)` to correctly unpack the old-style (name, dict)
+# call gradio makes; that branch is gone starting at 1.0.0, which is why
+# jinja2 ends up handed a dict as the template name (TypeError: unhashable
+# type: 'dict') -- confirmed via the actual HF Space runtime traceback.
+# 0.52.1 is the latest starlette release still containing that shim.
+starlette==0.52.1
