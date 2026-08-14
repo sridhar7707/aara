@@ -413,6 +413,22 @@ footer { display: none !important; }
 .aara-list-action-badge.action-sell { background: var(--action-sell-bg); color: var(--action-sell-fg); }
 .aara-list-action-badge.action-hold { background: var(--action-hold-bg); color: var(--action-hold-fg); }
 
+/* Verdict column badge (Approved/Rejected) -- reuses the same
+   positive/negative tint vocabulary as the Decision Detail approval card
+   (aara-record-card-state), itself built on the buy/sell tokens above, so
+   no new color token is introduced for this slice. */
+.aara-decisions-table table tbody td .aara-list-verdict-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: var(--radius-badge);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.aara-list-verdict-badge.verdict-approved { background: var(--action-buy-bg); color: var(--action-buy-fg); }
+.aara-list-verdict-badge.verdict-rejected { background: var(--action-sell-bg); color: var(--action-sell-fg); }
+
 /* Symbol prominence (spec V3 Section 5). */
 .aara-decisions-table table tbody td:nth-child(2) {
   font-weight: 600;
@@ -612,6 +628,7 @@ footer { display: none !important; }
 .aara-record-list--evidence .aara-record-card { background: var(--action-hold-bg); }
 .aara-record-list--governance .aara-record-card { background: rgba(200, 164, 93, 0.08); }
 .aara-record-list--approval .aara-record-card { background: rgba(11, 31, 58, 0.05); }
+.aara-record-list--audit .aara-record-card { background: var(--action-hold-bg); }
 .aara-record-card {
   display: flex;
   flex-wrap: wrap;

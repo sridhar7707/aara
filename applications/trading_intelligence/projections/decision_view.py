@@ -13,11 +13,19 @@ DecisionState is imported (and therefore re-exported) here so that
 ui/decision_center/mock_data.py -- which is forbidden from importing
 sentinel_engine directly (see applications/trading_intelligence/ui/tests/
 test_ui_structure.py) -- can obtain it via this module instead.
+
+approval_status (sentinel_engine.governance.approval_status.ApprovalStatus,
+also re-exported here for the same ui/ import-boundary reason) carries the
+decision's latest governance verdict, independent of status -- see
+DecisionContract's own docstring for why the two are distinct. Optional,
+defaulting to None.
 """
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Optional
 
 from sentinel_engine.domain.decision_state import DecisionState
+from sentinel_engine.governance.approval_status import ApprovalStatus
 
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
 
@@ -30,6 +38,7 @@ class DecisionView:
     status: DecisionState
     confidence: float
     updated_at: datetime
+    approval_status: Optional[ApprovalStatus] = None
 
     @classmethod
     def from_contract(cls, contract: DecisionContract) -> "DecisionView":
@@ -40,4 +49,5 @@ class DecisionView:
             status=contract.status,
             confidence=contract.confidence,
             updated_at=contract.updated_at,
+            approval_status=contract.approval_status,
         )

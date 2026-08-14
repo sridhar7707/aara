@@ -14,6 +14,7 @@ from sentinel_engine.services.evidence_service import EvidenceService
 from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.services.sentinel_engine import SentinelEngine
 
+from applications.trading_intelligence.adapters.sentinel_audit_source import SentinelAuditSource
 from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
 from applications.trading_intelligence.adapters.sentinel_governance_source import (
     SentinelGovernanceSource,
@@ -120,6 +121,7 @@ def test_build_application_wires_query_service_and_controller_once(monkeypatch):
     governance_query_service_calls = _track_constructor_calls(
         monkeypatch, DecisionGovernanceQueryService
     )
+    audit_source_calls = _track_constructor_calls(monkeypatch, SentinelAuditSource)
     controller_calls = _track_constructor_calls(monkeypatch, DecisionCenterController)
 
     build_application()
@@ -127,10 +129,12 @@ def test_build_application_wires_query_service_and_controller_once(monkeypatch):
     assert len(query_service_calls) == 1
     assert len(evidence_query_service_calls) == 1
     assert len(governance_query_service_calls) == 1
+    assert len(audit_source_calls) == 1
     assert len(controller_calls) == 1
     assert controller_calls[0]["args"][0] is query_service_calls[0]["self"]
     assert controller_calls[0]["args"][1] is evidence_query_service_calls[0]["self"]
     assert controller_calls[0]["args"][2] is governance_query_service_calls[0]["self"]
+    assert controller_calls[0]["args"][3] is audit_source_calls[0]["self"]
 
 
 def test_build_application_wires_evidence_read_chain_off_the_same_repositories(monkeypatch):
@@ -171,6 +175,19 @@ def test_build_application_wires_evidence_and_governance_read_chains_off_the_sam
     assert governance_source_calls[0]["args"][0] is decision_query
 
 
+def test_build_application_wires_audit_read_chain_off_the_same_decision_query(monkeypatch):
+    decision_query_calls = _track_constructor_calls(monkeypatch, DecisionQuery)
+    audit_source_calls = _track_constructor_calls(monkeypatch, SentinelAuditSource)
+
+    build_application()
+
+    assert len(decision_query_calls) == 1
+    decision_query = decision_query_calls[0]["self"]
+
+    assert len(audit_source_calls) == 1
+    assert audit_source_calls[0]["args"][0] is decision_query
+
+
 def test_build_application_does_not_duplicate_the_object_graph(monkeypatch):
     ledger_calls = _track_constructor_calls(monkeypatch, LedgerRepository)
     projection_calls = _track_constructor_calls(monkeypatch, _InMemoryProjectionRepository)
@@ -187,6 +204,7 @@ def test_build_application_does_not_duplicate_the_object_graph(monkeypatch):
     governance_query_service_calls = _track_constructor_calls(
         monkeypatch, DecisionGovernanceQueryService
     )
+    audit_source_calls = _track_constructor_calls(monkeypatch, SentinelAuditSource)
     controller_calls = _track_constructor_calls(monkeypatch, DecisionCenterController)
 
     build_application()
@@ -204,23 +222,46 @@ def test_build_application_does_not_duplicate_the_object_graph(monkeypatch):
     assert len(evidence_query_service_calls) == 1
     assert len(governance_source_calls) == 1
     assert len(governance_query_service_calls) == 1
+    assert len(audit_source_calls) == 1
     assert len(controller_calls) == 1
 
     repository_instances = {ledger_calls[0]["self"], projection_calls[0]["self"]}
     assert len(repository_instances) == 2  # exactly one of each, never duplicated
 
 
-def test_build_application_seeds_three_decisions_across_the_full_decision_state_range():
+def test_build_application_seeds_five_decisions_across_the_full_decision_state_range():
     ui = build_application()
 
     list_rows, *_detail = ui._render_screen()
 
-    assert len(list_rows) == 4
+    assert len(list_rows) == 5
     statuses = {row[0]: row[3] for row in list_rows}
     assert statuses["dec-seed-001"] == "Decision Created"
     assert statuses["dec-seed-002"] == "Evidence Attached"
     assert statuses["dec-seed-003"] == "Approval Recorded"
     assert statuses["dec-seed-004"] == "Governance Evaluated"
+    assert statuses["dec-seed-005"] == "Approval Recorded"
+
+
+def test_build_application_seeds_both_approval_verdicts_in_the_decision_list():
+    """dec-seed-003 (APPROVED) and dec-seed-005 (REJECTED) are the only two
+    seeds carrying a recorded approval, so the Decision List's Verdict
+    column demonstrates both real verdicts -- not just one -- alongside the
+    "no verdict yet" state the other three seeds show."""
+    ui = build_application()
+
+    list_rows, *_detail = ui._render_screen()
+    verdicts = {row[0]: row[6] for row in list_rows}
+
+    assert verdicts["dec-seed-003"] == (
+        '<span class="aara-list-verdict-badge verdict-approved">Approved</span>'
+    )
+    assert verdicts["dec-seed-005"] == (
+        '<span class="aara-list-verdict-badge verdict-rejected">Rejected</span>'
+    )
+    assert verdicts["dec-seed-001"] == "-"
+    assert verdicts["dec-seed-002"] == "-"
+    assert verdicts["dec-seed-004"] == "-"
 
 
 def test_build_application_seeded_decisions_are_reachable_by_id():
@@ -233,7 +274,7 @@ def test_build_application_seeded_decisions_are_reachable_by_id():
 
     (
         header, lifecycle, confidence, _updated, _status,
-        _evidence_html, _governance_html, _approval_html,
+        _evidence_html, _governance_html, _approval_html, _audit_html,
     ) = ui._render_detail("dec-seed-003")
 
     assert "NVDA" in header
@@ -252,8 +293,8 @@ def test_build_application_seeds_evidence_for_decisions_that_had_it_attached():
     is asserted against its own value rather than one shared literal."""
     ui = build_application()
 
-    *_, evidence_002, _governance_002, _approval_002 = ui._render_detail("dec-seed-002")
-    *_, evidence_003, _governance_003, _approval_003 = ui._render_detail("dec-seed-003")
+    *_, evidence_002, _governance_002, _approval_002, _audit_002 = ui._render_detail("dec-seed-002")
+    *_, evidence_003, _governance_003, _approval_003, _audit_003 = ui._render_detail("dec-seed-003")
 
     assert "NEWS_SENTIMENT" in evidence_002
     assert "newsapi" in evidence_002
@@ -267,7 +308,9 @@ def test_build_application_seeds_evidence_for_decisions_that_had_it_attached():
 def test_build_application_seeded_decision_without_attached_evidence_has_none():
     ui = build_application()
 
-    *_, evidence_html, _governance_html, _approval_html = ui._render_detail("dec-seed-001")
+    *_, evidence_html, _governance_html, _approval_html, _audit_html = ui._render_detail(
+        "dec-seed-001"
+    )
 
     assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
 
@@ -281,7 +324,9 @@ def test_build_application_seeds_governance_and_approval_for_the_fully_approved_
     neither" are all demonstrated by the existing seed path."""
     ui = build_application()
 
-    *_, _evidence_html, governance_html, approval_html = ui._render_detail("dec-seed-003")
+    *_, _evidence_html, governance_html, approval_html, audit_html = ui._render_detail(
+        "dec-seed-003"
+    )
 
     # evaluate_policy() timestamps with datetime.utcnow() (unlike
     # record_approval(), which uses the seed's own fixed approval
@@ -294,12 +339,30 @@ def test_build_application_seeds_governance_and_approval_for_the_fully_approved_
     assert "risk_officer" in approval_html
     assert "2026-08-08 09:34 UTC" in approval_html
 
+    # dec-seed-003 runs the full lifecycle (create -> evidence -> governance
+    # -> approval), so its audit trail carries all four event types.
+    # evaluate_policy() stamps GOVERNANCE_EVALUATED with real-clock
+    # datetime.utcnow() (unlike the other three, which use the seed's own
+    # fixed timestamps -- see _seed_decisions()'s own docstring), so its
+    # sort position relative to APPROVAL_RECORDED's fixed 2026-08-08
+    # timestamp depends on wall-clock time and is not asserted here; only
+    # the two fixed-timestamp events' relative order is deterministic.
+    assert "Decision Created" in audit_html
+    assert "Evidence Attached" in audit_html
+    assert "Governance Evaluated" in audit_html
+    assert "Approval Recorded" in audit_html
+    assert audit_html.index("Decision Created") < audit_html.index("Evidence Attached")
+
 
 def test_build_application_seeded_decisions_without_governance_or_approval_have_none():
     ui = build_application()
 
-    *_, _evidence_html_1, governance_html_1, approval_html_1 = ui._render_detail("dec-seed-001")
-    *_, _evidence_html_2, governance_html_2, approval_html_2 = ui._render_detail("dec-seed-002")
+    *_, _evidence_html_1, governance_html_1, approval_html_1, _audit_html_1 = ui._render_detail(
+        "dec-seed-001"
+    )
+    *_, _evidence_html_2, governance_html_2, approval_html_2, _audit_html_2 = ui._render_detail(
+        "dec-seed-002"
+    )
 
     assert governance_html_1 == (
         '<div class="aara-empty-message">No governance evaluation recorded.</div>'
@@ -311,6 +374,31 @@ def test_build_application_seeded_decisions_without_governance_or_approval_have_
     assert approval_html_2 == '<div class="aara-empty-message">No approval recorded.</div>'
 
 
+def test_build_application_seeds_a_rejected_decision_end_to_end():
+    """dec-seed-005 exercises the REJECTED approval path through the full
+    lifecycle (create -> evidence -> governance -> approval) -- the one
+    path no prior seed demonstrated, since dec-seed-003 is the only other
+    seed reaching record_approval(), and always with APPROVED."""
+    ui = build_application()
+
+    (
+        header, lifecycle, confidence, _updated, _status,
+        evidence_html, governance_html, approval_html, audit_html,
+    ) = ui._render_detail("dec-seed-005")
+
+    assert "TSLA" in header
+    assert "BUY" in header
+    assert confidence == "61%"
+    assert 'class="stage active"><span class="dot"></span><span class="label">Approval</span>' \
+        in lifecycle
+    assert "NEWS_SENTIMENT" in evidence_html
+    assert "pol-seed-001" in governance_html
+    assert "Rejected" in approval_html
+    assert "risk_officer" in approval_html
+    assert "2026-08-08 10:04 UTC" in approval_html
+    assert "Approval Recorded" in audit_html
+
+
 def test_build_application_seeds_a_decision_awaiting_approval_after_governance():
     """dec-seed-004 stops at GOVERNANCE_EVALUATED -- governance passed, no
     record_approval() call -- the one DecisionState terminal-status gap
@@ -320,7 +408,7 @@ def test_build_application_seeds_a_decision_awaiting_approval_after_governance()
 
     (
         header, lifecycle, confidence, _updated, _status,
-        evidence_html, governance_html, approval_html,
+        evidence_html, governance_html, approval_html, audit_html,
     ) = ui._render_detail("dec-seed-004")
 
     assert "GOOGL" in header
@@ -332,3 +420,4 @@ def test_build_application_seeds_a_decision_awaiting_approval_after_governance()
     assert "pol-seed-001" in governance_html
     assert "Yes" in governance_html
     assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
+    assert "Governance Evaluated" in audit_html

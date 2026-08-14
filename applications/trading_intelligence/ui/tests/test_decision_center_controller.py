@@ -4,6 +4,7 @@ import datetime
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
 from applications.trading_intelligence.contracts.read_error import TradingIntelligenceReadError
 from applications.trading_intelligence.projections.approval_entry import ApprovalEntry, ApprovalStatus
+from applications.trading_intelligence.projections.audit_entry import AuditEntry
 from applications.trading_intelligence.projections.decision_view import DecisionState
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
@@ -66,6 +67,18 @@ class _InMemoryGovernanceSource(GovernanceSource):
         return list(self._approvals_by_decision.get(decision_id, []))
 
 
+class _InMemoryAuditSource:
+    """Fake audit source -- controller.py holds this directly (no services/
+    wrapper for audit trail; see its own docstring on this accepted
+    asymmetry), so this is a plain class, not an ABC subclass."""
+
+    def __init__(self, audit_trail_by_decision=None):
+        self._audit_trail_by_decision = audit_trail_by_decision or {}
+
+    def get_audit_trail(self, decision_id):
+        return list(self._audit_trail_by_decision.get(decision_id, []))
+
+
 def _make_contract(**overrides):
     defaults = dict(
         decision_id="dec-001",
@@ -111,11 +124,21 @@ def _make_approval_entry(**overrides):
     return ApprovalEntry(**defaults)
 
 
+def _make_audit_entry(**overrides):
+    defaults = dict(
+        event_type="DECISION_CREATED",
+        created_at=datetime.datetime(2026, 8, 4, 12, 0, 0),
+    )
+    defaults.update(overrides)
+    return AuditEntry(**defaults)
+
+
 def _make_controller(
     decisions=None,
     evidence_by_decision=None,
     governance_by_decision=None,
     approvals_by_decision=None,
+    audit_trail_by_decision=None,
 ):
     query_service = DecisionQueryService(_InMemoryDecisionSource(decisions or {}))
     evidence_query_service = DecisionEvidenceQueryService(
@@ -124,7 +147,10 @@ def _make_controller(
     governance_query_service = DecisionGovernanceQueryService(
         _InMemoryGovernanceSource(governance_by_decision or {}, approvals_by_decision or {})
     )
-    return DecisionCenterController(query_service, evidence_query_service, governance_query_service)
+    audit_source = _InMemoryAuditSource(audit_trail_by_decision or {})
+    return DecisionCenterController(
+        query_service, evidence_query_service, governance_query_service, audit_source,
+    )
 
 
 def test_load_decisions_returns_a_decision_list_area():
@@ -193,8 +219,18 @@ class _StrictGovernanceSource(GovernanceSource):
         raise AssertionError("approvals must not be queried when decision read fails")
 
 
+class _StrictAuditSource:
+    def get_audit_trail(self, decision_id):
+        raise AssertionError("audit trail must not be queried when decision read fails")
+
+
 class _BoomEvidenceSource(EvidenceSource):
     def get_evidence(self, decision_id):
+        raise TradingIntelligenceReadError("boom")
+
+
+class _BoomAuditSource:
+    def get_audit_trail(self, decision_id):
         raise TradingIntelligenceReadError("boom")
 
 
@@ -219,6 +255,7 @@ def test_load_decision_detail_reports_decision_error_without_querying_evidence_o
         DecisionQueryService(_BoomDecisionSource()),
         DecisionEvidenceQueryService(_StrictEvidenceSource()),
         DecisionGovernanceQueryService(_StrictGovernanceSource()),
+        _StrictAuditSource(),
     )
 
     detail = controller.load_decision_detail("dec-001")
@@ -238,6 +275,7 @@ def test_load_decision_detail_reports_evidence_error_but_keeps_decision_and_gove
                 {"dec-001": [_make_approval_entry()]},
             )
         ),
+        _InMemoryAuditSource(),
     )
 
     detail = controller.load_decision_detail("dec-001")
@@ -258,6 +296,7 @@ def test_load_decision_detail_reports_governance_error_independently_of_approval
         DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
         DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
         DecisionGovernanceQueryService(_BoomGovernanceSource(fail_governance=True)),
+        _InMemoryAuditSource(),
     )
 
     detail = controller.load_decision_detail("dec-001")
@@ -274,6 +313,7 @@ def test_load_decision_detail_reports_approvals_error_independently_of_governanc
         DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
         DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
         DecisionGovernanceQueryService(_BoomGovernanceSource(fail_approvals=True)),
+        _InMemoryAuditSource(),
     )
 
     detail = controller.load_decision_detail("dec-001")
@@ -358,6 +398,7 @@ def test_load_decision_detail_does_not_query_evidence_for_a_missing_decision():
         query_service,
         DecisionEvidenceQueryService(_AssertNotCalledEvidenceSource()),
         DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
     )
 
     detail_area = controller.load_decision_detail("missing-decision")
@@ -392,6 +433,7 @@ def test_load_decisions_does_not_query_evidence():
         query_service,
         DecisionEvidenceQueryService(_AssertNotCalledEvidenceSource()),
         DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
     )
 
     list_area = controller.load_decisions(["dec-001"])
@@ -452,6 +494,7 @@ def test_load_decision_detail_does_not_query_governance_for_a_missing_decision()
         query_service,
         DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
         DecisionGovernanceQueryService(_AssertNotCalledGovernanceSource()),
+        _InMemoryAuditSource(),
     )
 
     detail_area = controller.load_decision_detail("missing-decision")
@@ -492,6 +535,94 @@ def test_load_decisions_does_not_query_governance():
         query_service,
         DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
         DecisionGovernanceQueryService(_AssertNotCalledGovernanceSource()),
+        _InMemoryAuditSource(),
+    )
+
+    list_area = controller.load_decisions(["dec-001"])
+
+    assert list_area.is_empty is False
+
+
+def test_load_decision_detail_attaches_audit_trail_from_the_audit_query_service():
+    entry = _make_audit_entry()
+    controller = _make_controller(
+        decisions={"dec-001": _make_contract()},
+        audit_trail_by_decision={"dec-001": [entry]},
+    )
+
+    detail_area = controller.load_decision_detail("dec-001")
+
+    assert detail_area.audit_trail == (entry,)
+
+
+def test_load_decision_detail_returns_empty_audit_trail_when_none_recorded():
+    controller = _make_controller(decisions={"dec-001": _make_contract()})
+
+    detail_area = controller.load_decision_detail("dec-001")
+
+    assert detail_area.audit_trail == ()
+
+
+def test_load_decision_detail_does_not_query_audit_trail_for_a_missing_decision():
+    class _AssertNotCalledAuditSource:
+        def get_audit_trail(self, decision_id):
+            raise AssertionError("audit trail must not be queried for a missing decision")
+
+    query_service = DecisionQueryService(_InMemoryDecisionSource())
+    controller = DecisionCenterController(
+        query_service,
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _AssertNotCalledAuditSource(),
+    )
+
+    detail_area = controller.load_decision_detail("missing-decision")
+
+    assert detail_area.is_empty is True
+    assert detail_area.audit_trail == ()
+
+
+def test_load_decision_detail_reports_audit_trail_error_but_keeps_other_concerns():
+    contract = _make_contract()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource({"dec-001": [_make_entry()]})),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _BoomAuditSource(),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.decision is not None
+    assert detail.evidence == (_make_entry(),)
+    assert detail.evidence_status is ReadStatus.OK
+    assert detail.audit_trail == ()
+    assert detail.audit_trail_status is ReadStatus.ERROR
+
+
+def test_load_screen_default_selection_includes_audit_trail():
+    entry = _make_audit_entry()
+    controller = _make_controller(
+        decisions={"dec-001": _make_contract()},
+        audit_trail_by_decision={"dec-001": [entry]},
+    )
+
+    screen = controller.load_screen(["dec-001"])
+
+    assert screen.detail_area.audit_trail == (entry,)
+
+
+def test_load_decisions_does_not_query_audit_trail():
+    class _AssertNotCalledAuditSource:
+        def get_audit_trail(self, decision_id):
+            raise AssertionError("load_decisions must never query the audit trail")
+
+    query_service = DecisionQueryService(_InMemoryDecisionSource({"dec-001": _make_contract()}))
+    controller = DecisionCenterController(
+        query_service,
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _AssertNotCalledAuditSource(),
     )
 
     list_area = controller.load_decisions(["dec-001"])

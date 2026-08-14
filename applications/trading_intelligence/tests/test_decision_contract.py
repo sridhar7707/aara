@@ -5,6 +5,7 @@ import dataclasses
 import pytest
 
 from sentinel_engine.domain.decision_state import DecisionState
+from sentinel_engine.governance.approval_status import ApprovalStatus
 
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
 
@@ -49,3 +50,18 @@ def test_decision_contract_is_immutable():
 def test_decision_contract_requires_all_fields():
     with pytest.raises(TypeError):
         DecisionContract(decision_id="dec-001", symbol="AAPL")
+
+
+def test_decision_contract_approval_status_defaults_to_none():
+    contract = _make_contract()
+    assert contract.approval_status is None
+
+
+def test_decision_contract_approval_status_can_be_approved():
+    contract = _make_contract(approval_status=ApprovalStatus.APPROVED)
+    assert contract.approval_status is ApprovalStatus.APPROVED
+
+
+def test_decision_contract_approval_status_can_be_rejected():
+    contract = _make_contract(approval_status=ApprovalStatus.REJECTED)
+    assert contract.approval_status is ApprovalStatus.REJECTED

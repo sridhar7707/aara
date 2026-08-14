@@ -12,6 +12,7 @@ from enum import Enum
 from typing import List, Optional, Tuple
 
 from applications.trading_intelligence.projections.approval_entry import ApprovalEntry
+from applications.trading_intelligence.projections.audit_entry import AuditEntry
 from applications.trading_intelligence.projections.decision_view import DecisionView
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
@@ -49,6 +50,8 @@ class DecisionDetailArea:
     governance_status: ReadStatus = ReadStatus.OK
     approvals: Tuple[ApprovalEntry, ...] = field(default=())
     approvals_status: ReadStatus = ReadStatus.OK
+    audit_trail: Tuple[AuditEntry, ...] = field(default=())
+    audit_trail_status: ReadStatus = ReadStatus.OK
 
     @property
     def is_empty(self) -> bool:

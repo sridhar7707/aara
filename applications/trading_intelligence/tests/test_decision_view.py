@@ -5,6 +5,7 @@ import dataclasses
 import pytest
 
 from sentinel_engine.domain.decision_state import DecisionState
+from sentinel_engine.governance.approval_status import ApprovalStatus
 
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
 from applications.trading_intelligence.projections.decision_view import DecisionView
@@ -55,3 +56,17 @@ def test_from_contract_does_not_carry_internal_references():
 
     assert not hasattr(view, "evidence_reference")
     assert not hasattr(view, "risk_reference")
+
+
+def test_from_contract_maps_approval_status_when_present():
+    contract = _make_contract(approval_status=ApprovalStatus.REJECTED)
+
+    view = DecisionView.from_contract(contract)
+
+    assert view.approval_status is ApprovalStatus.REJECTED
+
+
+def test_from_contract_defaults_approval_status_to_none():
+    view = DecisionView.from_contract(_make_contract())
+
+    assert view.approval_status is None

@@ -71,6 +71,18 @@ class _NoGovernanceSource(GovernanceSource):
         return []
 
 
+class _NoAuditSource:
+    """Same rationale as _NoEvidenceSource above, for the audit trail --
+    has its own dedicated tests (test_sentinel_audit_source.py,
+    test_bootstrap.py). Audit trail is wired directly to SentinelAuditSource
+    (no services/ wrapper -- see controller.py's own docstring on this
+    accepted asymmetry), so this stand-in is a plain class, not an ABC
+    subclass."""
+
+    def get_audit_trail(self, decision_id):
+        return []
+
+
 def _make_projection(**overrides):
     defaults = dict(
         decision_id="dec-001",
@@ -91,7 +103,9 @@ def _build_controller(repository: ProjectionRepository) -> DecisionCenterControl
     query_service = DecisionQueryService(source)
     evidence_query_service = DecisionEvidenceQueryService(_NoEvidenceSource())
     governance_query_service = DecisionGovernanceQueryService(_NoGovernanceSource())
-    return DecisionCenterController(query_service, evidence_query_service, governance_query_service)
+    return DecisionCenterController(
+        query_service, evidence_query_service, governance_query_service, _NoAuditSource(),
+    )
 
 
 def test_empty_repository_produces_an_empty_screen():

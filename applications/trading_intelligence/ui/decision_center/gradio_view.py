@@ -357,8 +357,8 @@ _PAGE_HEADER_HTML = (
     '<div class="aara-page-subtitle">Governed investment decisions</div>'
 )
 
-_LIST_HEADERS = ["Decision ID", "Symbol", "Action", "Status", "Confidence", "Last Updated"]
-_LIST_DATATYPES = ["str", "str", "markdown", "str", "str", "str"]
+_LIST_HEADERS = ["Decision ID", "Symbol", "Action", "Status", "Confidence", "Last Updated", "Verdict"]
+_LIST_DATATYPES = ["str", "str", "markdown", "str", "str", "str", "markdown"]
 _MISSING_VALUE = "-"
 
 _DECISION_READ_ERROR_MESSAGE = "Unable to load this decision."
@@ -366,9 +366,11 @@ _DECISION_NOT_FOUND_MESSAGE = "No decision found for this ID."
 _EVIDENCE_EMPTY_MESSAGE = "No evidence attached yet."
 _GOVERNANCE_EMPTY_MESSAGE = "No governance evaluation recorded."
 _APPROVAL_EMPTY_MESSAGE = "No approval recorded."
+_AUDIT_EMPTY_MESSAGE = "No audit events recorded."
 _EVIDENCE_ERROR_MESSAGE = "Evidence is temporarily unavailable."
 _GOVERNANCE_ERROR_MESSAGE = "Governance information is temporarily unavailable."
 _APPROVAL_ERROR_MESSAGE = "Approval information is temporarily unavailable."
+_AUDIT_ERROR_MESSAGE = "Audit trail is temporarily unavailable."
 
 # Static, not decision-dependent -- see module docstring's V4 Decision Brief
 # and Detail Panel Polish pass notes. Rendered verbatim for every decision
@@ -391,7 +393,7 @@ _LIFECYCLE_STAGES = [
     (DecisionState.APPROVAL_RECORDED, "Approval"),
 ]
 
-_DetailValues = Tuple[str, str, str, str, str, str, str, str]
+_DetailValues = Tuple[str, str, str, str, str, str, str, str, str]
 
 
 class DecisionCenterUI:
@@ -447,7 +449,7 @@ class DecisionCenterUI:
                     header_output = gr.HTML()
                     with gr.Row(elem_classes=["aara-hero-metrics"]):
                         conviction_output = gr.Textbox(
-                            label="Conviction", interactive=False,
+                            label="Confidence", interactive=False,
                             elem_classes=["aara-field-value", "aara-conviction-value"],
                         )
                         updated_output = gr.Textbox(
@@ -480,10 +482,16 @@ class DecisionCenterUI:
                         '<h3 class="aara-eyebrow">Approval</h3>', elem_classes=["aara-section-label"],
                     )
                     approval_output = gr.HTML()
+                    gr.Markdown(
+                        '<h3 class="aara-eyebrow">Audit Trail</h3>',
+                        elem_classes=["aara-section-label"],
+                    )
+                    audit_output = gr.HTML()
 
             detail_outputs = [
                 header_output, lifecycle_output, conviction_output, updated_output,
                 status_output, evidence_output, governance_output, approval_output,
+                audit_output,
             ]
             screen_outputs = [list_output, list_empty_output] + detail_outputs
             # Session-scoped (per Gradio Blocks session, not a self attribute --
@@ -506,7 +514,7 @@ class DecisionCenterUI:
 
     def _render_screen(
         self, selected_id: Optional[str] = None,
-    ) -> Tuple[List[List[str]], str, str, str, str, str, str, str, str, str]:
+    ) -> Tuple[List[List[str]], str, str, str, str, str, str, str, str, str, str]:
         screen = self._controller.load_screen(self._decision_ids, selected_id)
         list_rows = self._format_list_rows(screen.list_area)
         list_empty_message = self._format_list_empty_message_html(screen.list_area)
@@ -521,7 +529,7 @@ class DecisionCenterUI:
 
     def _on_row_select(
         self, evt: gr.SelectData,
-    ) -> Tuple[Optional[str], str, str, str, str, str, str, str, str]:
+    ) -> Tuple[Optional[str], str, str, str, str, str, str, str, str, str]:
         if not evt.selected or not evt.row_value:
             return (None,) + self._empty_detail()
         decision_id = evt.row_value[0]
@@ -537,6 +545,7 @@ class DecisionCenterUI:
                 view.status.value.replace("_", " ").title(),
                 f"{view.confidence * 100:.0f}%",
                 view.updated_at.strftime("%Y-%m-%d %H:%M UTC"),
+                DecisionCenterUI._verdict_badge_html(view.approval_status),
             ]
             for view in list_area.decisions
         ]
@@ -563,6 +572,24 @@ class DecisionCenterUI:
         css_class = _ACTION_BADGE_CLASSES.get(action, "action-hold")
         escaped = html.escape(action)
         return f'<span class="aara-list-action-badge {css_class}">{escaped}</span>'
+
+    @staticmethod
+    def _verdict_badge_html(status: Optional[ApprovalStatus]) -> str:
+        """Verdict column, same markdown-column pattern as the Action badge
+        above. status is None when no approval has been recorded yet for
+        that decision -- rendered as the plain _MISSING_VALUE dash, not a
+        fabricated "Pending" badge (ApprovalStatus has no PENDING member and
+        this slice does not add one). Reuses the existing
+        positive/negative approval-verdict color vocabulary already
+        established for the Decision Detail approval card
+        (_format_approval_html) -- never a bare red/green pair alone, per
+        this file's existing accessibility discipline."""
+        if status is None:
+            return _MISSING_VALUE
+        is_approved = status is ApprovalStatus.APPROVED
+        css_class = "verdict-approved" if is_approved else "verdict-rejected"
+        label = "Approved" if is_approved else "Rejected"
+        return f'<span class="aara-list-verdict-badge {css_class}">{html.escape(label)}</span>'
 
     @staticmethod
     def _format_detail(detail_area: DecisionDetailArea) -> _DetailValues:
@@ -597,6 +624,7 @@ class DecisionCenterUI:
             DecisionCenterUI._format_evidence_html(detail_area),
             DecisionCenterUI._format_governance_html(detail_area),
             DecisionCenterUI._format_approval_html(detail_area),
+            DecisionCenterUI._format_audit_html(detail_area),
         )
 
     @staticmethod
@@ -652,6 +680,21 @@ class DecisionCenterUI:
             for entry in detail_area.approvals
         ]
         return DecisionCenterUI._record_list_html(cards, _APPROVAL_EMPTY_MESSAGE, "approval")
+
+    @staticmethod
+    def _format_audit_html(detail_area: DecisionDetailArea) -> str:
+        if detail_area.audit_trail_status is ReadStatus.ERROR:
+            return DecisionCenterUI._error_message_html(_AUDIT_ERROR_MESSAGE)
+        cards = [
+            DecisionCenterUI._record_card_html(
+                entry.event_type.replace("_", " ").title(),
+                "Recorded",
+                [("Recorded At", entry.created_at.strftime("%Y-%m-%d %H:%M UTC"), True)],
+                "neutral",
+            )
+            for entry in detail_area.audit_trail
+        ]
+        return DecisionCenterUI._record_list_html(cards, _AUDIT_EMPTY_MESSAGE, "audit")
 
     @staticmethod
     def _decision_header_html(decision: DecisionView) -> str:
@@ -777,18 +820,20 @@ class DecisionCenterUI:
 
     @staticmethod
     def _empty_detail() -> _DetailValues:
-        return ("", _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "")
+        return (
+            "", _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "", "",
+        )
 
     @staticmethod
     def _missing_decision_detail() -> _DetailValues:
         return (
             DecisionCenterUI._missing_decision_header_html(),
-            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "",
+            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "", "",
         )
 
     @staticmethod
     def _decision_error_detail() -> _DetailValues:
         return (
             DecisionCenterUI._decision_error_header_html(),
-            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "",
+            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "", "",
         )

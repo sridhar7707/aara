@@ -4,7 +4,13 @@ import datetime
 import pytest
 
 from sentinel_engine.domain.decision_state import DecisionState
+from sentinel_engine.events.event import Event
+from sentinel_engine.events.event_types import EventType
+from sentinel_engine.governance.approval_status import ApprovalStatus
+from sentinel_engine.ledger.ledger import LedgerStore
 from sentinel_engine.projections.decision_projection import DecisionProjection
+from sentinel_engine.queries.decision_query import DecisionQuery
+from sentinel_engine.repositories.ledger_repository import LedgerRepository
 from sentinel_engine.repositories.projection_repository import ProjectionRepository
 
 from applications.trading_intelligence.adapters.sentinel_projection_decision_source import (
@@ -191,3 +197,112 @@ def test_list_decisions_never_calls_save():
     source = SentinelProjectionDecisionSource(_AssertNoSaveRepository())
 
     source.list_decisions(["dec-001", "missing"])
+
+
+class _InMemoryLedgerStore(LedgerStore):
+    """Minimal LedgerStore fake -- mirrors bootstrap.py's own
+    _InMemoryLedgerStore, needed here only to construct a real DecisionQuery
+    for the approval_status tests below."""
+
+    def __init__(self):
+        self._events = []
+
+    def append(self, event):
+        self._events.append(event)
+
+    def read_all(self):
+        return list(self._events)
+
+
+def _make_decision_query(events=()):
+    ledger_repository = LedgerRepository(_InMemoryLedgerStore())
+    projection_repository = _InMemoryProjectionRepository()
+    for event in events:
+        ledger_repository.save_event(event)
+    return ledger_repository, projection_repository
+
+
+def _make_approval_recorded_event(decision_id, status, approved_at):
+    return Event(
+        event_id=f"evt-{decision_id}",
+        event_type=EventType.APPROVAL_RECORDED,
+        created_at=approved_at,
+        payload={
+            "decision_id": decision_id,
+            "approval_id": f"apr-{decision_id}",
+            "status": status,
+            "approved_by": "risk_officer",
+        },
+    )
+
+
+def test_approval_status_is_none_when_no_decision_query_provided():
+    """Backward compatibility: every existing construction of this class
+    passes only a ProjectionRepository -- approval_status must stay None,
+    exactly as before this collaborator existed."""
+    repository = _InMemoryProjectionRepository()
+    repository.save(_make_projection())
+    source = SentinelProjectionDecisionSource(repository)
+
+    result = source.get_decision("dec-001")
+
+    assert result.approval_status is None
+
+
+def test_approval_status_is_none_when_decision_query_has_no_approval():
+    ledger_repository, projection_repository = _make_decision_query()
+    projection_repository.save(_make_projection())
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+    source = SentinelProjectionDecisionSource(projection_repository, decision_query)
+
+    result = source.get_decision("dec-001")
+
+    assert result.approval_status is None
+
+
+def test_get_decision_populates_approved_verdict_from_decision_query():
+    approved_at = datetime.datetime(2026, 8, 8, 9, 34, 0)
+    event = _make_approval_recorded_event("dec-001", ApprovalStatus.APPROVED, approved_at)
+    ledger_repository, projection_repository = _make_decision_query([event])
+    projection_repository.save(_make_projection())
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+    source = SentinelProjectionDecisionSource(projection_repository, decision_query)
+
+    result = source.get_decision("dec-001")
+
+    assert result.approval_status is ApprovalStatus.APPROVED
+
+
+def test_get_decision_populates_rejected_verdict_from_decision_query():
+    rejected_at = datetime.datetime(2026, 8, 8, 10, 4, 0)
+    event = _make_approval_recorded_event("dec-001", ApprovalStatus.REJECTED, rejected_at)
+    ledger_repository, projection_repository = _make_decision_query([event])
+    projection_repository.save(_make_projection())
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+    source = SentinelProjectionDecisionSource(projection_repository, decision_query)
+
+    result = source.get_decision("dec-001")
+
+    assert result.approval_status is ApprovalStatus.REJECTED
+
+
+def test_list_decisions_populates_approval_status_for_each_decision():
+    approved_event = _make_approval_recorded_event(
+        "dec-001", ApprovalStatus.APPROVED, datetime.datetime(2026, 8, 8, 9, 34, 0)
+    )
+    rejected_event = _make_approval_recorded_event(
+        "dec-002", ApprovalStatus.REJECTED, datetime.datetime(2026, 8, 8, 10, 4, 0)
+    )
+    ledger_repository, projection_repository = _make_decision_query(
+        [approved_event, rejected_event]
+    )
+    projection_repository.save(_make_projection(decision_id="dec-001", symbol="AAPL"))
+    projection_repository.save(_make_projection(decision_id="dec-002", symbol="MSFT"))
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+    source = SentinelProjectionDecisionSource(projection_repository, decision_query)
+
+    results = source.list_decisions(["dec-001", "dec-002"])
+
+    verdicts = {r.decision_id: r.approval_status for r in results}
+    assert verdicts["dec-001"] is ApprovalStatus.APPROVED
+    assert verdicts["dec-002"] is ApprovalStatus.REJECTED

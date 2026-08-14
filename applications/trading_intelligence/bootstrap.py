@@ -43,6 +43,7 @@ from sentinel_engine.services.evidence_service import EvidenceService
 from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.services.sentinel_engine import SentinelEngine
 
+from applications.trading_intelligence.adapters.sentinel_audit_source import SentinelAuditSource
 from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
 from applications.trading_intelligence.adapters.sentinel_governance_source import (
     SentinelGovernanceSource,
@@ -84,14 +85,18 @@ class _InMemoryProjectionRepository(ProjectionRepository):
 
 
 def _seed_decisions(engine: SentinelEngine) -> List[str]:
-    """Drive four decisions through the real Sentinel Engine write path,
-    each stopped at a different lifecycle stage, so the first visible
-    Decision Center screen demonstrates DecisionState's full range with
-    genuine engine-produced data rather than hand-built projections --
-    dec-seed-004 (added to reach GOVERNANCE_EVALUATED) closes the one
-    terminal-status gap the three original seeds left: none of them ever
-    displayed GOVERNANCE_EVALUATED as a decision's *current* status, only
-    as a passed-through stage inside dec-seed-003's own journey.
+    """Drive five decisions through the real Sentinel Engine write path,
+    each stopped at a different lifecycle stage (or governance verdict), so
+    the first visible Decision Center screen demonstrates DecisionState's
+    full range with genuine engine-produced data rather than hand-built
+    projections -- dec-seed-004 (added to reach GOVERNANCE_EVALUATED)
+    closes the one terminal-status gap the three original seeds left: none
+    of them ever displayed GOVERNANCE_EVALUATED as a decision's *current*
+    status, only as a passed-through stage inside dec-seed-003's own
+    journey. dec-seed-005 (added alongside the Decision List verdict badge)
+    closes the equivalent gap for approval verdict: dec-seed-003 is the
+    only prior seed reaching record_approval(), and always with APPROVED --
+    dec-seed-005 exercises the REJECTED path end to end.
 
     Each decision gets its own fixed timestamp(s), staggered across a single
     illustrative trading morning and advancing chronologically within a
@@ -174,6 +179,30 @@ def _seed_decisions(engine: SentinelEngine) -> List[str]:
     engine.evaluate_policy("dec-seed-004", "pol-seed-001")
     decision_ids.append("dec-seed-004")
 
+    # dec-seed-005: through APPROVAL_RECORDED with a REJECTED verdict --
+    # full lifecycle like dec-seed-003, but exercising the rejection path
+    # end to end (Decision List verdict badge, Decision Detail approval
+    # card) that no prior seed demonstrated. Reuses "pol-seed-001" for the
+    # same reason dec-seed-004 does.
+    created_005 = datetime(2026, 8, 8, 9, 52, 0)
+    evidence_attached_005 = datetime(2026, 8, 8, 9, 58, 0)
+    rejected_005 = datetime(2026, 8, 8, 10, 4, 0)
+    engine.create_decision(Decision(
+        decision_id="dec-seed-005", symbol="TSLA", action="BUY",
+        timestamp=created_005, confidence=0.61,
+        evidence_reference="evidence-seed-005", risk_reference="risk-seed-005",
+    ))
+    engine.attach_evidence("dec-seed-005", Evidence(
+        evidence_id="ev-seed-005", evidence_type="NEWS_SENTIMENT", source="newsapi",
+        data={"score": 0.41}, collected_at=evidence_attached_005,
+    ))
+    engine.evaluate_policy("dec-seed-005", "pol-seed-001")
+    engine.record_approval(Approval(
+        approval_id="apr-seed-002", decision_id="dec-seed-005",
+        status=ApprovalStatus.REJECTED, approved_by="risk_officer", timestamp=rejected_005,
+    ))
+    decision_ids.append("dec-seed-005")
+
     return decision_ids
 
 
@@ -188,18 +217,21 @@ def build_application() -> DecisionCenterUI:
 
     decision_ids = _seed_decisions(engine)
 
-    source = SentinelProjectionDecisionSource(projection_repository)
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+
+    source = SentinelProjectionDecisionSource(projection_repository, decision_query)
     query_service = DecisionQueryService(source)
 
-    decision_query = DecisionQuery(ledger_repository, projection_repository)
     evidence_source = SentinelEvidenceSource(decision_query)
     evidence_query_service = DecisionEvidenceQueryService(evidence_source)
 
     governance_source = SentinelGovernanceSource(decision_query)
     governance_query_service = DecisionGovernanceQueryService(governance_source)
 
+    audit_source = SentinelAuditSource(decision_query)
+
     controller = DecisionCenterController(
-        query_service, evidence_query_service, governance_query_service,
+        query_service, evidence_query_service, governance_query_service, audit_source,
     )
 
     return DecisionCenterUI(controller, decision_ids)

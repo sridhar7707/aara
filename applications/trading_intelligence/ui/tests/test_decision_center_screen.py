@@ -5,6 +5,7 @@ import dataclasses
 import pytest
 
 from applications.trading_intelligence.projections.approval_entry import ApprovalEntry, ApprovalStatus
+from applications.trading_intelligence.projections.audit_entry import AuditEntry
 from applications.trading_intelligence.projections.decision_view import DecisionState, DecisionView
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
@@ -57,6 +58,15 @@ def _make_approval_entry(**overrides):
     )
     defaults.update(overrides)
     return ApprovalEntry(**defaults)
+
+
+def _make_audit_entry(**overrides):
+    defaults = dict(
+        event_type="DECISION_CREATED",
+        created_at=datetime.datetime(2026, 8, 4, 12, 0, 0),
+    )
+    defaults.update(overrides)
+    return AuditEntry(**defaults)
 
 
 def test_decision_list_area_reports_empty_state_when_no_decisions():
@@ -184,6 +194,43 @@ def test_decision_detail_area_with_governance_and_approvals_still_formats_core_d
     assert area.status_display == "Decision Created"
 
 
+def test_decision_detail_area_defaults_to_no_audit_trail():
+    area = DecisionDetailArea(decision=_make_view())
+
+    assert area.audit_trail == ()
+
+
+def test_decision_detail_area_carries_audit_entries():
+    entry = _make_audit_entry()
+    area = DecisionDetailArea(decision=_make_view(), audit_trail=(entry,))
+
+    assert area.audit_trail == (entry,)
+
+
+def test_decision_detail_area_preserves_audit_entry_order():
+    first = _make_audit_entry(event_type="DECISION_CREATED")
+    second = _make_audit_entry(event_type="EVIDENCE_ATTACHED")
+    area = DecisionDetailArea(decision=_make_view(), audit_trail=(first, second))
+
+    assert area.audit_trail == (first, second)
+
+
+def test_decision_detail_area_is_immutable_including_audit_trail():
+    area = DecisionDetailArea(decision=_make_view())
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        area.audit_trail = (_make_audit_entry(),)
+
+
+def test_empty_audit_trail_and_errored_audit_trail_are_distinguishable():
+    empty = DecisionDetailArea(decision=_make_view(), audit_trail=())
+    errored = DecisionDetailArea(
+        decision=_make_view(), audit_trail=(), audit_trail_status=ReadStatus.ERROR
+    )
+
+    assert empty.audit_trail_status is ReadStatus.OK
+    assert errored.audit_trail_status is ReadStatus.ERROR
+
+
 def test_decision_detail_area_defaults_every_read_status_to_ok():
     area = DecisionDetailArea(decision=None)
 
@@ -191,6 +238,7 @@ def test_decision_detail_area_defaults_every_read_status_to_ok():
     assert area.evidence_status is ReadStatus.OK
     assert area.governance_status is ReadStatus.OK
     assert area.approvals_status is ReadStatus.OK
+    assert area.audit_trail_status is ReadStatus.OK
 
 
 def test_missing_decision_and_errored_decision_are_distinguishable():
