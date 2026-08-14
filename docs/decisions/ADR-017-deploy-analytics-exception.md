@@ -1,6 +1,6 @@
 # ADR-017: ADR-002 Exception — Deploy `analytics/` to Dashboard Space
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-13
 
 ## Scope
