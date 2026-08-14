@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from sentinel_engine.application.investor_workspace import InvestorWorkspaceFacade
+from applications.wealth_intelligence.application.investor_workspace import InvestorWorkspaceFacade
 from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.governance.approval_status import ApprovalStatus
 from sentinel_engine.queries.decision_center_query import DecisionCenterView

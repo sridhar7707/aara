@@ -10,7 +10,7 @@ from typing import List, Optional, Tuple
 
 import gradio as gr
 
-from sentinel_engine.presentation.investor_presenter import (
+from applications.wealth_intelligence.presentation.investor_presenter import (
     ApprovalSummaryRow,
     GovernanceSummaryRow,
     InvestorPresenter,

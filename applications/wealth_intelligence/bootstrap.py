@@ -18,10 +18,8 @@ expected to be replaced once ADR-004 is resolved.
 """
 from typing import Dict, List, Optional
 
-from sentinel_engine.application.investor_workspace import InvestorWorkspaceFacade
 from sentinel_engine.events.event import Event
 from sentinel_engine.ledger.ledger import LedgerStore
-from sentinel_engine.presentation.investor_presenter import InvestorPresenter
 from sentinel_engine.projections.decision_projection import DecisionProjection
 from sentinel_engine.queries.decision_center_query import DecisionCenterQuery
 from sentinel_engine.queries.decision_query import DecisionQuery
@@ -33,6 +31,8 @@ from sentinel_engine.services.evidence_service import EvidenceService
 from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.services.sentinel_engine import SentinelEngine
 
+from applications.wealth_intelligence.application.investor_workspace import InvestorWorkspaceFacade
+from applications.wealth_intelligence.presentation.investor_presenter import InvestorPresenter
 from applications.wealth_intelligence.ui.investor_workspace import InvestorWorkspaceUI
 
 

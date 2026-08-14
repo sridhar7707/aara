@@ -17,7 +17,7 @@ import gradio as gr
 from applications.wealth_intelligence.ui.investor_workspace import InvestorWorkspaceUI
 from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.governance.approval_status import ApprovalStatus
-from sentinel_engine.presentation.investor_presenter import (
+from applications.wealth_intelligence.presentation.investor_presenter import (
     ApprovalSummaryRow,
     DecisionCenterViewModel,
     EvidenceRow,

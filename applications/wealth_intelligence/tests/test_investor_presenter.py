@@ -1,9 +1,9 @@
-"""Tests for sentinel_engine.presentation.investor_presenter.InvestorPresenter."""
+"""Tests for applications.wealth_intelligence.presentation.investor_presenter.InvestorPresenter."""
 import datetime
 
 from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.governance.approval_status import ApprovalStatus
-from sentinel_engine.presentation.investor_presenter import (
+from applications.wealth_intelligence.presentation.investor_presenter import (
     DecisionCenterViewModel,
     InvestorPresenter,
     MorningBriefView,

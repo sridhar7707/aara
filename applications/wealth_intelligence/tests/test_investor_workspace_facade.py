@@ -1,5 +1,5 @@
-"""Tests for sentinel_engine.application.investor_workspace.InvestorWorkspaceFacade."""
-from sentinel_engine.application.investor_workspace import InvestorWorkspaceFacade
+"""Tests for applications.wealth_intelligence.application.investor_workspace.InvestorWorkspaceFacade."""
+from applications.wealth_intelligence.application.investor_workspace import InvestorWorkspaceFacade
 
 
 class _FakeMorningBriefQuery:
