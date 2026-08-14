@@ -1,0 +1,153 @@
+name: Deploy Wealth Intelligence to HuggingFace Spaces
+
+# Authorized by ADR-023 (docs/decisions/ADR-023-deploy-trading-wealth-intelligence-exception.md).
+# Deploys applications/wealth_intelligence/ to its own, separate HF Space --
+# completely independent of deploy_ui.yml (dashboard/'s Space) and of
+# deploy_trading_intelligence.yml. No shared trigger, no shared job, no
+# shared secret name for the Space ID.
+#
+# Not gated on the "CI" workflow (unlike deploy_ui.yml): ci.yml currently
+# runs only sentinel_engine/tests and tests/, not
+# applications/wealth_intelligence/tests -- gating on CI success here would
+# imply a coverage guarantee that doesn't exist yet. This workflow instead
+# only triggers on changes to the exact paths it deploys.
+#
+# Gradio pin: 4.44.1, matching Trading Intelligence's Space rather than
+# dashboard/'s 5.9.0. applications/wealth_intelligence/'s own UI
+# (ui/investor_workspace.py) has no documented Gradio-version-specific
+# behavior, but its test suite (18 tests) has only ever run against 4.44.1
+# in this repository -- pinning the one already-verified version avoids
+# introducing an unverified third Gradio/Python combination across the two
+# new Spaces.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'applications/wealth_intelligence/**'
+      - 'sentinel_engine/**'
+      - 'requirements_wealth_intelligence.txt'
+      - '.github/workflows/deploy_wealth_intelligence.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy-wealth-intelligence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install huggingface-hub
+        run: pip install "huggingface-hub>=0.20.0"
+
+      - name: Deploy to HuggingFace Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ secrets.HF_SPACE_ID_WEALTH_INTELLIGENCE }}
+        run: |
+          python - <<'PYEOF'
+          import os, sys, shutil
+          from pathlib import Path
+          from huggingface_hub import HfApi
+
+          token    = os.environ.get("HF_TOKEN", "")
+          space_id = os.environ.get("HF_SPACE_ID", "")
+
+          if not token or not space_id:
+              print("::error::HF_TOKEN or HF_SPACE_ID_WEALTH_INTELLIGENCE secret is not set.")
+              print("Add HF_SPACE_ID_WEALTH_INTELLIGENCE=<owner>/<space-name> in GitHub repo Settings -> Secrets.")
+              sys.exit(1)
+
+          # Stage only what applications/wealth_intelligence/ actually needs
+          # to boot: itself and the shared sentinel_engine/ package. No
+          # brand/ asset -- ui/investor_workspace.py has zero filesystem
+          # access (verified: no pathlib/open()/Path(__file__) usage).
+          staging = Path("/tmp/hf_space_wealth_intelligence")
+          if staging.exists():
+              shutil.rmtree(staging)
+          staging.mkdir()
+
+          skip_tests_and_cache = shutil.ignore_patterns("__pycache__", "tests")
+
+          # applications/ must exist as a real importable package at the
+          # Space root -- bootstrap.py/investor_workspace.py use
+          # fully-qualified applications.wealth_intelligence.* imports.
+          (staging / "applications").mkdir()
+          shutil.copy("applications/__init__.py", staging / "applications" / "__init__.py")
+          shutil.copytree(
+              "applications/wealth_intelligence",
+              staging / "applications" / "wealth_intelligence",
+              ignore=skip_tests_and_cache,
+          )
+
+          # Shared Sentinel Intelligence Engine (zero external dependencies
+          # of its own -- verified: no third-party imports anywhere in it).
+          # This Space's own copy also carries
+          # sentinel_engine/presentation/investor_presenter.py and
+          # sentinel_engine/application/investor_workspace.py -- classified
+          # Product-specific/Transitional by ADR-015, currently consumed
+          # only by this product, unaffected by this deploy.
+          shutil.copytree(
+              "sentinel_engine", staging / "sentinel_engine",
+              ignore=skip_tests_and_cache,
+          )
+
+          # applications/wealth_intelligence/main.py -> app.py (Gradio
+          # Spaces entry point). Its own `if __name__ == "__main__":` guard
+          # calls build_application().build().launch() unchanged -- no
+          # content rewrite needed.
+          shutil.copy(
+              "applications/wealth_intelligence/main.py", staging / "app.py",
+          )
+
+          # Product-scoped requirements (gradio only -- see
+          # requirements_wealth_intelligence.txt's own header comment).
+          shutil.copy(
+              "requirements_wealth_intelligence.txt", staging / "requirements.txt",
+          )
+
+          # Space metadata -- always overwrite so sdk_version stays in sync
+          # with requirements.txt's gradio pin.
+          readme = staging / "README.md"
+          readme.write_text(
+              "---\n"
+              "title: AARA Wealth Intelligence\n"
+              "emoji: \U0001F4B0\n"
+              "colorFrom: green\n"
+              "colorTo: blue\n"
+              "sdk: gradio\n"
+              "sdk_version: 4.44.1\n"
+              "python_version: \"3.9\"\n"
+              "app_file: app.py\n"
+              "pinned: false\n"
+              "---\n"
+          )
+
+          api = HfApi(token=token)
+          # Upload everything except README.md -- huggingface_hub's
+          # upload_folder calls a YAML-validation endpoint for README.md
+          # that occasionally returns an empty body, crashing with
+          # JSONDecodeError (same issue deploy_ui.yml already works around).
+          api.upload_folder(
+              folder_path=str(staging),
+              repo_id=space_id,
+              repo_type="space",
+              commit_message="chore: deploy Wealth Intelligence from CI",
+              ignore_patterns=["README.md"],
+          )
+          try:
+              api.upload_file(
+                  path_or_fileobj=str(staging / "README.md"),
+                  path_in_repo="README.md",
+                  repo_id=space_id,
+                  repo_type="space",
+                  commit_message="chore: update Space card metadata",
+              )
+          except Exception as e:
+              print(f"::warning::README.md upload failed: {e} — Space card metadata may be stale")
+
+          print(f"Wealth Intelligence deployed -> https://huggingface.co/spaces/{space_id}")
+          PYEOF

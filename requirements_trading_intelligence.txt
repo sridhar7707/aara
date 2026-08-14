@@ -1,0 +1,13 @@
+# HuggingFace Spaces runtime dependencies for AARA Trading Intelligence
+# (applications/trading_intelligence/) — kept minimal, no ML/trading packages.
+#
+# gradio==4.44.1, not dashboard/'s 5.9.0 (requirements_space.txt):
+# PyPI metadata confirms gradio 5.9.0 requires Python >=3.10, while 4.44.1
+# supports Python >=3.8. applications/trading_intelligence/'s test suite
+# (272 tests) and its Decision Center UI's documented Gradio-4.44.1-specific
+# keyboard-selection behavior (see gradio_view.py's own module docstring,
+# "Gradio 4.44.1's Dataframe keyboard gap") have only ever been run against
+# this exact version — 5.9.0 compatibility is unverified. Do not upgrade
+# this pin without re-verifying that behavior against the new version.
+gradio==4.44.1
+pillow>=10.4.0

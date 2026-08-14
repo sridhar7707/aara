@@ -1,0 +1,164 @@
+name: Deploy Trading Intelligence to HuggingFace Spaces
+
+# Authorized by ADR-023 (docs/decisions/ADR-023-deploy-trading-wealth-intelligence-exception.md).
+# Deploys applications/trading_intelligence/ to its own, separate HF Space --
+# completely independent of deploy_ui.yml (dashboard/'s Space) and of
+# deploy_wealth_intelligence.yml. No shared trigger, no shared job, no shared
+# secret name for the Space ID.
+#
+# Not gated on the "CI" workflow (unlike deploy_ui.yml): ci.yml currently
+# runs only sentinel_engine/tests and tests/, not
+# applications/trading_intelligence/tests -- gating on CI success here would
+# imply a coverage guarantee that doesn't exist yet. This workflow instead
+# only triggers on changes to the exact paths it deploys.
+#
+# Gradio pin: 4.44.1, not the 5.9.0 used by dashboard/'s Space. Verified via
+# PyPI metadata that gradio 5.9.0 requires Python >=3.10 while 4.44.1
+# supports Python >=3.8; applications/trading_intelligence/'s own test suite
+# (272 tests) and its Decision Center UI's documented Gradio-4.44.1-specific
+# keyboard-selection behavior have only ever been run/verified against
+# 4.44.1. Space python_version is pinned to 3.9 to match the exact
+# interpreter/Gradio combination those tests actually ran under -- not
+# assumed compatible with a newer Python just because PyPI allows it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'applications/trading_intelligence/**'
+      - 'sentinel_engine/**'
+      - 'brand/logos/**'
+      - 'requirements_trading_intelligence.txt'
+      - '.github/workflows/deploy_trading_intelligence.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy-trading-intelligence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install huggingface-hub
+        run: pip install "huggingface-hub>=0.20.0"
+
+      - name: Deploy to HuggingFace Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_ID: ${{ secrets.HF_SPACE_ID_TRADING_INTELLIGENCE }}
+        run: |
+          python - <<'PYEOF'
+          import os, sys, shutil
+          from pathlib import Path
+          from huggingface_hub import HfApi
+
+          token    = os.environ.get("HF_TOKEN", "")
+          space_id = os.environ.get("HF_SPACE_ID", "")
+
+          if not token or not space_id:
+              print("::error::HF_TOKEN or HF_SPACE_ID_TRADING_INTELLIGENCE secret is not set.")
+              print("Add HF_SPACE_ID_TRADING_INTELLIGENCE=<owner>/<space-name> in GitHub repo Settings -> Secrets.")
+              sys.exit(1)
+
+          # Stage only what applications/trading_intelligence/ actually needs
+          # to boot: itself, the shared sentinel_engine/ package, and the one
+          # brand asset gradio_view.py reads at import time.
+          staging = Path("/tmp/hf_space_trading_intelligence")
+          if staging.exists():
+              shutil.rmtree(staging)
+          staging.mkdir()
+
+          skip_tests_and_cache = shutil.ignore_patterns("__pycache__", "tests")
+
+          # applications/ must exist as a real importable package at the
+          # Space root -- bootstrap.py/gradio_view.py use fully-qualified
+          # applications.trading_intelligence.* imports.
+          (staging / "applications").mkdir()
+          shutil.copy("applications/__init__.py", staging / "applications" / "__init__.py")
+          shutil.copytree(
+              "applications/trading_intelligence",
+              staging / "applications" / "trading_intelligence",
+              ignore=skip_tests_and_cache,
+          )
+
+          # Shared Sentinel Intelligence Engine (zero external dependencies
+          # of its own -- verified: no third-party imports anywhere in it).
+          shutil.copytree(
+              "sentinel_engine", staging / "sentinel_engine",
+              ignore=skip_tests_and_cache,
+          )
+
+          # brand/logos/ -- required. gradio_view.py's
+          # _load_shell_logo_data_uri() reads
+          # brand/logos/sentinel_mark_favicon_v1.0.png at *module import
+          # time* via a path computed relative to its own file location
+          # (parents[4] from applications/trading_intelligence/ui/decision_center/
+          # gradio_view.py resolves to this staging root once staged at the
+          # same relative depth). Omitting this directory crashes the Space
+          # on boot, before serving a single request -- the same failure
+          # class ADR-017 fixed for dashboard/'s missing analytics/ import.
+          shutil.copytree(
+              "brand/logos", staging / "brand" / "logos",
+              ignore=shutil.ignore_patterns("__pycache__"),
+          )
+
+          # applications/trading_intelligence/main.py -> app.py (Gradio
+          # Spaces entry point). Its own `if __name__ == "__main__":` guard
+          # calls build_application().build().launch() unchanged -- no
+          # content rewrite needed.
+          shutil.copy(
+              "applications/trading_intelligence/main.py", staging / "app.py",
+          )
+
+          # Product-scoped requirements (gradio + Pillow only -- see
+          # requirements_trading_intelligence.txt's own header comment for
+          # why 4.44.1, not requirements_space.txt's 5.9.0).
+          shutil.copy(
+              "requirements_trading_intelligence.txt", staging / "requirements.txt",
+          )
+
+          # Space metadata -- always overwrite so sdk_version stays in sync
+          # with requirements.txt's gradio pin.
+          readme = staging / "README.md"
+          readme.write_text(
+              "---\n"
+              "title: AARA Trading Intelligence\n"
+              "emoji: \U0001F4C8\n"
+              "colorFrom: indigo\n"
+              "colorTo: blue\n"
+              "sdk: gradio\n"
+              "sdk_version: 4.44.1\n"
+              "python_version: \"3.9\"\n"
+              "app_file: app.py\n"
+              "pinned: false\n"
+              "---\n"
+          )
+
+          api = HfApi(token=token)
+          # Upload everything except README.md -- huggingface_hub's
+          # upload_folder calls a YAML-validation endpoint for README.md
+          # that occasionally returns an empty body, crashing with
+          # JSONDecodeError (same issue deploy_ui.yml already works around).
+          api.upload_folder(
+              folder_path=str(staging),
+              repo_id=space_id,
+              repo_type="space",
+              commit_message="chore: deploy Trading Intelligence from CI",
+              ignore_patterns=["README.md"],
+          )
+          try:
+              api.upload_file(
+                  path_or_fileobj=str(staging / "README.md"),
+                  path_in_repo="README.md",
+                  repo_id=space_id,
+                  repo_type="space",
+                  commit_message="chore: update Space card metadata",
+              )
+          except Exception as e:
+              print(f"::warning::README.md upload failed: {e} — Space card metadata may be stale")
+
+          print(f"Trading Intelligence deployed -> https://huggingface.co/spaces/{space_id}")
+          PYEOF

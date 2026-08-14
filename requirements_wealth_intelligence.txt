@@ -1,0 +1,10 @@
+# HuggingFace Spaces runtime dependencies for AARA Wealth Intelligence
+# (applications/wealth_intelligence/) — kept minimal, no ML/trading packages.
+#
+# gradio==4.44.1, matching Trading Intelligence's Space rather than
+# dashboard/'s 5.9.0 (requirements_space.txt). ui/investor_workspace.py has
+# no documented Gradio-version-specific behavior, but its test suite
+# (18 tests) has only ever run against 4.44.1 in this repository — pinning
+# the one already-verified version avoids introducing an unverified third
+# Gradio/Python combination across the two new Spaces.
+gradio==4.44.1
