@@ -43,6 +43,10 @@ from sentinel_engine.services.evidence_service import EvidenceService
 from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.services.sentinel_engine import SentinelEngine
 
+from applications.platform.identity.supabase_authentication_provider import (
+    SupabaseAuthenticationProvider,
+)
+from applications.platform.identity.user import User
 from applications.trading_intelligence.adapters.sentinel_audit_source import SentinelAuditSource
 from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
 from applications.trading_intelligence.adapters.sentinel_governance_source import (
@@ -82,6 +86,14 @@ class _InMemoryProjectionRepository(ProjectionRepository):
 
     def get(self, decision_id: str) -> Optional[DecisionProjection]:
         return self._projections.get(decision_id)
+
+
+class _NoOpSupabaseClient:
+    """Placeholder Supabase client per ADR-029 Section 2.1 -- makes no
+    network call and always reports no authenticated user."""
+
+    def get_user(self, jwt=None):
+        return None
 
 
 def _seed_decisions(engine: SentinelEngine) -> List[str]:
@@ -207,6 +219,11 @@ def _seed_decisions(engine: SentinelEngine) -> List[str]:
 
 
 def build_application() -> DecisionCenterUI:
+    auth_provider = SupabaseAuthenticationProvider(_NoOpSupabaseClient())
+    # ADR-029 Sec 2.3/2.4: captured only -- never passed to any collaborator
+    # constructed below, and a None result is not an error.
+    current_user: Optional[User] = auth_provider.get_current_user()
+
     ledger_repository = LedgerRepository(_InMemoryLedgerStore())
     projection_repository = _InMemoryProjectionRepository()
 
