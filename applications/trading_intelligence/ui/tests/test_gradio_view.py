@@ -103,6 +103,7 @@ class _FakeController:
         self._detail_area = detail_area
         self.load_screen_calls = []
         self.load_decision_detail_calls = []
+        self.load_decisions_calls = []
 
     def load_screen(self, decision_ids, selected_id=None):
         self.load_screen_calls.append((decision_ids, selected_id))
@@ -111,6 +112,15 @@ class _FakeController:
     def load_decision_detail(self, decision_id):
         self.load_decision_detail_calls.append(decision_id)
         return self._detail_area
+
+    def load_decisions(self, decision_ids):
+        """_render_screen()'s own _newest_decision_id() calls this to
+        resolve the initial (no-selection-yet) detail pane -- returns the
+        same list_area already set on self._screen, matching what
+        load_screen() would build from decisions had this fake actually
+        composed one, per the existing load_screen()/_screen pattern above."""
+        self.load_decisions_calls.append(decision_ids)
+        return self._screen.list_area if self._screen is not None else DecisionListArea(decisions=[])
 
 
 def _assert_index_order(html, *substrings):
@@ -128,6 +138,12 @@ def test_decision_center_ui_can_be_constructed():
 
 
 def test_render_screen_calls_controller_with_known_decision_ids():
+    """decision_ids (the composition root's known-ids list) is always
+    forwarded as load_screen()'s first argument unchanged. The second
+    argument is no longer None here: with no explicit selection yet,
+    _render_screen resolves it to the newest decision's id first (see
+    test_render_screen_resolves_no_selection_to_the_newest_decision below)
+    -- with a single seeded view, that's trivially "dec-001"."""
     view = _make_view()
     screen = DecisionCenterScreen(
         list_area=DecisionListArea(decisions=[view]),
@@ -138,7 +154,7 @@ def test_render_screen_calls_controller_with_known_decision_ids():
 
     ui._render_screen()
 
-    assert controller.load_screen_calls == [(["dec-001", "dec-002"], None)]
+    assert controller.load_screen_calls == [(["dec-001", "dec-002"], "dec-001")]
 
 
 def test_render_screen_forwards_an_explicit_selected_id_to_the_controller():
@@ -912,6 +928,85 @@ def test_list_rows_render_the_missing_value_dash_when_no_verdict_recorded():
     list_rows = ui._render_screen()[0]
 
     assert list_rows[0][6] == "-"
+
+
+def test_list_rows_render_newest_decision_first():
+    """DecisionListArea carries no ordering guarantee -- list_rows must sort
+    by DecisionView.updated_at descending regardless of the order decisions
+    arrive in, so investors see the most recent decision at the top without
+    scrolling/scanning for it."""
+    oldest = _make_view(
+        decision_id="dec-oldest", updated_at=datetime.datetime(2026, 8, 8, 8, 0, 0),
+    )
+    newest = _make_view(
+        decision_id="dec-newest", updated_at=datetime.datetime(2026, 8, 8, 10, 0, 0),
+    )
+    middle = _make_view(
+        decision_id="dec-middle", updated_at=datetime.datetime(2026, 8, 8, 9, 0, 0),
+    )
+    screen = DecisionCenterScreen(
+        # Deliberately out of order (not already newest-first) -- proves
+        # the sort, not an incidental pass-through of input order.
+        list_area=DecisionListArea(decisions=[oldest, newest, middle]),
+        detail_area=DecisionDetailArea(decision=oldest),
+    )
+    controller = _FakeController(screen=screen)
+    ui = DecisionCenterUI(controller, ["dec-oldest", "dec-newest", "dec-middle"])
+
+    list_rows = ui._render_screen()[0]
+
+    assert [row[0] for row in list_rows] == ["dec-newest", "dec-middle", "dec-oldest"]
+
+
+def test_render_screen_resolves_no_selection_to_the_newest_decision():
+    """Regression test for the Candidate-1 follow-up: the table sorts
+    newest-first (_format_list_rows), but controller.load_screen()'s own
+    "no selection yet" default picks list_area.decisions[0] in original,
+    unsorted order -- without _newest_decision_id(), the initial detail
+    pane could show a different decision than the table's own top row.
+
+    Proves, in one place:
+    1. The table is newest-first.
+    2. With no explicit selection, the resolved selection sent to the
+       controller is that same newest decision -- not whatever happened to
+       be list_area.decisions[0] (here, deliberately the oldest).
+    3. An explicit selection of a different, older decision still reaches
+       the controller unchanged -- not silently overridden back to
+       "newest"."""
+    oldest = _make_view(
+        decision_id="dec-oldest", symbol="AAPL",
+        updated_at=datetime.datetime(2026, 8, 8, 8, 0, 0),
+    )
+    newest = _make_view(
+        decision_id="dec-newest", symbol="TSLA",
+        updated_at=datetime.datetime(2026, 8, 8, 10, 0, 0),
+    )
+    # decisions[0] is deliberately the oldest, and detail_area is
+    # deliberately set to that same oldest decision -- reproducing exactly
+    # the inconsistency this fix closes, so the assertions below fail if
+    # the fix regresses back to trusting decisions[0] as-is.
+    screen = DecisionCenterScreen(
+        list_area=DecisionListArea(decisions=[oldest, newest]),
+        detail_area=DecisionDetailArea(decision=oldest),
+    )
+    controller = _FakeController(screen=screen)
+    ui = DecisionCenterUI(controller, ["dec-oldest", "dec-newest"])
+
+    list_rows = ui._render_screen()[0]
+
+    # 1. Table is newest-first.
+    assert [row[0] for row in list_rows] == ["dec-newest", "dec-oldest"]
+    # 2. No explicit selection was given, yet load_screen() was called with
+    # the newest decision's id, not None and not "dec-oldest".
+    assert controller.load_screen_calls == [(["dec-oldest", "dec-newest"], "dec-newest")]
+
+    # 3. An explicit selection of the *older* decision still reaches the
+    # controller unchanged -- proves this fix only fills in the missing
+    # case, it never overrides a real user selection.
+    controller.load_screen_calls.clear()
+    ui._render_screen("dec-oldest")
+
+    assert controller.load_screen_calls == [(["dec-oldest", "dec-newest"], "dec-oldest")]
 
 
 def test_why_rationale_is_the_exact_fixed_placeholder_text():

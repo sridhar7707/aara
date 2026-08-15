@@ -515,11 +515,35 @@ class DecisionCenterUI:
     def _render_screen(
         self, selected_id: Optional[str] = None,
     ) -> Tuple[List[List[str]], str, str, str, str, str, str, str, str, str, str]:
+        """selected_id is None only when nothing has been explicitly picked
+        yet (initial demo.load(), or Refresh before any row click) --
+        controller.load_screen()'s own default for that case is
+        list_area.decisions[0] in original, unsorted order, which no longer
+        matches _format_list_rows' newest-first table. Resolving that here
+        (asking the controller for the newest id by name, via the same
+        selected_id parameter it already accepts for an explicit pick) keeps
+        the initial detail pane in sync with the sorted top row without
+        touching controller.py's own default-selection logic. Once a row is
+        actually clicked, _on_row_select supplies a real selected_id and
+        this branch never runs again for that session."""
+        if selected_id is None:
+            selected_id = self._newest_decision_id()
         screen = self._controller.load_screen(self._decision_ids, selected_id)
         list_rows = self._format_list_rows(screen.list_area)
         list_empty_message = self._format_list_empty_message_html(screen.list_area)
         detail_values = self._format_detail(screen.detail_area)
         return (list_rows, list_empty_message) + detail_values
+
+    def _newest_decision_id(self) -> Optional[str]:
+        """Same ordering key as _format_list_rows (updated_at descending) --
+        deliberately re-fetches list_area rather than trying to share one
+        with _render_screen's own later call, since selected_id must be
+        resolved before controller.load_screen() runs (it's an input to
+        that call, not derivable from its output)."""
+        decisions = self._controller.load_decisions(self._decision_ids).decisions
+        if not decisions:
+            return None
+        return max(decisions, key=lambda view: view.updated_at).decision_id
 
     def _render_detail(self, decision_id: str) -> _DetailValues:
         if not decision_id:
@@ -537,6 +561,13 @@ class DecisionCenterUI:
 
     @staticmethod
     def _format_list_rows(list_area: DecisionListArea) -> List[List[str]]:
+        """Rendered newest-first (DecisionView.updated_at descending) --
+        DecisionListArea itself carries no ordering guarantee (whatever the
+        controller/query-service returned), so this is the one place that
+        decides display order. _render_screen's own _newest_decision_id()
+        uses the same ordering key to keep the initial (no-selection-yet)
+        detail pane in sync with this table's top row."""
+        decisions = sorted(list_area.decisions, key=lambda view: view.updated_at, reverse=True)
         return [
             [
                 view.decision_id,
@@ -547,7 +578,7 @@ class DecisionCenterUI:
                 view.updated_at.strftime("%Y-%m-%d %H:%M UTC"),
                 DecisionCenterUI._verdict_badge_html(view.approval_status),
             ]
-            for view in list_area.decisions
+            for view in decisions
         ]
 
     @staticmethod
