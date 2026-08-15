@@ -30,12 +30,14 @@ from applications.platform.identity.authentication_provider import Authenticatio
 from applications.platform.identity.user import User
 from applications.platform.navigation.navigation_builder import NavigationBuilder
 from applications.platform.registry.product_registry import ProductRegistry
-from applications.platform.workspaces.workspace import Workspace
 from applications.platform.workspaces.workspace_registry import WorkspaceRegistry
 from applications.trading_intelligence.adapters.sentinel_projection_decision_source import (
     SentinelProjectionDecisionSource,
 )
-from applications.trading_intelligence.product import TRADING_INTELLIGENCE_PRODUCT
+from applications.trading_intelligence.product import (
+    DECISION_CENTER_WORKSPACE,
+    TRADING_INTELLIGENCE_PRODUCT,
+)
 from applications.trading_intelligence.services.decision_evidence_query_service import (
     DecisionEvidenceQueryService,
     EvidenceSource,
@@ -89,15 +91,6 @@ class _NoAuditSource:
         return []
 
 
-_DECISION_CENTER_WORKSPACE = Workspace(
-    workspace_id="trading_intelligence.decision_center",
-    product_id="trading_intelligence",
-    display_name="Decision Center",
-    visibility="TRADING_INTELLIGENCE",
-    order=0,
-)
-
-
 class _FakeAuthenticationProvider(AuthenticationProvider):
     def __init__(self, current_user=None):
         self._current_user = current_user
@@ -147,9 +140,9 @@ def test_trading_intelligence_product_can_be_registered():
 def test_decision_center_workspace_can_be_registered():
     registry = _InMemoryWorkspaceRegistry()
 
-    registry.register_workspace(_DECISION_CENTER_WORKSPACE)
+    registry.register_workspace(DECISION_CENTER_WORKSPACE)
 
-    assert registry.list_workspaces("trading_intelligence") == [_DECISION_CENTER_WORKSPACE]
+    assert registry.list_workspaces("trading_intelligence") == [DECISION_CENTER_WORKSPACE]
 
 
 def test_navigation_builder_discovers_trading_intelligence_when_entitled():
@@ -157,7 +150,7 @@ def test_navigation_builder_discovers_trading_intelligence_when_entitled():
     products = _InMemoryProductRegistry()
     products.register(TRADING_INTELLIGENCE_PRODUCT)
     workspaces = _InMemoryWorkspaceRegistry()
-    workspaces.register_workspace(_DECISION_CENTER_WORKSPACE)
+    workspaces.register_workspace(DECISION_CENTER_WORKSPACE)
     entitlements = _FakeEntitlementChecker(grants={(user.user_id, "trading_intelligence")})
     builder = NavigationBuilder(
         product_registry=products,
@@ -177,7 +170,7 @@ def test_decision_center_appears_as_a_navigation_item():
     products = _InMemoryProductRegistry()
     products.register(TRADING_INTELLIGENCE_PRODUCT)
     workspaces = _InMemoryWorkspaceRegistry()
-    workspaces.register_workspace(_DECISION_CENTER_WORKSPACE)
+    workspaces.register_workspace(DECISION_CENTER_WORKSPACE)
     entitlements = _FakeEntitlementChecker(grants={(user.user_id, "trading_intelligence")})
     builder = NavigationBuilder(
         product_registry=products,
@@ -201,7 +194,7 @@ def test_non_entitled_users_do_not_see_trading_intelligence():
     products = _InMemoryProductRegistry()
     products.register(TRADING_INTELLIGENCE_PRODUCT)
     workspaces = _InMemoryWorkspaceRegistry()
-    workspaces.register_workspace(_DECISION_CENTER_WORKSPACE)
+    workspaces.register_workspace(DECISION_CENTER_WORKSPACE)
     entitlements = _FakeEntitlementChecker(grants=set())  # no grants for this user
     builder = NavigationBuilder(
         product_registry=products,
@@ -220,7 +213,7 @@ def _build_entitled_navigation_model():
     products = _InMemoryProductRegistry()
     products.register(TRADING_INTELLIGENCE_PRODUCT)
     workspaces = _InMemoryWorkspaceRegistry()
-    workspaces.register_workspace(_DECISION_CENTER_WORKSPACE)
+    workspaces.register_workspace(DECISION_CENTER_WORKSPACE)
     entitlements = _FakeEntitlementChecker(grants={(user.user_id, "trading_intelligence")})
     builder = NavigationBuilder(
         product_registry=products,
