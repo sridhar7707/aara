@@ -65,6 +65,9 @@ jobs:
       - name: Run Trading Intelligence tests
         run: python -m pytest applications/trading_intelligence -v --tb=short
 
+      - name: Run Trading Intelligence Platform tests
+        run: python -m pytest applications/platform -v --tb=short
+
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short
 
