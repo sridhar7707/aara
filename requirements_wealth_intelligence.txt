@@ -36,3 +36,17 @@ huggingface_hub==0.36.2
 # "TypeError: unhashable type: 'dict'" -- verified against starlette
 # source, not assumed to apply here without the dry-run above).
 starlette==0.52.1
+
+# ADR-028 Section 2.3: exactly one Supabase Python SDK package, the narrow
+# supabase-auth client (not the full "supabase" package, which additionally
+# pulls in realtime/storage/functions/postgrest this adapter never uses).
+# Verified via a clean pip dependency-resolution dry-run against this exact
+# file (--ignore-installed --python-version 3.9 --only-binary=:all:): resolves
+# cleanly alongside gradio==4.44.1/huggingface_hub==0.36.2 with no version
+# conflict -- httpx resolves to 0.28.1 (satisfies both gradio's >=0.24.1 and
+# supabase-auth's <0.29,>=0.26) and pydantic resolves to 2.13.4 (satisfies
+# both gradio's >=2.0 and supabase-auth's <3,>=1.10). Not verified against
+# this file's pre-existing starlette==0.52.1 pin, which independently fails
+# to resolve under Python 3.9 (requires >=3.10) -- a pre-existing issue
+# unrelated to this addition, not introduced or fixed by it.
+supabase-auth==2.31.0

@@ -83,6 +83,21 @@ jobs:
               ignore=skip_tests_and_cache,
           )
 
+          # ADR-028 Section 2.2: applications/platform/identity/ only (not
+          # the rest of applications/platform/) so SupabaseAuthenticationProvider
+          # is importable in the Space. Not wired into bootstrap.py by this
+          # authorization -- ADR-028 Section 3 explicitly withholds that.
+          (staging / "applications" / "platform").mkdir()
+          shutil.copy(
+              "applications/platform/__init__.py",
+              staging / "applications" / "platform" / "__init__.py",
+          )
+          shutil.copytree(
+              "applications/platform/identity",
+              staging / "applications" / "platform" / "identity",
+              ignore=skip_tests_and_cache,
+          )
+
           # Shared Sentinel Intelligence Engine (zero external dependencies
           # of its own -- verified: no third-party imports anywhere in it).
           # This Space's own copy also carries
