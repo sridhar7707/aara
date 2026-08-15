@@ -77,6 +77,18 @@ class _NoGovernanceSource(GovernanceSource):
         return []
 
 
+class _NoAuditSource:
+    """Same rationale as _NoEvidenceSource/_NoGovernanceSource above, for
+    audit-trail wiring -- has its own dedicated tests under
+    applications/trading_intelligence/. Duck-typed, not a GovernanceSource/
+    EvidenceSource-style ABC subclass: controller.py's own docstring notes
+    audit trail is wired directly to SentinelAuditSource with no
+    services/-layer abstraction to subclass, by design."""
+
+    def get_audit_trail(self, decision_id):
+        return []
+
+
 _DECISION_CENTER_WORKSPACE = Workspace(
     workspace_id="trading_intelligence.decision_center",
     product_id="trading_intelligence",
@@ -257,7 +269,9 @@ def test_navigation_item_can_be_used_to_construct_decision_center_experience():
     query_service = DecisionQueryService(source)
     evidence_query_service = DecisionEvidenceQueryService(_NoEvidenceSource())
     governance_query_service = DecisionGovernanceQueryService(_NoGovernanceSource())
-    controller = DecisionCenterController(query_service, evidence_query_service, governance_query_service)
+    controller = DecisionCenterController(
+        query_service, evidence_query_service, governance_query_service, _NoAuditSource(),
+    )
 
     screen = controller.load_screen(["dec-001"])
 
@@ -301,6 +315,7 @@ def test_navigation_driven_construction_performs_no_writes():
         DecisionQueryService(source),
         DecisionEvidenceQueryService(_NoEvidenceSource()),
         DecisionGovernanceQueryService(_NoGovernanceSource()),
+        _NoAuditSource(),
     )
 
     controller.load_screen(["dec-001"])
