@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 import yfinance as yf
+from alpaca.trading.requests import GetCalendarRequest
 from loguru import logger
 
 from bot.execution.alpaca_client import AlpacaClient
@@ -113,7 +114,7 @@ def _is_market_hours(alpaca_api=None) -> bool:
     if is_holiday is None:
         if alpaca_api is not None:
             try:
-                cal = alpaca_api.get_calendar(start=today_str, end=today_str)
+                cal = alpaca_api.get_calendar(filters=GetCalendarRequest(start=today_str, end=today_str))
                 is_holiday = len(cal) == 0
             except Exception as e:
                 logger.warning(f"Alpaca calendar check failed — using hardcoded holidays: {e}")
@@ -366,7 +367,12 @@ def _fetch_symbol(symbol: str, client: AlpacaClient, yf_batch: dict) -> tuple[st
     bars_5m  — intraday 5-min bars; empty when not enough today yet (< 60 bars) or
                stale (feed broken).  Used for current price only.
     bars_daily — 1-year daily OHLCV from yfinance; used for XGB/LSTM/regime (matches training).
-    Both empty → skip this symbol entirely (feed is stale/broken).
+    The two feeds are independent: a stale/broken Alpaca 5-min feed only
+    empties bars_5m, it does not discard an already-successfully-fetched
+    yf_batch daily bar (ADR-026 Fix 2) — bot/main.py's own fallback
+    (`sig_bars = bars_daily if not bars_daily.empty else bars_5m`) already
+    assumes bars_daily survives a stale 5-min feed. Both empty only when
+    yfinance's own batch fetch also had nothing for this symbol.
     """
     feed_stale = False
     bars_5m    = pd.DataFrame()
@@ -393,8 +399,11 @@ def _fetch_symbol(symbol: str, client: AlpacaClient, yf_batch: dict) -> tuple[st
         logger.warning(f"5min bar fetch failed for {symbol}: {e}")
         feed_stale = True
 
-    if feed_stale:
-        return symbol, pd.DataFrame(), pd.DataFrame()
+    # ADR-026 Fix 2: a stale/broken 5-min feed (feed_stale) only means
+    # bars_5m stays empty (already its default from initialization above) --
+    # it must not also discard bars_daily, which is fetched independently
+    # from yf_batch below and may well be valid even when Alpaca's 5-min
+    # feed is not.
 
     # Daily bars from pre-fetched batch (thread-safe; computed before thread pool)
     bars_daily = pd.DataFrame()
