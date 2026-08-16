@@ -48,3 +48,13 @@ starlette==0.52.1
 # to resolve under Python 3.9 (requires >=3.10) -- a pre-existing issue
 # unrelated to this addition, not introduced or fixed by it.
 supabase-auth==2.31.0
+
+# HF ZeroGPU runtime requirement (see main.py's _zero_gpu_startup_probe) --
+# this Space's hardware (zero-a10g) refuses to start without at least one
+# @spaces.GPU-decorated function present. Verified via a clean pip
+# dependency-resolution dry-run against this exact file (--python-version
+# 3.9 --only-binary=:all:): resolves cleanly alongside gradio==4.44.1,
+# huggingface_hub==0.36.2, and supabase-auth==2.31.0 -- httpx resolves to
+# 0.28.1 and pydantic to 2.13.4, matching the same versions the existing
+# supabase-auth verification above already documented.
+spaces==0.46.0
