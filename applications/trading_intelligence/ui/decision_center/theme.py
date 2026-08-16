@@ -338,8 +338,10 @@ footer { display: none !important; }
    budget below -- true at 3 seed rows, still true and still scrollable at
    500 real decisions.
 
-   The height budget itself is Gradio's own `height=` prop (gradio_view.py's
-   gr.Dataframe(height=...)), which VirtualTable already uses to compute a
+   The height budget itself is Gradio's own height prop -- `height=` on
+   gradio 4.44.1, renamed `max_height=` on gradio 5.x (gradio_view.py's
+   _DATAFRAME_HEIGHT_KWARG resolves which one to pass) -- which VirtualTable
+   already uses to compute a
    content-fit height when rows fit and to cap-and-virtualize when they
    don't (read in refresh_height_map()/get_max() -- confirmed this is a
    genuine virtualized/windowed table, not a plain scrolling div, so it

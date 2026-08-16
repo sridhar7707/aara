@@ -215,7 +215,6 @@ pass -- confirmed by inspection, not by adding an explicit height.
 """
 import base64
 import html
-import inspect
 import io
 import pathlib
 from typing import List, Optional, Tuple
@@ -238,12 +237,10 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
 # gr.Dataframe's row-height-budget kwarg is named `height` on the gradio==
 # 4.44.1 pin this app deploys with (requirements_trading_intelligence.txt)
 # but was renamed `max_height` by gradio 5.x, which is what CI's shared
-# requirements.txt resolves to on Python >=3.10. Resolve the name once,
-# from whichever gradio is actually installed, instead of hardcoding one
-# version's kwarg and breaking the other.
-_DATAFRAME_HEIGHT_KWARG = (
-    "height" if "height" in inspect.signature(gr.Dataframe.__init__).parameters else "max_height"
-)
+# requirements.txt resolves to on Python >=3.10. Same _gr_major-style
+# compat convention as scripts/dashboard.py:80.
+_gr_major = int(gr.__version__.split(".")[0])
+_DATAFRAME_HEIGHT_KWARG = "height" if _gr_major < 5 else "max_height"
 
 
 def _load_shell_logo_data_uri() -> str:
