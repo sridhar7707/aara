@@ -43,6 +43,7 @@ from sentinel_engine.services.evidence_service import EvidenceService
 from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.services.sentinel_engine import SentinelEngine
 
+from applications.platform.identity.principal import PrincipalRegistry
 from applications.platform.identity.supabase_authentication_provider import (
     SupabaseAuthenticationProvider,
 )
@@ -223,6 +224,16 @@ def build_application() -> DecisionCenterUI:
     # ADR-029 Sec 2.3/2.4: captured only -- never passed to any collaborator
     # constructed below, and a None result is not an error.
     current_user: Optional[User] = auth_provider.get_current_user()
+
+    # ADR-032 Sec 2/3: fresh, process-local registry; current_user.user_id is
+    # today's opaque lookup key only, not a durable identity mapping. Result
+    # stays local -- never passed to any collaborator constructed below.
+    principal_registry = PrincipalRegistry()
+    current_principal = (
+        principal_registry.get_or_create(current_user.user_id)
+        if current_user is not None
+        else None
+    )
 
     ledger_repository = LedgerRepository(_InMemoryLedgerStore())
     projection_repository = _InMemoryProjectionRepository()
