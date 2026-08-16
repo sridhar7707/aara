@@ -106,13 +106,13 @@ every step after that unchanged.
 V4 Decision Brief pass (2026-08-10), presentation-layer only -- no
 controller/screen/projections/sentinel_engine change:
 
-- Why?/Rationale section: _WHY_RATIONALE_HTML is a static gr.HTML block
-  built once at build() time from a fixed literal, deliberately never added
-  to detail_outputs/_DetailValues -- it does not read decision_id, the
-  controller, or any DecisionDetailArea field, by design (there is no
-  rationale/thesis data anywhere in this read chain, and this pass adds
-  none: no LLM call, no inferred copy). It reads identically for every
-  decision and for the empty/error states alike.
+- Why?/Rationale section: _WHY_RATIONALE_HTML was originally a static
+  gr.HTML block built once at build() time from a fixed literal, never
+  wired into detail_outputs/_DetailValues -- superseded by the Decision
+  Detail Depth pass below, which wires a real per-decision why_output.
+  _WHY_RATIONALE_HTML itself is unchanged and still used verbatim as the
+  zero-evidence fallback (there is still no rationale/thesis field
+  anywhere in this read chain, and none is invented here either).
 - Approval cards no longer show the V3 "Authorization Recorded" literal --
   that was presentation copy with no ApprovalEntry field behind it. The
   card header now carries exactly one item, entry.status itself (the real
@@ -193,6 +193,40 @@ Detail Panel Polish pass (2026-08-12), gradio_view.py + theme.py:
   anywhere; only the presentation of the same "nothing here yet" fact
   changed.
 
+Decision Detail Depth pass (2026-08-16), application-layer only -- no
+sentinel_engine/bot/dashboard/database/ledger change, no new domain field,
+no new repository/query contract (per the preceding read-only audit):
+
+- Why? summary: why_output is now wired into detail_outputs/_DetailValues
+  and rendered by _format_why_summary_html, which composes a real sentence
+  from the already-loaded EvidenceEntry(evidence_type, source) tuple on
+  DecisionDetailArea (e.g. "1 NEWS_SENTIMENT signal from newsapi.") --
+  falls back to the original, unchanged _WHY_RATIONALE_HTML when there is
+  no evidence to summarize (including the evidence-read-error case, which
+  already surfaces its own message in the Evidence section itself). No
+  thesis/rationale field is read or invented.
+- Audit Trail payload: each audit card now carries an expandable
+  <details>/<summary> disclosure (_format_audit_detail_html) showing the
+  event's restored event_id plus every key already present on
+  Event.payload, exactly as DecisionQuery.get_decision_timeline() returns
+  it -- no field invented or transformed beyond str()/escaping for
+  display. Uses the same aara-record-field/record-label/record-value
+  classes the record cards already use, so no new theme.py class is
+  needed for it.
+- Restored identifiers: EvidenceEntry.evidence_id, ApprovalEntry.
+  approval_id, and AuditEntry.event_id (see their own projection modules)
+  are mapped straight through from the sentinel_engine summary/event
+  objects that already carried them -- decision_id remains excluded from
+  every rendered fragment, unchanged from the 2026-08-10 UX correction.
+- Decision Journey navigation: _lifecycle_track_html's four stage labels
+  are now <a href="#..."> anchors to elem_ids already placed on
+  header_output ("decision-created-section"), evidence_output
+  ("evidence-section"), governance_output ("governance-section"), and
+  approval_output ("approval-section") -- native in-page anchor jumps, no
+  JS, no controller/status/lifecycle semantic change. theme.py gained one
+  `text-decoration: none` line on `.aara-lifecycle-track .label` so the
+  anchor doesn't pick up a default browser underline; no other CSS changed.
+
 Nav Coming Soon pass (2026-08-12), markup here + theme.py: the two muted
 nav items (Portfolio Intelligence, Risk Intelligence) previously read as
 plain dimmed text with no explanation for why they don't respond to a
@@ -217,13 +251,14 @@ import base64
 import html
 import io
 import pathlib
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
 from PIL import Image as PILImage
 
 from applications.trading_intelligence.projections.approval_entry import ApprovalStatus
 from applications.trading_intelligence.projections.decision_view import DecisionState, DecisionView
+from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
 from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionDetailArea,
@@ -395,13 +430,18 @@ _WHY_RATIONALE_HTML = (
 _ACTION_BADGE_CLASSES = {"BUY": "action-buy", "SELL": "action-sell", "HOLD": "action-hold"}
 
 _LIFECYCLE_STAGES = [
-    (DecisionState.DECISION_CREATED, "Created"),
-    (DecisionState.EVIDENCE_ATTACHED, "Evidence"),
-    (DecisionState.GOVERNANCE_EVALUATED, "Governance"),
-    (DecisionState.APPROVAL_RECORDED, "Approval"),
+    (DecisionState.DECISION_CREATED, "Created", "decision-created-section"),
+    (DecisionState.EVIDENCE_ATTACHED, "Evidence", "evidence-section"),
+    (DecisionState.GOVERNANCE_EVALUATED, "Governance", "governance-section"),
+    (DecisionState.APPROVAL_RECORDED, "Approval", "approval-section"),
 ]
 
-_DetailValues = Tuple[str, str, str, str, str, str, str, str, str]
+# (header, lifecycle, conviction, updated, status, why, evidence, governance,
+# approval, audit) -- why sits between status and evidence, not after audit,
+# so every existing `*_, evidence_html, governance_html, approval_html,
+# audit_html = ...`-style unpack in the test suite keeps addressing the same
+# trailing four elements unchanged.
+_DetailValues = Tuple[str, str, str, str, str, str, str, str, str, str]
 
 
 class DecisionCenterUI:
@@ -456,7 +496,7 @@ class DecisionCenterUI:
                         '<h2 class="aara-eyebrow">Decision Intelligence</h2>',
                         elem_classes=["aara-section-label", "aara-section-label--group"],
                     )
-                    header_output = gr.HTML()
+                    header_output = gr.HTML(elem_id="decision-created-section")
                     with gr.Row(elem_classes=["aara-hero-metrics"]):
                         conviction_output = gr.Textbox(
                             label="Confidence", interactive=False,
@@ -473,7 +513,7 @@ class DecisionCenterUI:
                     gr.Markdown(
                         '<h3 class="aara-eyebrow">Why?</h3>', elem_classes=["aara-section-label"],
                     )
-                    gr.HTML(_WHY_RATIONALE_HTML)
+                    why_output = gr.HTML()
                     gr.Markdown(
                         '<h3 class="aara-eyebrow">Decision Journey</h3>',
                         elem_classes=["aara-section-label"],
@@ -482,16 +522,16 @@ class DecisionCenterUI:
                     gr.Markdown(
                         '<h3 class="aara-eyebrow">Evidence</h3>', elem_classes=["aara-section-label"],
                     )
-                    evidence_output = gr.HTML()
+                    evidence_output = gr.HTML(elem_id="evidence-section")
                     gr.Markdown(
                         '<h3 class="aara-eyebrow">Governance & Policy</h3>',
                         elem_classes=["aara-section-label"],
                     )
-                    governance_output = gr.HTML()
+                    governance_output = gr.HTML(elem_id="governance-section")
                     gr.Markdown(
                         '<h3 class="aara-eyebrow">Approval</h3>', elem_classes=["aara-section-label"],
                     )
-                    approval_output = gr.HTML()
+                    approval_output = gr.HTML(elem_id="approval-section")
                     gr.Markdown(
                         '<h3 class="aara-eyebrow">Audit Trail</h3>',
                         elem_classes=["aara-section-label"],
@@ -500,7 +540,7 @@ class DecisionCenterUI:
 
             detail_outputs = [
                 header_output, lifecycle_output, conviction_output, updated_output,
-                status_output, evidence_output, governance_output, approval_output,
+                status_output, why_output, evidence_output, governance_output, approval_output,
                 audit_output,
             ]
             screen_outputs = [list_output, list_empty_output] + detail_outputs
@@ -524,7 +564,7 @@ class DecisionCenterUI:
 
     def _render_screen(
         self, selected_id: Optional[str] = None,
-    ) -> Tuple[List[List[str]], str, str, str, str, str, str, str, str, str, str]:
+    ) -> Tuple[List[List[str]], str, str, str, str, str, str, str, str, str, str, str]:
         """selected_id is None only when nothing has been explicitly picked
         yet (initial demo.load(), or Refresh before any row click) --
         controller.load_screen()'s own default for that case is
@@ -563,7 +603,7 @@ class DecisionCenterUI:
 
     def _on_row_select(
         self, evt: gr.SelectData,
-    ) -> Tuple[Optional[str], str, str, str, str, str, str, str, str, str]:
+    ) -> Tuple[Optional[str], str, str, str, str, str, str, str, str, str, str]:
         if not evt.selected or not evt.row_value:
             return (None,) + self._empty_detail()
         decision_id = evt.row_value[0]
@@ -662,10 +702,37 @@ class DecisionCenterUI:
             detail_area.confidence_display,
             detail_area.timestamp_display,
             detail_area.status_display,
+            DecisionCenterUI._format_why_summary_html(detail_area.evidence),
             DecisionCenterUI._format_evidence_html(detail_area),
             DecisionCenterUI._format_governance_html(detail_area),
             DecisionCenterUI._format_approval_html(detail_area),
             DecisionCenterUI._format_audit_html(detail_area),
+        )
+
+    @staticmethod
+    def _format_why_summary_html(evidence: Tuple[EvidenceEntry, ...]) -> str:
+        """Composes a real, decision-specific summary from already-loaded
+        EvidenceEntry data (evidence_type/source) -- the one real signal
+        already available in this read chain, not a substitute for a
+        thesis/rationale field (none exists anywhere, and this pass invents
+        none). Falls back to the original, unchanged _WHY_RATIONALE_HTML
+        when there is no evidence to summarize -- including the
+        evidence-read-error case (detail_area.evidence is empty then too),
+        which already surfaces its own message in the Evidence section."""
+        if not evidence:
+            return _WHY_RATIONALE_HTML
+        if len(evidence) == 1:
+            entry = evidence[0]
+            summary = f"1 {entry.evidence_type} signal from {entry.source}."
+        else:
+            descriptions = "; ".join(
+                f"{entry.evidence_type} from {entry.source}" for entry in evidence
+            )
+            summary = f"{len(evidence)} signals: {descriptions}."
+        return (
+            '<div class="aara-disclosure-message">'
+            f'<div class="aara-disclosure-body">{html.escape(summary)}</div>'
+            "</div>"
         )
 
     @staticmethod
@@ -732,10 +799,36 @@ class DecisionCenterUI:
                 "Recorded",
                 [("Recorded At", entry.created_at.strftime("%Y-%m-%d %H:%M UTC"), True)],
                 "neutral",
+                DecisionCenterUI._format_audit_detail_html(entry.event_id, entry.payload),
             )
             for entry in detail_area.audit_trail
         ]
         return DecisionCenterUI._record_list_html(cards, _AUDIT_EMPTY_MESSAGE, "audit")
+
+    @staticmethod
+    def _format_audit_detail_html(event_id: str, payload: Dict[str, Any]) -> str:
+        """Expandable, structured presentation of exactly what
+        DecisionQuery.get_decision_timeline() already returns on the
+        underlying Event -- event_id plus every payload key as-is, nothing
+        invented or transformed beyond str()/html.escape() for display.
+        Native <details>/<summary> disclosure, no JS. Reuses the record
+        card's own aara-record-card-fields/aara-record-field/record-label/
+        record-value classes rather than introducing new, unstyled ones."""
+        rows = [("Event ID", event_id)]
+        rows.extend((str(key), str(value)) for key, value in payload.items())
+        field_html = "".join(
+            '<div class="aara-record-field">'
+            f'<span class="record-label">{html.escape(label)}</span>'
+            f'<span class="record-value">{html.escape(value)}</span>'
+            "</div>"
+            for label, value in rows
+        )
+        return (
+            '<details class="aara-payload-disclosure">'
+            "<summary>Details</summary>"
+            f'<div class="aara-record-card-fields">{field_html}</div>'
+            "</details>"
+        )
 
     @staticmethod
     def _decision_header_html(decision: DecisionView) -> str:
@@ -769,10 +862,16 @@ class DecisionCenterUI:
 
     @staticmethod
     def _lifecycle_track_html(status: DecisionState) -> str:
-        stage_values = [stage for stage, _ in _LIFECYCLE_STAGES]
+        """Each stage label is a native #anchor link to the already-existing
+        detail section it names (decision-created-section on header_output,
+        evidence-section/governance-section/approval-section on their own
+        gr.HTML() outputs) -- no JS, no new controller/status/lifecycle
+        semantics, just an in-page jump to a section that already renders
+        that data."""
+        stage_values = [stage for stage, _, _ in _LIFECYCLE_STAGES]
         current_index = stage_values.index(status)
         segments = []
-        for index, (_, label) in enumerate(_LIFECYCLE_STAGES):
+        for index, (_, label, anchor_id) in enumerate(_LIFECYCLE_STAGES):
             if index > 0:
                 connector_class = "complete" if index <= current_index else ""
                 segments.append(f'<span class="connector {connector_class}"></span>')
@@ -784,13 +883,14 @@ class DecisionCenterUI:
                 stage_class = ""
             segments.append(
                 f'<span class="stage {stage_class}"><span class="dot"></span>'
-                f'<span class="label">{html.escape(label)}</span></span>'
+                f'<a class="label" href="#{anchor_id}">{html.escape(label)}</a></span>'
             )
         return '<div class="aara-lifecycle-track">' + "".join(segments) + "</div>"
 
     @staticmethod
     def _record_card_html(
         record_type: str, state: str, fields: List[Tuple[str, str, bool]], state_variant: str,
+        extra_html: str = "",
     ) -> str:
         """record_type/state form the card's header row (record type, then
         state, then source/value, then timestamp -- the latter two come from
@@ -819,7 +919,13 @@ class DecisionCenterUI:
         "negative" (a REJECTED approval) -- never a bare red/green pair on
         their own; the pill's text label is what actually carries the
         meaning, matching FORBIDDEN_UI_PATTERNS.md's "color is never the
-        only semantic indicator" rule."""
+        only semantic indicator" rule.
+
+        extra_html is appended after the fields block, unescaped (the
+        caller is responsible for escaping anything it interpolates) --
+        Audit's only caller today, carrying the expandable payload
+        disclosure from _format_audit_detail_html; empty string (the
+        default) for every other caller, so their markup is unchanged."""
         field_html = "".join(
             '<div class="aara-record-field">'
             f'<span class="record-label">{html.escape(label)}</span>'
@@ -839,6 +945,7 @@ class DecisionCenterUI:
             f'{html.escape(state)}</span>'
             "</div>"
             f'<div class="aara-record-card-fields">{field_html}</div>'
+            f'{extra_html}'
             "</div>"
         )
 
@@ -862,19 +969,22 @@ class DecisionCenterUI:
     @staticmethod
     def _empty_detail() -> _DetailValues:
         return (
-            "", _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "", "",
+            "", _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE,
+            "", "", "", "", "",
         )
 
     @staticmethod
     def _missing_decision_detail() -> _DetailValues:
         return (
             DecisionCenterUI._missing_decision_header_html(),
-            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "", "",
+            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE,
+            "", "", "", "", "",
         )
 
     @staticmethod
     def _decision_error_detail() -> _DetailValues:
         return (
             DecisionCenterUI._decision_error_header_html(),
-            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, "", "", "", "",
+            _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE,
+            "", "", "", "", "",
         )

@@ -107,6 +107,16 @@ def test_get_evidence_maps_summary_to_entry_correctly():
     assert isinstance(result[0], EvidenceEntry)
 
 
+def test_get_evidence_preserves_evidence_id():
+    decision_service, evidence_service, source = _make_wiring()
+    decision_service.create_decision(_make_decision())
+    evidence_service.associate_evidence("dec-001", _make_evidence(evidence_id="ev-xyz"))
+
+    result = source.get_evidence("dec-001")
+
+    assert result[0].evidence_id == "ev-xyz"
+
+
 def test_get_evidence_preserves_evidence_type():
     decision_service, evidence_service, source = _make_wiring()
     decision_service.create_decision(_make_decision())

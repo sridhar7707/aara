@@ -108,6 +108,18 @@ def test_get_audit_trail_preserves_event_type():
     assert result[0].event_type == "DECISION_CREATED"
 
 
+def test_get_audit_trail_preserves_event_id_and_payload():
+    decision_service, _, source = _make_wiring()
+    decision_service.create_decision(_make_decision())
+
+    result = source.get_audit_trail("dec-001")
+
+    assert result[0].event_id
+    assert result[0].payload["decision_id"] == "dec-001"
+    assert result[0].payload["symbol"] == "AAPL"
+    assert result[0].payload["action"] == "BUY"
+
+
 def test_get_audit_trail_preserves_created_at():
     decision_service, _, source = _make_wiring()
     created_at = datetime.datetime(2026, 8, 8, 9, 0, 0)
@@ -151,8 +163,10 @@ def test_get_audit_trail_does_not_reorder_events_from_the_timeline():
 
     class _Event:
         def __init__(self, event_type, created_at):
+            self.event_id = f"evt-{event_type}"
             self.event_type = event_type
             self.created_at = created_at
+            self.payload = {}
 
     class _Timeline:
         events = [_Event("GOVERNANCE_EVALUATED", later), _Event("DECISION_CREATED", earlier)]

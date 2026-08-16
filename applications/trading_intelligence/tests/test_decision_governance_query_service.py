@@ -24,6 +24,7 @@ def _make_governance_entry(**overrides):
 
 def _make_approval_entry(**overrides):
     defaults = dict(
+        approval_id="apr-001",
         status=ApprovalStatus.APPROVED,
         approved_by="risk_officer",
         approved_at=datetime.datetime(2026, 8, 8, 9, 10, 0),

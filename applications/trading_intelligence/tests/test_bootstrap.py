@@ -273,15 +273,17 @@ def test_build_application_seeded_decisions_are_reachable_by_id():
     ui = build_application()
 
     (
-        header, lifecycle, confidence, _updated, _status,
+        header, lifecycle, confidence, _updated, _status, _why_html,
         _evidence_html, _governance_html, _approval_html, _audit_html,
     ) = ui._render_detail("dec-seed-003")
 
     assert "NVDA" in header
     assert "SELL" in header
     assert confidence == "91%"
-    assert 'class="stage active"><span class="dot"></span><span class="label">Approval</span>' \
-        in lifecycle
+    assert (
+        'class="stage active"><span class="dot"></span>'
+        '<a class="label" href="#approval-section">Approval</a>'
+    ) in lifecycle
 
 
 def test_build_application_seeds_evidence_for_decisions_that_had_it_attached():
@@ -382,15 +384,17 @@ def test_build_application_seeds_a_rejected_decision_end_to_end():
     ui = build_application()
 
     (
-        header, lifecycle, confidence, _updated, _status,
+        header, lifecycle, confidence, _updated, _status, _why_html,
         evidence_html, governance_html, approval_html, audit_html,
     ) = ui._render_detail("dec-seed-005")
 
     assert "TSLA" in header
     assert "BUY" in header
     assert confidence == "61%"
-    assert 'class="stage active"><span class="dot"></span><span class="label">Approval</span>' \
-        in lifecycle
+    assert (
+        'class="stage active"><span class="dot"></span>'
+        '<a class="label" href="#approval-section">Approval</a>'
+    ) in lifecycle
     assert "NEWS_SENTIMENT" in evidence_html
     assert "pol-seed-001" in governance_html
     assert "Rejected" in approval_html
@@ -407,15 +411,17 @@ def test_build_application_seeds_a_decision_awaiting_approval_after_governance()
     ui = build_application()
 
     (
-        header, lifecycle, confidence, _updated, _status,
+        header, lifecycle, confidence, _updated, _status, _why_html,
         evidence_html, governance_html, approval_html, audit_html,
     ) = ui._render_detail("dec-seed-004")
 
     assert "GOOGL" in header
     assert "BUY" in header
     assert confidence == "83%"
-    assert 'class="stage active"><span class="dot"></span><span class="label">Governance</span>' \
-        in lifecycle
+    assert (
+        'class="stage active"><span class="dot"></span>'
+        '<a class="label" href="#governance-section">Governance</a>'
+    ) in lifecycle
     assert "NEWS_SENTIMENT" in evidence_html
     assert "pol-seed-001" in governance_html
     assert "Yes" in governance_html

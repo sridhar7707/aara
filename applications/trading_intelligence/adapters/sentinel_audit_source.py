@@ -36,6 +36,11 @@ class SentinelAuditSource:
         if timeline is None:
             return []
         return [
-            AuditEntry(event_type=event.event_type, created_at=event.created_at)
+            AuditEntry(
+                event_id=event.event_id,
+                event_type=event.event_type,
+                created_at=event.created_at,
+                payload=event.payload,
+            )
             for event in timeline.events
         ]

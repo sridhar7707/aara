@@ -32,6 +32,7 @@ def _make_view(**overrides):
 
 def _make_entry(**overrides):
     defaults = dict(
+        evidence_id="ev-001",
         evidence_type="NEWS_SENTIMENT",
         source="newsapi",
         attached_at=datetime.datetime(2026, 8, 4, 12, 5, 0),
@@ -52,6 +53,7 @@ def _make_governance_entry(**overrides):
 
 def _make_approval_entry(**overrides):
     defaults = dict(
+        approval_id="apr-001",
         status=ApprovalStatus.APPROVED,
         approved_by="risk_officer",
         approved_at=datetime.datetime(2026, 8, 4, 12, 7, 0),
@@ -62,8 +64,10 @@ def _make_approval_entry(**overrides):
 
 def _make_audit_entry(**overrides):
     defaults = dict(
+        event_id="evt-001",
         event_type="DECISION_CREATED",
         created_at=datetime.datetime(2026, 8, 4, 12, 0, 0),
+        payload={"decision_id": "dec-001"},
     )
     defaults.update(overrides)
     return AuditEntry(**defaults)

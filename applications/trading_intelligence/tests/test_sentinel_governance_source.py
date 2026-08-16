@@ -194,6 +194,16 @@ def test_get_approvals_maps_summary_to_entry_correctly():
     assert isinstance(result[0], ApprovalEntry)
 
 
+def test_get_approvals_preserves_approval_id():
+    decision_service, governance_service, source = _make_wiring()
+    decision_service.create_decision(_make_decision())
+    governance_service.record_approval(_make_approval(approval_id="apr-xyz"))
+
+    result = source.get_approvals("dec-001")
+
+    assert result[0].approval_id == "apr-xyz"
+
+
 def test_get_approvals_preserves_status():
     decision_service, governance_service, source = _make_wiring()
     decision_service.create_decision(_make_decision())

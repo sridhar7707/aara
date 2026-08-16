@@ -12,6 +12,7 @@ from applications.trading_intelligence.services.decision_evidence_query_service 
 
 def _make_entry(**overrides):
     defaults = dict(
+        evidence_id="ev-001",
         evidence_type="NEWS_SENTIMENT",
         source="newsapi",
         attached_at=datetime.datetime(2026, 8, 8, 9, 5, 0),

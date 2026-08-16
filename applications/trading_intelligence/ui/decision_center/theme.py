@@ -595,6 +595,7 @@ footer { display: none !important; }
 .aara-lifecycle-track .label {
   font-size: 13px;
   color: var(--color-text-secondary);
+  text-decoration: none; /* stage labels are #anchor links (Decision Detail Depth pass) */
 }
 .aara-lifecycle-track .stage.active .label {
   color: var(--color-text-primary);

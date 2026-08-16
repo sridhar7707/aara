@@ -45,6 +45,7 @@ class SentinelEvidenceSource(EvidenceSource):
             return []
         return [
             EvidenceEntry(
+                evidence_id=item.evidence_id,
                 evidence_type=item.evidence_type,
                 source=item.source,
                 attached_at=item.attached_at,

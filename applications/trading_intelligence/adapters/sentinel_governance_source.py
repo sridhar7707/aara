@@ -62,6 +62,7 @@ class SentinelGovernanceSource(GovernanceSource):
             return []
         return [
             ApprovalEntry(
+                approval_id=item.approval_id,
                 status=item.status,
                 approved_by=item.approved_by,
                 approved_at=item.approved_at,
