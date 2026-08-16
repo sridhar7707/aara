@@ -54,3 +54,11 @@ pytest-mock>=3.12.0
 # present transitively via other packages; declared explicitly since our
 # own code imports it directly.
 PyYAML>=6.0.0
+
+# HF ZeroGPU runtime requirement for applications/trading_intelligence/main.py's
+# _zero_gpu_startup_probe(). CI's "Run Trading Intelligence tests" step
+# imports main.py (via test_main.py), so this must be installable here too,
+# not just in requirements_trading_intelligence.txt. Verified via a clean pip
+# dependency-resolution dry-run under both Python 3.9 (gradio==4.44.1) and
+# Python 3.11 (gradio>=5.0.0,<6.0.0, resolves to 5.50.0) -- no conflicts.
+spaces==0.46.0
