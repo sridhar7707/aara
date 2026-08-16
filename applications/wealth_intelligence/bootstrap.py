@@ -31,6 +31,11 @@ from sentinel_engine.services.evidence_service import EvidenceService
 from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.services.sentinel_engine import SentinelEngine
 
+from applications.platform.identity.principal import PrincipalRegistry
+from applications.platform.identity.supabase_authentication_provider import (
+    SupabaseAuthenticationProvider,
+)
+from applications.platform.identity.user import User
 from applications.wealth_intelligence.application.investor_workspace import InvestorWorkspaceFacade
 from applications.wealth_intelligence.presentation.investor_presenter import InvestorPresenter
 from applications.wealth_intelligence.ui.investor_workspace import InvestorWorkspaceUI
@@ -58,7 +63,30 @@ class _InMemoryProjectionRepository(ProjectionRepository):
         return self._projections.get(decision_id)
 
 
+class _NoOpSupabaseClient:
+    """Placeholder Supabase client per ADR-033 Section 2.1 -- makes no
+    network call and always reports no authenticated user."""
+
+    def get_user(self, jwt=None):
+        return None
+
+
 def build_application() -> InvestorWorkspaceUI:
+    auth_provider = SupabaseAuthenticationProvider(_NoOpSupabaseClient())
+    # ADR-033 Sec 2.2: captured only -- never passed to any collaborator
+    # constructed below, and a None result is not an error.
+    current_user: Optional[User] = auth_provider.get_current_user()
+
+    # ADR-033 Sec 2.3/2.4: fresh, process-local registry; current_user.user_id
+    # is today's opaque lookup key only, not a durable identity mapping.
+    # Result stays local -- never passed to any collaborator constructed below.
+    principal_registry = PrincipalRegistry()
+    current_principal = (
+        principal_registry.get_or_create(current_user.user_id)
+        if current_user is not None
+        else None
+    )
+
     ledger_repository = LedgerRepository(_InMemoryLedgerStore())
     projection_repository = _InMemoryProjectionRepository()
 
