@@ -215,6 +215,7 @@ pass -- confirmed by inspection, not by adding an explicit height.
 """
 import base64
 import html
+import inspect
 import io
 import pathlib
 from typing import List, Optional, Tuple
@@ -233,6 +234,16 @@ from applications.trading_intelligence.ui.decision_center.screen import (
 from applications.trading_intelligence.ui.decision_center.theme import CSS
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[4]
+
+# gr.Dataframe's row-height-budget kwarg is named `height` on the gradio==
+# 4.44.1 pin this app deploys with (requirements_trading_intelligence.txt)
+# but was renamed `max_height` by gradio 5.x, which is what CI's shared
+# requirements.txt resolves to on Python >=3.10. Resolve the name once,
+# from whichever gradio is actually installed, instead of hardcoding one
+# version's kwarg and breaking the other.
+_DATAFRAME_HEIGHT_KWARG = (
+    "height" if "height" in inspect.signature(gr.Dataframe.__init__).parameters else "max_height"
+)
 
 
 def _load_shell_logo_data_uri() -> str:
@@ -423,15 +434,17 @@ class DecisionCenterUI:
                             elem_classes=["aara-refresh-button"],
                         )
                     list_output = gr.Dataframe(
-                        # height is a navigator viewport budget, not a fit for
-                        # today's 3 seed rows -- ~9-10 rows before Gradio's
-                        # own virtualized table (VirtualTable.svelte) caps
-                        # and scrolls internally, so this must not be
-                        # re-tuned as seed/demo data changes; it works
-                        # unmodified whether there are 3 decisions or 500.
+                        # height/max_height (see _DATAFRAME_HEIGHT_KWARG) is a
+                        # navigator viewport budget, not a fit for today's 3
+                        # seed rows -- ~9-10 rows before Gradio's own
+                        # virtualized table (VirtualTable.svelte) caps and
+                        # scrolls internally, so this must not be re-tuned as
+                        # seed/demo data changes; it works unmodified whether
+                        # there are 3 decisions or 500.
                         headers=_LIST_HEADERS, datatype=_LIST_DATATYPES, interactive=False,
-                        label="Decisions", show_label=False, height=340,
+                        label="Decisions", show_label=False,
                         elem_classes=["aara-decisions-table"],
+                        **{_DATAFRAME_HEIGHT_KWARG: 340},
                     )
                     # Quiet message below the (still-rendered, headers-only)
                     # table when there are zero decisions -- reuses the same
