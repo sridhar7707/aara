@@ -24,6 +24,7 @@ import bot.trust_ledger.risk as risk_ledger
 from bot.risk.risk_manager import RiskManager
 from bot.strategy.ensemble import ensemble_confidence
 from bot.strategy.model_output_adapter import build_model_outputs
+from bot.strategy.sentiment import get_cached_headlines
 from sentinel_engine.adapters.evidence_adapter import to_evidence_records
 from sentinel_engine.composition.evidence import get_evidence_service
 
@@ -118,6 +119,7 @@ class EntryDecisionRecorder:
         self.model_outputs = build_model_outputs(
             xgb_prob, lstm_prob, sentiment,
             lstm_is_degraded=lstm_is_degraded, lstm_val_loss=lstm_val_loss,
+            sentiment_headlines=get_cached_headlines(self.symbol),
         )
         self.market_context = {
             "regime": regime_name,
@@ -216,7 +218,10 @@ def record_exit_decision_safe(
     final_confidence = ensemble_confidence(
         ledger_ctx.xgb_prob, ledger_ctx.lstm_prob, ledger_ctx.sentiment, ledger_ctx.macro_score,
     )
-    model_outputs = build_model_outputs(ledger_ctx.xgb_prob, ledger_ctx.lstm_prob, ledger_ctx.sentiment)
+    model_outputs = build_model_outputs(
+        ledger_ctx.xgb_prob, ledger_ctx.lstm_prob, ledger_ctx.sentiment,
+        sentiment_headlines=get_cached_headlines(symbol),
+    )
     market_context = {
         "regime": regime_name, "macro_score": ledger_ctx.macro_score,
         "decision_timestamp": _utc_now(),

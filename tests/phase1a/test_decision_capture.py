@@ -86,6 +86,21 @@ def test_build_model_outputs_shape():
     assert out["lstm"]["metadata"]["is_degraded"] is True
 
 
+def test_build_model_outputs_headlines_default_empty():
+    """ADR-034: omitting sentiment_headlines must reproduce today's exact
+    output -- finbert.metadata.headlines == []."""
+    out = build_model_outputs(0.7, 0.3, -0.5)
+    assert out["finbert"]["metadata"]["headlines"] == []
+
+
+def test_build_model_outputs_headlines_threaded_unchanged():
+    """ADR-034: supplied sentiment_headlines are preserved unchanged in
+    finbert.metadata.headlines."""
+    headlines = ["Stock surges on earnings beat", "Analysts raise price target"]
+    out = build_model_outputs(0.7, 0.3, -0.5, sentiment_headlines=headlines)
+    assert out["finbert"]["metadata"]["headlines"] == headlines
+
+
 def test_build_model_outputs_confidence_values_are_native_floats():
     import numpy as np
     out = build_model_outputs(np.float64(0.7), np.float64(0.3), np.float64(0.1))

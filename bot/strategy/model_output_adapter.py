@@ -39,6 +39,7 @@ def build_model_outputs(
     xgb_drivers: list | None = None,
     lstm_is_degraded: bool = False,
     lstm_val_loss: float | None = None,
+    sentiment_headlines: list[str] | None = None,
 ) -> dict:
     """xgb_drivers: XGBPredictor.explain()'s [(feature_name, shap_value), ...]
     output, if available for this decision -- cast to JSON-safe types here
@@ -64,6 +65,9 @@ def build_model_outputs(
         "finbert": {
             "signal": _sentiment_signal(sentiment_score),
             "confidence": float((sentiment_score + 1.0) / 2.0),
-            "metadata": {"raw_score": float(sentiment_score)},
+            "metadata": {
+                "raw_score": float(sentiment_score),
+                "headlines": list(sentiment_headlines or []),
+            },
         },
     }
