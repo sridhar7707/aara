@@ -1,8 +1,8 @@
 # ADR-034: FinBERT Evidence Headline Provenance (Narrow ADR-002 Exception)
 
-**Status:** Proposed
+**Status:** Accepted
 **Date:** 2026-08-16
-**Decision Type:** Architecture — Narrow ADR-002 Exception
+**Decision Type:** Architecture — Narrow ADR-002 Exception (Accepted)
 **Related ADRs:** ADR-002 (protected path this ADR would except), ADR-012 (governs the MODEL_OUTPUT Evidence shape this ADR adds a key inside, not modifies), ADR-026 (structural precedent for this ADR's format and narrow-exception discipline)
 
 ---
@@ -371,11 +371,12 @@ data-level rollback step is required beyond reverting the code.
 
 ## 10. Status
 
-**Proposed.** Awaiting explicit acceptance. If accepted, the three
-corrections named in §3 are authorized, strictly bounded by §4's
-Explicit Non-Authorization list. Acceptance authorizes the exception
-itself; it does not waive §5's ADR-002 compliance requirements (isolated
-branch/worktree, full regression pass, stated rollback plan, both
-trading-trigger paths verified) or §6's required tests — those remain
-preconditions to be satisfied during implementation, not retroactively
-satisfied by acceptance.
+**Accepted.** This ADR is now authoritative per `docs/DOCUMENT_INDEX.md`'s
+documentation hierarchy — the three corrections named in §3 are
+authorized, strictly bounded by §4's Explicit Non-Authorization list.
+Acceptance authorizes the exception itself; it does not waive §5's
+ADR-002 compliance requirements (isolated branch/worktree, full
+regression pass, stated rollback plan, both trading-trigger paths
+verified) or §6's required tests — those remain preconditions to be
+satisfied during implementation, not retroactively satisfied by
+acceptance.
