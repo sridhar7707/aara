@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock, patch
 import pytest
 import bot.strategy.sentiment as _sentiment_mod
-from bot.strategy.sentiment import get_news_headlines, batch_sentiment_scores
+from bot.strategy.sentiment import get_news_headlines, batch_sentiment_scores, get_cached_headlines
 
 
 @pytest.fixture(autouse=True)
@@ -159,3 +159,43 @@ def test_get_news_headlines_l1_cache_takes_priority_over_db():
         result = get_news_headlines("AAPL")
     assert result == ["L1 headline"]
     mock_db_get.assert_not_called()
+
+
+# --- get_cached_headlines (ADR-034) ---
+
+def test_get_cached_headlines_l1_hit():
+    """L1 in-process cache hit returns the cached list."""
+    import bot.strategy.sentiment as mod
+    from datetime import date
+    mod._NEWS_DAY_CACHE[f"AAPL:{date.today().isoformat()}"] = ["L1 headline"]
+    with patch("bot.strategy.sentiment._news_db_get") as mock_db_get:
+        result = get_cached_headlines("AAPL")
+    assert result == ["L1 headline"]
+    mock_db_get.assert_not_called()
+
+
+def test_get_cached_headlines_l2_hit():
+    """L1 miss, L2 SQLite cache hit returns the cached list."""
+    cached = ["DB headline 1", "DB headline 2"]
+    with patch("bot.strategy.sentiment._news_db_get", return_value=cached), \
+         patch("bot.strategy.sentiment.requests.get") as mock_api:
+        result = get_cached_headlines("AAPL")
+    assert result == cached
+    mock_api.assert_not_called()
+
+
+def test_get_cached_headlines_full_miss_returns_empty_list():
+    """Both L1 and L2 miss returns []."""
+    with patch("bot.strategy.sentiment._news_db_get", return_value=None):
+        result = get_cached_headlines("AAPL")
+    assert result == []
+
+
+def test_get_cached_headlines_full_miss_never_calls_newsapi():
+    """A complete cache miss must never fall through to a live NewsAPI request."""
+    with patch("bot.strategy.sentiment._news_db_get", return_value=None), \
+         patch("bot.strategy.sentiment.NEWSAPI_KEY", "test-key"), \
+         patch("bot.strategy.sentiment.requests.get") as mock_api:
+        result = get_cached_headlines("AAPL")
+    assert result == []
+    mock_api.assert_not_called()

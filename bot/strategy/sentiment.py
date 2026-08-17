@@ -152,6 +152,27 @@ def get_news_headlines(ticker: str) -> list[str]:
         return []
 
 
+def get_cached_headlines(ticker: str) -> list[str]:
+    """Return today's cached headlines for a ticker, cache-only — never fetches.
+
+    Checks L1 (in-process) then L2 (SQLite) cache, same lookup order as
+    get_news_headlines(). Returns [] on a full cache miss; never falls
+    through to a live NewsAPI (or any other external) request.
+    """
+    today = date.today().isoformat()
+    _cache_key = f"{ticker}:{today}"
+
+    if _cache_key in _NEWS_DAY_CACHE:
+        return _NEWS_DAY_CACHE[_cache_key]
+
+    db_cached = _news_db_get(ticker, today)
+    if db_cached is not None:
+        _NEWS_DAY_CACHE[_cache_key] = db_cached
+        return db_cached
+
+    return []
+
+
 def get_sec_headlines(ticker: str) -> list[str]:
     """Pull recent SEC filing descriptions from EDGAR full-text search (no key needed).
 
