@@ -38,8 +38,10 @@ and none of the three is real enough today to include in a truthful MVP goal
 
 What exists, verified directly against
 `applications/trading_intelligence/ui/decision_center/`, real and tested
-(77 tests: 49 in `applications/trading_intelligence/tests`, 28 in
+(326 tests: 181 in `applications/trading_intelligence/tests`, 145 in
 `applications/trading_intelligence/ui/tests`):
+
+**Implemented — real code, real rendering, decision-specific:**
 
 - **Decision list** — `DecisionListArea`, populated by
   `DecisionCenterController.load_decisions()` /
@@ -57,10 +59,36 @@ What exists, verified directly against
 - **Timestamp** — `DecisionView.updated_at`, displayed as-is on the list;
   `DecisionDetailArea.timestamp_display` on detail (formatted
   `"%Y-%m-%d %H:%M UTC"`).
+- **Evidence** — `EvidenceEntry` record cards (`evidence_type`/`source`/
+  `attached_at`), read via `SentinelEvidenceSource`/
+  `DecisionEvidenceQueryService`, including ADR-037's evidence metadata
+  disclosure (`shap_drivers`/`is_degraded`/`val_loss`/`raw_score`/
+  `headlines`).
+- **Why?/Rationale summary** — a real, per-decision sentence derived from
+  already-loaded evidence (`evidence_type`/`source`), not a fabricated
+  thesis; falls back to a static disclosure when no evidence exists.
+- **Risk context placeholder** — a static, decision-independent disclosure
+  ("Risk context not yet available") added by the UI-completion roadmap's
+  Slice 1. Presentation only — see Section 3 for why this is not Risk
+  Intelligence.
 
-This is the entire included capability. `symbol` and `action` are also
-present on `DecisionView` (not separately called out by this task, but part
-of the same, already-real field set).
+**Implemented but illustrative — real code, real rendering, but backed by
+Sentinel Engine's own seed data, not real production data:**
+
+- **Governance & Policy, Approval, Audit Trail** — `GovernanceEntry`/
+  `ApprovalEntry`/`AuditEntry`, read via `SentinelGovernanceSource`/
+  `DecisionGovernanceQueryService` and `SentinelAuditSource`. These render
+  Sentinel Engine's own internal `GovernanceService`/`Policy`/`Approval`
+  domain (real code, per `ADR-012`), populated by `bootstrap.py`'s
+  deterministic in-memory seed decisions — **not** the real
+  `constitution_enforcement_events`/`approval_events` production audit
+  source `AARA_TRADING_INTELLIGENCE_GOVERNANCE_INTELLIGENCE_DESIGN.md`
+  analyzes (Section 3 keeps this distinction explicit).
+
+`symbol` and `action` are also present on `DecisionView` (not separately
+called out by this task, but part of the same, already-real field set). None
+of the above implies real persistence or real production authentication —
+both remain exactly as excluded as Section 3 states.
 
 ## 3. Excluded Capabilities
 
@@ -72,21 +100,30 @@ MVP — not a vague "later," a cited, concrete blocker:
   proposed for it (`AARA_TRADING_INTELLIGENCE_PRODUCT_ARCHITECTURE.md`
   Section 7 confirms Trading Intelligence, not Sentinel, owns portfolio
   context).
-- **Risk Intelligence** — no `sentinel_engine` risk contract exists at all;
-  the largest single gap found across every capability analyzed this
-  session (`AARA_TRADING_INTELLIGENCE_RISK_INTELLIGENCE_DESIGN.md`
-  Section 1).
-- **Evidence Intelligence UI** — `Evidence` contract exists, but no
-  Trading-Intelligence-side reader exists, and the cardinality question
-  (single `evidence_reference` vs. the full list
-  `EvidenceService.get_evidence_for_decision()` returns) is unresolved
-  (`AARA_TRADING_INTELLIGENCE_EVIDENCE_DESIGN.md` Section 4). Building
-  against it now would mean guessing.
-- **Governance Intelligence UI** — `Approval`'s shape (one record per
-  decision) doesn't match the real audit data
-  (`constitution_enforcement_events`, six rows per decision); using it as-is
-  would misrepresent the real data
-  (`AARA_TRADING_INTELLIGENCE_GOVERNANCE_INTELLIGENCE_DESIGN.md` Section 3).
+- **Real Risk Intelligence** — no `sentinel_engine` risk contract exists at
+  all; still the largest single gap found across every capability analyzed
+  in this product (`AARA_TRADING_INTELLIGENCE_RISK_INTELLIGENCE_DESIGN.md`
+  Section 1). The UI's static "Risk context not yet available" disclosure
+  (Section 2) is a decision-independent placeholder string, not a
+  `RiskEvaluation` contract, reader, or any risk data of any kind — it must
+  not be read as Risk Intelligence existing.
+- **Evidence Intelligence UI** — implemented (Section 2): a real
+  Trading-Intelligence-side reader (`SentinelEvidenceSource`) exists and is
+  rendered, including ADR-037 evidence metadata. The cardinality concern
+  originally named here (single `evidence_reference` vs. the full list
+  `EvidenceService.get_evidence_for_decision()` returns) turned out moot —
+  the built reader never dereferences `evidence_reference` at all; it reads
+  `DecisionQuery.get_decision_timeline()`'s event stream directly, mirroring
+  `SentinelAuditSource`'s existing pattern.
+- **Governance Intelligence UI (real production source)** — remains
+  excluded exactly as before: `Approval`'s shape (one record per decision)
+  still doesn't match the real audit data (`constitution_enforcement_events`,
+  six rows per decision); using it as-is would still misrepresent the real
+  data (`AARA_TRADING_INTELLIGENCE_GOVERNANCE_INTELLIGENCE_DESIGN.md`
+  Section 3). What the UI now renders (Section 2) is a separate thing —
+  Sentinel Engine's own internal, illustrative `GovernanceService`/`Policy`/
+  `Approval` domain, not `constitution_enforcement_events` — and does not
+  close this exclusion.
 - **Authentication implementation** — `AuthenticationProvider` is an
   abstract interface with zero concrete implementations; per `ADR-003`,
   implementation "begins only after product boundaries stabilize," which
@@ -115,39 +152,47 @@ data, which has never happened) both remain unmet. This document does not
 resolve `ADR-004` and does not propose a timeline for when production mode
 becomes available — that is `ADR-004`'s decision to make, not this one's.
 
+**Section 2's now-broader rendered feature set changes nothing about this
+posture.** Evidence, governance/approval/audit, the Why summary, and the
+Risk placeholder all run through the same in-memory, illustrative seed data
+`bootstrap.py` already produces — none of them implies a real production
+backend exists, and Production mode above remains exactly as blocked.
+
 ## 5. MVP User Journey
 
-**Only what actually exists today, verified directly — not the aspirational
-Login → Workspace → Decision Center flow described in
-`AARA_TRADING_INTELLIGENCE_MVP_EXPERIENCE_DESIGN.md` Section 1, which itself
-already states most of that flow doesn't exist as working code.**
+**Only what actually exists today, verified directly.**
 
-The real, working journey today is a **data/service flow, not a browser
-flow** — there is no rendering framework wired to
-`DecisionCenterScreen`/`DecisionListArea`/`DecisionDetailArea` at all; they
-are plain, framework-independent dataclasses
-(`AARA_TRADING_INTELLIGENCE_DECISION_CENTER_DESIGN.md` Section 4's own
-description, still accurate). What genuinely works, provable by running the
-test suite:
+The real, working journey today is a genuine rendered browser page, not
+just a data/service flow — `applications/trading_intelligence/ui/
+decision_center/gradio_view.py`'s `DecisionCenterUI` is a fully wired
+Gradio `Blocks` application, launched by `main.py`:
 
 ```
-Construct a data source
-  (mock_data.build_mock_screen(), or
-   SentinelProjectionDecisionSource(InMemoryProjectionRepository())
-     -> DecisionQueryService -> DecisionCenterController)
-        |
-        v
-Call .load_screen(decision_ids, selected_id=...)
-        |
-        v
-Receive a DecisionCenterScreen
-  (DecisionListArea + DecisionDetailArea, fully populated)
+bootstrap.build_application()
+  -> DecisionCenterController (query_service, evidence_query_service,
+                                governance_query_service, audit_source)
+  -> DecisionCenterUI(controller, decision_ids)
+main.py: DecisionCenterUI.build().launch()
+  -> a real Gradio Blocks page: decision list, decision detail, evidence,
+     governance & policy, approval, audit trail, Why? summary, Risk
+     placeholder, refresh, mouse/keyboard row selection
 ```
 
-No login step, no workspace navigation, no rendered page exists in this
-flow. A truthful MVP user journey today ends at "a screen model exists and
-is correct," not at "a user sees a screen" — Section 7 names closing that
-gap as future work, not something this document claims is already done.
+This supersedes the earlier claim that `DecisionCenterScreen`/
+`DecisionListArea`/`DecisionDetailArea` have no rendering framework wired to
+them and that no rendered page exists — both were true when originally
+written (per `AARA_TRADING_INTELLIGENCE_DECISION_CENTER_DESIGN.md` Section
+4's pre-build description) and are false now; `gradio_view.py` did not exist
+at the time.
+
+**No login step and no real, multi-workspace navigation still exist** — the
+shell's nav bar shows "Decision Center" as the only active item; Portfolio
+Intelligence and Risk Intelligence remain non-interactive "Coming Soon"
+labels, and no `AuthenticationProvider` implementation is wired to any real
+credential. A truthful MVP user journey today is "a user opens the app and
+sees a real Decision Center page," not the aspirational Login → Workspace →
+Decision Center flow `AARA_TRADING_INTELLIGENCE_MVP_EXPERIENCE_DESIGN.md`
+Section 1 describes, which still doesn't exist as working code.
 
 ## 6. Implementation Readiness Matrix
 
@@ -156,31 +201,43 @@ gap as future work, not something this document claims is already done.
 | Decision list | Real, tested, wired end-to-end | Already built | — |
 | Decision detail | Real, tested, wired end-to-end | Already built | — |
 | Portfolio | No code anywhere | No | No `sentinel_engine` contract proposed; ownership not decided |
-| Risk Intelligence | No `sentinel_engine` contract | No | Missing contract (new `sentinel_engine/` code needs its own ADR, per `ADR-001`); which of four non-unified risk models is authoritative is undecided |
-| Evidence Intelligence UI | Contract exists, no reader | No | Cardinality decision unresolved; no reader/adapter exists |
-| Governance Intelligence UI | Contract exists, wrong shape | No | Needs a new contract matching `constitution_enforcement_events`; needs its own ADR |
+| Real Risk Intelligence | No `sentinel_engine` contract | No | Missing contract (new `sentinel_engine/` code needs its own ADR, per `ADR-001`); which of four non-unified risk models is authoritative is undecided |
+| Risk placeholder (static UI disclosure) | Real, tested, wired end-to-end | Already built | — (not Risk Intelligence; see Section 3) |
+| Evidence Intelligence UI | Real, tested, wired end-to-end, including ADR-037 metadata | Already built | — |
+| Governance Intelligence UI (Sentinel-domain, illustrative) | Real, tested, wired end-to-end | Already built | — |
+| Governance Intelligence UI (real `constitution_enforcement_events` source) | No reader, wrong contract shape | No | Needs a new contract matching `constitution_enforcement_events`; needs its own ADR |
 | Authentication | Interface only, zero implementations | No | `ADR-003`: implementation gated on product boundaries stabilizing |
 | Real ledger connection | No backend implementation | No | `ADR-004`: deferred until Phase 1A validation window completes |
-| Rendering/UI framework | No technology chosen | No | Open decision, `AARA_PLATFORM_SHELL_ARCHITECTURE.md` Section 6 — not resolved by this document |
+| Rendering/UI framework | Gradio 4.44.1, chosen and shipped (`gradio_view.py`) | Already built | — |
+
+`AARA_PLATFORM_SHELL_ARCHITECTURE.md` Section 6's "open decision" this row
+previously cited concerns the platform-wide shell technology choice across
+all AARA products, not Trading Intelligence's own Decision Center, which
+already ships on Gradio.
 
 ## 7. First Implementation Milestone
 
-**The smallest next coding milestone that requires no new contract, no new
-ADR, and no ownership-boundary change:** add explicit placeholder areas to
-`DecisionCenterScreen` for evidence, risk, and governance — each honestly
-representing "not yet available," not real data. This is narrower than any
-excluded capability in Section 3: it renders the *absence* of evidence/
-risk/governance content, never evidence/risk/governance content itself, so
-it does not implement any of the three excluded UI capabilities.
+**Status: superseded — completed, then exceeded.** The milestone originally
+named here — add explicit placeholder areas to `DecisionCenterScreen` for
+evidence, risk, and governance, each honestly representing "not yet
+available" — has shipped. For evidence and governance, the actual result
+went further than a placeholder: both are now real, rendered content
+(Section 2), not an absence-only disclosure. What has actually shipped,
+verified directly:
 
-This would close the one concrete gap
-`AARA_TRADING_INTELLIGENCE_MVP_EXPERIENCE_DESIGN.md` Section 4 already
-named as unmet ("see future intelligence areas" — not achievable today, not
-even as a placeholder), using the same framework-independent-dataclass, TDD
-pattern this codebase already follows for `DecisionListArea`/
-`DecisionDetailArea`. It is a definition of the next milestone, not an
-implementation of it — no file under any protected or in-scope path was
-changed to produce this section.
+- Decision Center rendering (`gradio_view.py`, a real Gradio `Blocks`
+  application — see Section 5).
+- Evidence rendering, including ADR-037 evidence metadata.
+- Governance & Policy, Approval, and Audit Trail rendering (Sentinel-domain,
+  illustrative — see Sections 2 and 3).
+- A derived, per-decision Why?/Rationale summary.
+- The Risk section's placeholder: a static, decision-independent disclosure
+  — the one piece of the original milestone that shipped exactly as
+  originally scoped (an absence-only placeholder, since no `RiskEvaluation`
+  contract exists).
+
+This document does not name a next milestone — that is a separate, future
+scope decision, not a correction to this one.
 
 ---
 
