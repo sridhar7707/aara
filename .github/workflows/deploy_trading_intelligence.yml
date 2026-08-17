@@ -99,6 +99,31 @@ jobs:
               ignore=skip_tests_and_cache,
           )
 
+          # ADR-039: applications/platform/navigation/, registry/, workspaces/,
+          # and entitlements/ -- required by bootstrap.py's NavigationBuilder
+          # wiring (ADR-038). shell/ deliberately not staged -- nothing
+          # imports it.
+          shutil.copytree(
+              "applications/platform/navigation",
+              staging / "applications" / "platform" / "navigation",
+              ignore=skip_tests_and_cache,
+          )
+          shutil.copytree(
+              "applications/platform/registry",
+              staging / "applications" / "platform" / "registry",
+              ignore=skip_tests_and_cache,
+          )
+          shutil.copytree(
+              "applications/platform/workspaces",
+              staging / "applications" / "platform" / "workspaces",
+              ignore=skip_tests_and_cache,
+          )
+          shutil.copytree(
+              "applications/platform/entitlements",
+              staging / "applications" / "platform" / "entitlements",
+              ignore=skip_tests_and_cache,
+          )
+
           # Shared Sentinel Intelligence Engine (zero external dependencies
           # of its own -- verified: no third-party imports anywhere in it).
           shutil.copytree(
