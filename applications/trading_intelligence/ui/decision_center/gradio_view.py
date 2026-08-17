@@ -443,6 +443,28 @@ _RISK_CONTEXT_HTML = (
     "</div>"
 )
 
+# P0 illustrative-data disclosure (UI-completion Product/UX audit): static,
+# decision-independent, persistent -- built once at build() time like
+# _SHELL_NAV_HTML, never wired into detail_outputs/_DetailValues/any
+# callback path. Placed at the page-header level (every load, before any
+# decision-specific content) rather than inside a single decision's detail
+# panel, since it applies to the whole screen, not one decision. Deliberately
+# names only "decisions and supporting data" in general -- it must not
+# assert or deny that governance, approvals, audit events, persistence,
+# authentication, brokerage connectivity, or any other production capability
+# exists; that is out of scope for a single disclosure line.
+_ILLUSTRATIVE_DATA_TITLE = "Illustrative Data"
+_ILLUSTRATIVE_DATA_BODY = (
+    "The decisions and supporting data shown here are illustrative and are "
+    "not real trading activity."
+)
+_ILLUSTRATIVE_DATA_HTML = (
+    '<div class="aara-disclosure-message">'
+    f'<div class="aara-disclosure-title">{html.escape(_ILLUSTRATIVE_DATA_TITLE)}</div>'
+    f'<div class="aara-disclosure-body">{html.escape(_ILLUSTRATIVE_DATA_BODY)}</div>'
+    "</div>"
+)
+
 _ACTION_BADGE_CLASSES = {"BUY": "action-buy", "SELL": "action-sell", "HOLD": "action-hold"}
 
 _LIFECYCLE_STAGES = [
@@ -474,6 +496,7 @@ class DecisionCenterUI:
             gr.HTML(_SHELL_NAV_HTML, elem_classes=["aara-shell-nav"])
 
             gr.HTML(_PAGE_HEADER_HTML, elem_classes=["aara-page-header"])
+            gr.HTML(_ILLUSTRATIVE_DATA_HTML)
 
             with gr.Row(elem_classes=["aara-layout-row"]):
                 with gr.Column(scale=3, min_width=380, elem_classes=["aara-list-column"]):

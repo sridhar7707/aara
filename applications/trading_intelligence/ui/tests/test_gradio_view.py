@@ -21,6 +21,9 @@ from applications.trading_intelligence.projections.decision_view import Decision
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 from applications.trading_intelligence.ui.decision_center.gradio_view import (
+    _ILLUSTRATIVE_DATA_BODY,
+    _ILLUSTRATIVE_DATA_HTML,
+    _ILLUSTRATIVE_DATA_TITLE,
     _NAV_COMING_SOON_BADGE_HTML,
     _NAV_COMING_SOON_LABEL,
     _RISK_CONTEXT_BODY,
@@ -1349,3 +1352,38 @@ def test_risk_context_block_is_present_in_the_built_layout():
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
     assert _RISK_CONTEXT_HTML in html_values
+
+
+def test_illustrative_data_disclosure_is_the_exact_fixed_text():
+    """P0 Product/UX audit finding: a persistent, decision-independent
+    disclosure that all data shown is illustrative, not real trading
+    activity. Must not assert or deny that governance, approvals, audit
+    events, persistence, authentication, brokerage connectivity, or any
+    other production capability exists -- render exactly this title and
+    body, verbatim."""
+    assert _ILLUSTRATIVE_DATA_TITLE == "Illustrative Data"
+    assert _ILLUSTRATIVE_DATA_BODY == (
+        "The decisions and supporting data shown here are illustrative and are "
+        "not real trading activity."
+    )
+    assert _ILLUSTRATIVE_DATA_HTML == (
+        '<div class="aara-disclosure-message">'
+        '<div class="aara-disclosure-title">Illustrative Data</div>'
+        '<div class="aara-disclosure-body">'
+        "The decisions and supporting data shown here are illustrative and are "
+        "not real trading activity.</div>"
+        "</div>"
+    )
+
+
+def test_illustrative_data_disclosure_block_is_present_in_the_built_layout():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    assert _ILLUSTRATIVE_DATA_HTML in html_values
