@@ -23,6 +23,9 @@ from applications.trading_intelligence.projections.governance_entry import Gover
 from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _NAV_COMING_SOON_BADGE_HTML,
     _NAV_COMING_SOON_LABEL,
+    _RISK_CONTEXT_BODY,
+    _RISK_CONTEXT_HTML,
+    _RISK_CONTEXT_TITLE,
     _SHELL_NAV_HTML,
     _WHY_RATIONALE_BODY,
     _WHY_RATIONALE_HTML,
@@ -1315,3 +1318,34 @@ def test_shell_nav_block_is_present_in_the_built_layout():
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
     assert _SHELL_NAV_HTML in html_values
+
+
+def test_risk_context_is_the_exact_fixed_placeholder_text():
+    """Slice 1 (UI-completion audit): the Risk section is a static,
+    decision-independent disclosure -- no RiskEvaluation/RiskEntry contract
+    or reader exists anywhere in this codebase. Render exactly this title
+    and body, verbatim, for every decision."""
+    assert _RISK_CONTEXT_TITLE == "Risk context not yet available"
+    assert _RISK_CONTEXT_BODY == (
+        "Position-level risk analysis has not yet been implemented for this workspace."
+    )
+    assert _RISK_CONTEXT_HTML == (
+        '<div class="aara-disclosure-message">'
+        '<div class="aara-disclosure-title">Risk context not yet available</div>'
+        '<div class="aara-disclosure-body">'
+        "Position-level risk analysis has not yet been implemented for this workspace.</div>"
+        "</div>"
+    )
+
+
+def test_risk_context_block_is_present_in_the_built_layout():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    assert _RISK_CONTEXT_HTML in html_values

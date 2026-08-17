@@ -427,6 +427,22 @@ _WHY_RATIONALE_HTML = (
     "</div>"
 )
 
+# Slice 1 (UI-completion audit): static, decision-independent disclosure --
+# no RiskEvaluation/RiskEntry contract or reader exists anywhere in this
+# codebase. Built once at build() time like _SHELL_NAV_HTML, never wired
+# into detail_outputs/_DetailValues/any callback path -- unlike
+# _WHY_RATIONALE_HTML, which the Decision Detail Depth pass wired into the
+# dynamic render path, this block must stay static, so it deliberately does
+# not follow that later precedent.
+_RISK_CONTEXT_TITLE = "Risk context not yet available"
+_RISK_CONTEXT_BODY = "Position-level risk analysis has not yet been implemented for this workspace."
+_RISK_CONTEXT_HTML = (
+    '<div class="aara-disclosure-message">'
+    f'<div class="aara-disclosure-title">{html.escape(_RISK_CONTEXT_TITLE)}</div>'
+    f'<div class="aara-disclosure-body">{html.escape(_RISK_CONTEXT_BODY)}</div>'
+    "</div>"
+)
+
 _ACTION_BADGE_CLASSES = {"BUY": "action-buy", "SELL": "action-sell", "HOLD": "action-hold"}
 
 _LIFECYCLE_STAGES = [
@@ -532,6 +548,10 @@ class DecisionCenterUI:
                         '<h3 class="aara-eyebrow">Approval</h3>', elem_classes=["aara-section-label"],
                     )
                     approval_output = gr.HTML(elem_id="approval-section")
+                    gr.Markdown(
+                        '<h3 class="aara-eyebrow">Risk</h3>', elem_classes=["aara-section-label"],
+                    )
+                    gr.HTML(_RISK_CONTEXT_HTML)
                     gr.Markdown(
                         '<h3 class="aara-eyebrow">Audit Trail</h3>',
                         elem_classes=["aara-section-label"],
