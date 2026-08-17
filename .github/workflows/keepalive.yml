@@ -1,14 +1,24 @@
 name: Keep-Alive & Trade Dispatch
 
 on:
-  # Triggered by cron-job.org at 8:15 AM CDT Mon-Fri
-  # (GitHub's built-in scheduler was too unreliable — replaced with external cron)
+  # Primary: cron-job.org (external, workflow_dispatch). Backup: native
+  # GitHub schedule below, in case the external trigger is down for a
+  # reason other than the weekend/holiday calendar it already respects.
+  # See ADR-035.
   workflow_dispatch:
+  schedule:
+    # 15:00 UTC = 10:00 AM CDT, Mon-Fri -- after cron-job.org's documented
+    # 8:15 AM CDT slot, so the dedup guard below sees a completed or
+    # in-progress primary run and no-ops on a normal day.
+    - cron: '0 15 * * 1-5'
 
 jobs:
   dispatch-and-ping:
     runs-on: ubuntu-latest
     permissions:
+      # write already includes read for this scope -- covers both the
+      # existing dispatch POST and the new dedup guard's `gh api .../runs`
+      # GET call below (ADR-035).
       actions: write
     steps:
       - name: Dispatch trade.yml (weekdays + market hours only)
@@ -30,6 +40,19 @@ jobs:
           MARKET_CLOSE=945   # 3:45 PM ET
           if [ "$MINS_ET" -lt "$MARKET_OPEN" ] || [ "$MINS_ET" -ge "$MARKET_CLOSE" ]; then
             echo "Outside market hours ($(TZ=America/New_York date '+%H:%M ET')) — skipping trade dispatch."
+            exit 0
+          fi
+          # ADR-035 same-day dedup guard: trade.yml's own concurrency group
+          # (cancel-in-progress: true) would kill an already-running healthy
+          # session if this step dispatches again on top of it -- so if any
+          # run already exists for today (queued/in_progress/completed,
+          # regardless of source), skip rather than dispatch a duplicate.
+          TODAY_UTC=$(date -u +%Y-%m-%d)
+          EXISTING_RUNS=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/trade.yml/runs?created=>=${TODAY_UTC}&per_page=10" \
+            --jq '[.workflow_runs[] | select(.status == "queued" or .status == "in_progress" or .status == "completed")] | length')
+          if [ "${EXISTING_RUNS:-0}" -gt 0 ]; then
+            echo "trade.yml already ran today (${EXISTING_RUNS} run(s) found) — skipping duplicate dispatch."
             exit 0
           fi
           echo "Within market hours ($(TZ=America/New_York date '+%H:%M ET')) — dispatching trade.yml"
