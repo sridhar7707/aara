@@ -4,7 +4,7 @@ import datetime
 from sentinel_engine.domain.decision import Decision
 from sentinel_engine.evidence.evidence import Evidence
 from sentinel_engine.ledger.ledger import LedgerStore
-from sentinel_engine.queries.decision_query import DecisionQuery
+from sentinel_engine.queries.decision_query import DecisionQuery, EvidenceSummary
 from sentinel_engine.repositories.ledger_repository import LedgerRepository
 from sentinel_engine.repositories.projection_repository import ProjectionRepository
 from sentinel_engine.services.decision_service import DecisionService
@@ -159,6 +159,53 @@ def test_get_evidence_returns_empty_list_for_a_missing_decision():
     _, _, source = _make_wiring()
 
     assert source.get_evidence("missing-decision") == []
+
+
+def test_get_evidence_preserves_data():
+    """ADR-036: Evidence.data, once it reaches the EVIDENCE_ATTACHED payload
+    (sentinel_engine/services/evidence_service.py), must reach EvidenceEntry
+    unchanged -- exercised end to end through real EvidenceService/
+    DecisionQuery, not a stub."""
+    decision_service, evidence_service, source = _make_wiring()
+    decision_service.create_decision(_make_decision())
+    evidence_service.associate_evidence("dec-001", _make_evidence(data={"score": 0.62}))
+
+    result = source.get_evidence("dec-001")
+
+    assert result[0].data == {"score": 0.62}
+
+
+def test_get_evidence_defaults_data_to_empty_dict_when_payload_has_no_data_key():
+    """Backward compatibility: an EVIDENCE_ATTACHED event predating ADR-036
+    (payload without a "data" key) must still produce a valid EvidenceEntry,
+    not raise -- existing behavior for events without data is preserved."""
+    attached_at = datetime.datetime(2026, 8, 8, 9, 5, 0)
+
+    class _Event:
+        event_type = "EVIDENCE_ATTACHED"
+        payload = {
+            "decision_id": "dec-001",
+            "evidence_id": "ev-001",
+            "evidence_type": "NEWS_SENTIMENT",
+            "source": "newsapi",
+        }
+
+    class _Timeline:
+        evidence = [EvidenceSummary(
+            evidence_id="ev-001", evidence_type="NEWS_SENTIMENT",
+            source="newsapi", attached_at=attached_at,
+        )]
+        events = [_Event()]
+
+    class _StubDecisionQuery:
+        def get_decision_timeline(self, decision_id):
+            return _Timeline()
+
+    source = SentinelEvidenceSource(_StubDecisionQuery())
+
+    result = source.get_evidence("dec-001")
+
+    assert result[0].data == {}
 
 
 def test_get_evidence_returns_multiple_entries_in_order():

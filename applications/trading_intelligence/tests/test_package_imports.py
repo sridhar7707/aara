@@ -22,6 +22,7 @@ _SUBPACKAGES = [
     "applications.trading_intelligence.adapters.sentinel_evidence_source",
     "applications.trading_intelligence.adapters.sentinel_governance_source",
     "applications.trading_intelligence.adapters.sentinel_audit_source",
+    "applications.trading_intelligence.entitlements",
     "applications.trading_intelligence.projections",
     "applications.trading_intelligence.projections.decision_view",
     "applications.trading_intelligence.projections.evidence_entry",

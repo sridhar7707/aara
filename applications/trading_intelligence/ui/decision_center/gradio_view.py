@@ -748,10 +748,73 @@ class DecisionCenterUI:
                     ("Attached", entry.attached_at.strftime("%Y-%m-%d %H:%M UTC"), True),
                 ],
                 "neutral",
+                DecisionCenterUI._format_evidence_detail_html(entry.data.get("metadata", {})),
             )
             for entry in detail_area.evidence
         ]
         return DecisionCenterUI._record_list_html(cards, _EVIDENCE_EMPTY_MESSAGE, "evidence")
+
+    @staticmethod
+    def _format_evidence_detail_html(metadata: Dict[str, Any]) -> str:
+        """Expandable, structured presentation of exactly the five
+        ADR-037-authorized EvidenceEntry.data["metadata"] keys --
+        shap_drivers, is_degraded, val_loss, raw_score, headlines -- each
+        rendered only when present, nothing invented or transformed beyond
+        display formatting. Any other current or future metadata key is
+        not rendered. signal/confidence are top-level siblings of metadata
+        on EvidenceEntry.data, never part of the metadata dict this
+        function receives, so they can never appear here structurally --
+        see _format_evidence_html's call site.
+
+        Reuses _format_audit_detail_html's own <details>/<summary>
+        disclosure and aara-record-card-fields/aara-record-field/
+        record-label/record-value markup rather than introducing new,
+        unstyled classes. Returns "" (no disclosure at all) when none of
+        the five keys are present, matching the pre-ADR-037 card exactly.
+
+        val_loss=None and an empty headlines list both render an explicit
+        "N/A" -- never Python's None/[] reprs, never a blank field."""
+        rows: List[Tuple[str, str]] = []
+
+        if "shap_drivers" in metadata:
+            rows.extend(
+                (str(driver["feature"]), str(driver["shap_value"]))
+                for driver in metadata["shap_drivers"]
+            )
+
+        if "is_degraded" in metadata:
+            rows.append(("Model Degraded", "Yes" if metadata["is_degraded"] else "No"))
+
+        if "val_loss" in metadata:
+            val_loss = metadata["val_loss"]
+            rows.append(("Validation Loss", "N/A" if val_loss is None else str(val_loss)))
+
+        if "raw_score" in metadata:
+            rows.append(("Raw Sentiment Score", str(metadata["raw_score"])))
+
+        if "headlines" in metadata:
+            headlines = metadata["headlines"]
+            if headlines:
+                rows.extend(("Headline", str(headline)) for headline in headlines)
+            else:
+                rows.append(("Headlines", "N/A"))
+
+        if not rows:
+            return ""
+
+        field_html = "".join(
+            '<div class="aara-record-field">'
+            f'<span class="record-label">{html.escape(label)}</span>'
+            f'<span class="record-value">{html.escape(value)}</span>'
+            "</div>"
+            for label, value in rows
+        )
+        return (
+            '<details class="aara-payload-disclosure">'
+            "<summary>Details</summary>"
+            f'<div class="aara-record-card-fields">{field_html}</div>'
+            "</details>"
+        )
 
     @staticmethod
     def _format_governance_html(detail_area: DecisionDetailArea) -> str:

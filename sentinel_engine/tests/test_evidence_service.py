@@ -133,6 +133,19 @@ def test_associate_evidence_writes_evidence_attached_event_with_correct_payload(
     assert events[0].payload["source"] == "newsapi"
 
 
+def test_associate_evidence_preserves_evidence_data_in_event_payload():
+    """ADR-036: evidence.data must survive into the EVIDENCE_ATTACHED
+    payload -- previously discarded here, the sole point Evidence.data was
+    lost before ever reaching the durable ledger."""
+    service, ledger_repository, _ = _make_service()
+    evidence = _make_evidence(data={"raw_score": 0.42, "headlines": ["A headline"]})
+
+    service.associate_evidence("dec-001", evidence)
+
+    events = ledger_repository.get_events()
+    assert events[0].payload["data"] == {"raw_score": 0.42, "headlines": ["A headline"]}
+
+
 def test_associate_evidence_advances_projection_status_when_projection_exists():
     service, _, projection_repository = _make_service()
     projection_repository.save(_make_projection())

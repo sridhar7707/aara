@@ -18,9 +18,17 @@ get_evidence() translates DecisionQuery infrastructure exceptions into
 TradingIntelligenceReadError (contracts/read_error.py) -- DecisionQuery has
 no documented exception contract, so a future persistent backend may raise
 anything.
-"""
-from typing import List
 
+data (ADR-036) is sourced from timeline.events, not timeline.evidence --
+EvidenceSummary deliberately stays narrow (unwidened), but DecisionTimeline
+already exposes the full, unfiltered Event list, and each EVIDENCE_ATTACHED
+event's own payload now carries "data" (sentinel_engine/services/
+evidence_service.py). Mirrors SentinelAuditSource's existing pattern of
+reading timeline.events directly rather than inventing a new query.
+"""
+from typing import Any, Dict, List
+
+from sentinel_engine.events.event_types import EventType
 from sentinel_engine.queries.decision_query import DecisionQuery
 
 from applications.trading_intelligence.contracts.read_error import TradingIntelligenceReadError
@@ -43,12 +51,22 @@ class SentinelEvidenceSource(EvidenceSource):
             ) from exc
         if timeline is None:
             return []
+        data_by_evidence_id = self._data_by_evidence_id(timeline.events)
         return [
             EvidenceEntry(
                 evidence_id=item.evidence_id,
                 evidence_type=item.evidence_type,
                 source=item.source,
                 attached_at=item.attached_at,
+                data=data_by_evidence_id.get(item.evidence_id, {}),
             )
             for item in timeline.evidence
         ]
+
+    @staticmethod
+    def _data_by_evidence_id(events) -> Dict[str, Dict[str, Any]]:
+        return {
+            event.payload["evidence_id"]: event.payload.get("data", {})
+            for event in events
+            if event.event_type == EventType.EVIDENCE_ATTACHED
+        }

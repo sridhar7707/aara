@@ -43,11 +43,16 @@ from sentinel_engine.services.evidence_service import EvidenceService
 from sentinel_engine.services.governance_service import GovernanceService
 from sentinel_engine.services.sentinel_engine import SentinelEngine
 
+from applications.platform.identity.authentication_provider import AuthenticationProvider
 from applications.platform.identity.principal import PrincipalRegistry
 from applications.platform.identity.supabase_authentication_provider import (
     SupabaseAuthenticationProvider,
 )
 from applications.platform.identity.user import User
+from applications.platform.navigation.navigation_builder import NavigationBuilder
+from applications.platform.registry.product_registry import Product, ProductRegistry
+from applications.platform.workspaces.workspace import Workspace
+from applications.platform.workspaces.workspace_registry import WorkspaceRegistry
 from applications.trading_intelligence.adapters.sentinel_audit_source import SentinelAuditSource
 from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
 from applications.trading_intelligence.adapters.sentinel_governance_source import (
@@ -55,6 +60,11 @@ from applications.trading_intelligence.adapters.sentinel_governance_source impor
 )
 from applications.trading_intelligence.adapters.sentinel_projection_decision_source import (
     SentinelProjectionDecisionSource,
+)
+from applications.trading_intelligence.entitlements import TradingIntelligenceEntitlementChecker
+from applications.trading_intelligence.product import (
+    DECISION_CENTER_WORKSPACE,
+    TRADING_INTELLIGENCE_PRODUCT,
 )
 from applications.trading_intelligence.services.decision_evidence_query_service import (
     DecisionEvidenceQueryService,
@@ -95,6 +105,53 @@ class _NoOpSupabaseClient:
 
     def get_user(self, jwt=None):
         return None
+
+
+class _ResolvedUserAuthenticationProvider(AuthenticationProvider):
+    """Wraps an already-resolved Optional[User] value; performs no lookup,
+    network call, or re-invocation of the real SupabaseAuthenticationProvider
+    of any kind. Per ADR-038 Section 2.2 item 4 -- a second, distinct
+    AuthenticationProvider implementation, not a second call on the real
+    provider ADR-029 Section 2.2 governs. Gives NavigationBuilder something
+    to call get_current_user() on without a second real lookup, keeping
+    ADR-029 Section 2.2's "exactly once" call count on the real provider
+    instance intact."""
+
+    def __init__(self, current_user):
+        self._current_user = current_user
+
+    def get_current_user(self):
+        return self._current_user
+
+
+class _InMemoryProductRegistry(ProductRegistry):
+    """Process-local, non-durable registry per ADR-038 Section 2.2 item 1 --
+    mirrors _InMemoryLedgerStore/_InMemoryProjectionRepository's existing
+    per-call pattern in this same file. Not shared, not a singleton, not
+    module-level."""
+
+    def __init__(self):
+        self._products: Dict[str, Product] = {}
+
+    def register(self, product: Product) -> None:
+        self._products[product.product_id] = product
+
+    def list_products(self) -> List[Product]:
+        return list(self._products.values())
+
+
+class _InMemoryWorkspaceRegistry(WorkspaceRegistry):
+    """Process-local, non-durable registry per ADR-038 Section 2.2 item 1 --
+    same rationale as _InMemoryProductRegistry above."""
+
+    def __init__(self):
+        self._workspaces: List[Workspace] = []
+
+    def register_workspace(self, workspace: Workspace) -> None:
+        self._workspaces.append(workspace)
+
+    def list_workspaces(self, product_id: str) -> List[Workspace]:
+        return [workspace for workspace in self._workspaces if workspace.product_id == product_id]
 
 
 def _seed_decisions(engine: SentinelEngine) -> List[str]:
@@ -234,6 +291,29 @@ def build_application() -> DecisionCenterUI:
         if current_user is not None
         else None
     )
+
+    # ADR-038 Sec 2.2: product-local, in-memory registries, registered with
+    # only Trading Intelligence's own already-existing descriptors -- no
+    # Wealth Intelligence import, no platform-wide composition root.
+    product_registry = _InMemoryProductRegistry()
+    product_registry.register(TRADING_INTELLIGENCE_PRODUCT)
+
+    workspace_registry = _InMemoryWorkspaceRegistry()
+    workspace_registry.register_workspace(DECISION_CENTER_WORKSPACE)
+
+    entitlement_checker = TradingIntelligenceEntitlementChecker()
+
+    # ADR-038 Sec 2.2 item 4: NavigationBuilder receives a
+    # _ResolvedUserAuthenticationProvider wrapping the already-captured
+    # current_user, never the real auth_provider instance -- preserves
+    # ADR-029 Sec 2.2's "exactly once" call count on that instance.
+    resolved_user_provider = _ResolvedUserAuthenticationProvider(current_user)
+    navigation_builder = NavigationBuilder(
+        product_registry, workspace_registry, entitlement_checker, resolved_user_provider,
+    )
+    # ADR-038 Sec 2.3: confined to local scope -- never passed to any
+    # collaborator constructed below, never returned.
+    navigation_model = navigation_builder.build()
 
     ledger_repository = LedgerRepository(_InMemoryLedgerStore())
     projection_repository = _InMemoryProjectionRepository()

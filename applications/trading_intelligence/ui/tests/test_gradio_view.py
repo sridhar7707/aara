@@ -558,6 +558,129 @@ def test_render_detail_renders_an_empty_evidence_message_for_a_decision_with_no_
     assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
 
 
+def test_evidence_detail_disclosure_renders_all_five_authorized_fields():
+    """ADR-037: shap_drivers, is_degraded, val_loss, raw_score, headlines."""
+    view = _make_view()
+    entry = _make_entry(data={"metadata": {
+        "shap_drivers": [{"feature": "rsi", "shap_value": 0.12}],
+        "is_degraded": True,
+        "val_loss": 0.61,
+        "raw_score": 0.42,
+        "headlines": ["Stock surges on earnings beat"],
+    }})
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_html, _governance_html, _approval_html, _audit_html = ui._render_detail("dec-001")
+
+    assert '<details class="aara-payload-disclosure">' in evidence_html
+    assert "rsi" in evidence_html
+    assert "0.12" in evidence_html
+    assert "Yes" in evidence_html
+    assert "0.61" in evidence_html
+    assert "0.42" in evidence_html
+    assert "Stock surges on earnings beat" in evidence_html
+
+
+def test_evidence_detail_disclosure_renders_multiple_headlines_individually():
+    view = _make_view()
+    entry = _make_entry(data={"metadata": {
+        "headlines": ["First headline", "Second headline"],
+    }})
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_html, _governance_html, _approval_html, _audit_html = ui._render_detail("dec-001")
+
+    assert "First headline" in evidence_html
+    assert "Second headline" in evidence_html
+    assert "['First headline', 'Second headline']" not in evidence_html
+
+
+def test_evidence_detail_disclosure_renders_empty_headlines_as_explicit_na():
+    view = _make_view()
+    entry = _make_entry(data={"metadata": {"headlines": []}})
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_html, _governance_html, _approval_html, _audit_html = ui._render_detail("dec-001")
+
+    assert "N/A" in evidence_html
+    assert "[]" not in evidence_html
+
+
+def test_evidence_detail_disclosure_renders_val_loss_none_as_explicit_na():
+    view = _make_view()
+    entry = _make_entry(data={"metadata": {"val_loss": None}})
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_html, _governance_html, _approval_html, _audit_html = ui._render_detail("dec-001")
+
+    assert "N/A" in evidence_html
+    assert "None" not in evidence_html
+
+
+def test_evidence_detail_disclosure_escapes_html_in_headlines():
+    view = _make_view()
+    entry = _make_entry(data={"metadata": {
+        "headlines": ["<img src=x onerror=alert(1)>"],
+    }})
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_html, _governance_html, _approval_html, _audit_html = ui._render_detail("dec-001")
+
+    assert "<img" not in evidence_html
+    assert "&lt;img" in evidence_html
+
+
+def test_evidence_detail_disclosure_does_not_render_unknown_metadata_keys():
+    view = _make_view()
+    entry = _make_entry(data={"metadata": {
+        "raw_score": 0.5,
+        "some_future_key": "should not appear",
+    }})
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_html, _governance_html, _approval_html, _audit_html = ui._render_detail("dec-001")
+
+    assert "should not appear" not in evidence_html
+    assert "some_future_key" not in evidence_html
+
+
+def test_evidence_card_does_not_render_signal_or_confidence():
+    """ADR-037 §2.3: signal/confidence are per-model informational values,
+    not the decision -- must never appear in the Evidence card at all."""
+    view = _make_view()
+    entry = _make_entry(data={
+        "signal": "BUY",
+        "confidence": 0.913,
+        "metadata": {"raw_score": 0.5},
+    })
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_html, _governance_html, _approval_html, _audit_html = ui._render_detail("dec-001")
+
+    assert "0.913" not in evidence_html
+    assert "BUY" not in evidence_html
+
+
+def test_evidence_card_renders_no_detail_disclosure_when_metadata_is_empty():
+    """No metadata keys present -- the header fields render exactly as
+    before ADR-037, with no expandable disclosure appended."""
+    view = _make_view()
+    entry = _make_entry()
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, evidence_html, _governance_html, _approval_html, _audit_html = ui._render_detail("dec-001")
+
+    assert '<details class="aara-payload-disclosure">' not in evidence_html
+
+
 def test_render_detail_renders_a_single_governance_card():
     view = _make_view()
     entry = _make_governance_entry(policy_id="pol-max-pos", enabled=True)

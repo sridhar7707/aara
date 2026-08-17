@@ -2,13 +2,16 @@
 panel -- narrower than sentinel_engine.queries.decision_query.EvidenceSummary.
 
 Carries evidence_id (restored -- Decision Detail Depth pass) alongside
-evidence_type/source/attached_at. Still never carries Evidence.data (the
-arbitrary per-evidence-type payload attached at evidence-creation time);
-rendering that free-form dict remains a separate, later decision, not part
-of this slice.
+evidence_type/source/attached_at. Also carries data (ADR-036) -- the
+free-form per-evidence-type payload attached at evidence-creation time,
+sourced from the EVIDENCE_ATTACHED event's own payload, not from
+EvidenceSummary. Defaults to {} so events predating ADR-036, or a missing
+"data" key, produce a valid entry rather than an error. Rendering data in
+the UI remains a separate, later decision, not part of this slice.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any, Dict
 
 
 @dataclass(frozen=True)
@@ -17,3 +20,4 @@ class EvidenceEntry:
     evidence_type: str
     source: str
     attached_at: datetime
+    data: Dict[str, Any] = field(default_factory=dict)
