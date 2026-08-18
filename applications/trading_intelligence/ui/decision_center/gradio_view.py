@@ -378,6 +378,138 @@ _KEYBOARD_SELECTION_BRIDGE_JS = """
 </script>
 """
 
+# P1 accessibility slice: live-region announcer setup. A separate, named JS
+# constant -- not merged into _KEYBOARD_SELECTION_BRIDGE_JS above, an
+# unrelated concern (keyboard selection vs. screen-reader announcements).
+#
+# Gradio 4.44.1's gr.HTML component exposes no Python-level hook to set
+# arbitrary ARIA attributes on its own rendered host (elem_id/elem_classes
+# are the only attribute hooks -- gradio.components.html.HTML.__init__ has
+# no aria_* parameter). Verified directly against the shipped Svelte source,
+# not assumed:
+#   - gradio/_frontend_code/atoms/src/Block.svelte line 37: every gr.HTML
+#     is wrapped in <svelte:element id={elem_id} class="block ...">, a
+#     stable root element that is never destroyed and recreated when the
+#     component's value later changes (only a Svelte prop update, not a
+#     remount).
+#   - gradio/_frontend_code/html/shared/HTML.svelte: the actual
+#     {@html value} binding lives on a *descendant* <div class="prose ...">
+#     inside that stable root -- only this inner content is replaced on each
+#     update.
+# Setting aria-live/aria-atomic/role once on the stable outer element (by
+# id, found via document.getElementById) therefore persists across every
+# later content update; a live-region attribute on an ancestor of the
+# mutating content is standard, correct ARIA usage, not a workaround.
+#
+# The target element does not exist yet when this <script> parses (Gradio's
+# own client-side app mounts asynchronously after page load), so a bounded
+# polling loop -- not a MutationObserver, which would react to every future
+# DOM change instead of just needing to find one element once -- retries
+# briefly, applies the three attributes exactly once, then stops. Fails
+# silently (no error, just stops polling) if the element is never found
+# rather than throwing or polling forever.
+_LIVE_ANNOUNCER_ELEM_ID = "aara-live-announcer"
+_LIVE_REGION_SETUP_JS = f"""
+<script>
+(function () {{
+  var attempts = 0;
+  var maxAttempts = 100;
+  var intervalId = setInterval(function () {{
+    attempts += 1;
+    var el = document.getElementById("{_LIVE_ANNOUNCER_ELEM_ID}");
+    if (el) {{
+      el.setAttribute("aria-live", "polite");
+      el.setAttribute("aria-atomic", "true");
+      el.setAttribute("role", "status");
+      clearInterval(intervalId);
+      return;
+    }}
+    if (attempts >= maxAttempts) {{
+      clearInterval(intervalId);
+    }}
+  }}, 50);
+}})();
+</script>
+"""
+
+# P1 accessibility slice: dataframe selection ARIA sync. A third, independent
+# JS bridge (not merged into either bridge above -- distinct concern from
+# both keyboard activation and live-region announcement): the Decisions
+# gr.Dataframe renders with role="grid" (Gradio's own Table.svelte), but
+# never sets aria-selected anywhere -- selection is conveyed only visually,
+# via theme.py's `tr:has(td.focus)` CSS. A screen-reader user browsing the
+# grid with table/grid navigation (not just listening to the one-time
+# live-region announcement) has no programmatic way to determine which row
+# is currently selected. Verified directly against the shipped Svelte source
+# (gradio/_frontend_code/dataframe/shared/Table.svelte), not assumed.
+#
+# Reuses exactly the same DOM contract V3.1's keyboard bridge already
+# depends on and documents above (.aara-decisions-table anchor; a real data
+# row is a `tr[slot="tbody"]`; Gradio's own click handler marks the selected
+# cell with a `td.focus` class) -- no new contract introduced. Both mouse
+# clicks and keyboard selection (via the bridge above, which calls a real
+# cell.click()) converge on this same `.focus` class, so one sync function
+# covers both input methods uniformly.
+#
+# A MutationObserver -- not a one-shot event listener -- is used because
+# aria-selected must stay correct as an ongoing state, not just at the
+# moment of selection (mirroring why the CSS `:has()` selector is itself
+# continuously reactive, not a one-time style). `childList: true` also
+# covers Refresh replacing the table's rows wholesale. The target table does
+# not exist when this <script> parses (Gradio's client mounts
+# asynchronously), so the same bounded-polling-then-attach pattern as
+# _LIVE_REGION_SETUP_JS above is used: retry briefly, then either attach the
+# observer (running one initial sync so every row carries an explicit
+# aria-selected="false"/"true" from the start, not just after the first
+# mutation) or give up silently if the table is never found.
+_SELECTION_ARIA_SYNC_JS = """
+<script>
+(function () {
+  function syncSelectedRow(table) {
+    var rows = table.querySelectorAll('tr[slot="tbody"]');
+    rows.forEach(function (row) {
+      var isSelected = !!row.querySelector("td.focus");
+      row.setAttribute("aria-selected", isSelected ? "true" : "false");
+    });
+  }
+  function findInteractiveTable() {
+    // .aara-decisions-table contains two <table> elements: Gradio's own
+    // hidden column-width-measurement table (zero tr[slot="tbody"] rows)
+    // and the real, virtualized, interactive table the rows above are
+    // documented against -- .querySelector() alone would silently bind to
+    // whichever renders first in DOM order (the empty one), so every
+    // candidate is checked for a real data row instead of trusting order.
+    var tables = document.querySelectorAll(".aara-decisions-table table");
+    for (var i = 0; i < tables.length; i++) {
+      if (tables[i].querySelector('tr[slot="tbody"]')) {
+        return tables[i];
+      }
+    }
+    return null;
+  }
+  var attempts = 0;
+  var maxAttempts = 100;
+  var intervalId = setInterval(function () {
+    attempts += 1;
+    var table = findInteractiveTable();
+    if (table) {
+      clearInterval(intervalId);
+      syncSelectedRow(table);
+      var observer = new MutationObserver(function () {
+        syncSelectedRow(table);
+      });
+      observer.observe(table, {
+        attributes: true, attributeFilter: ["class"], childList: true, subtree: true,
+      });
+      return;
+    }
+    if (attempts >= maxAttempts) {
+      clearInterval(intervalId);
+    }
+  }, 50);
+})();
+</script>
+"""
 
 _SHELL_IDENTITY_HTML = (
     f'<img class="aara-shell-logo" src="{_load_shell_logo_data_uri()}" alt="AARA" />'
@@ -490,13 +622,22 @@ class DecisionCenterUI:
     def build(self) -> gr.Blocks:
         with gr.Blocks(
             title="AARA Trading Intelligence — Decision Center", css=CSS,
-            head=_KEYBOARD_SELECTION_BRIDGE_JS,
+            head=_KEYBOARD_SELECTION_BRIDGE_JS + _LIVE_REGION_SETUP_JS + _SELECTION_ARIA_SYNC_JS,
         ) as demo:
             gr.HTML(_SHELL_IDENTITY_HTML, elem_classes=["aara-shell-header"])
             gr.HTML(_SHELL_NAV_HTML, elem_classes=["aara-shell-nav"])
 
             gr.HTML(_PAGE_HEADER_HTML, elem_classes=["aara-page-header"])
             gr.HTML(_ILLUSTRATIVE_DATA_HTML)
+            # P1 accessibility slice: visually hidden, screen-reader-only
+            # live region -- see _LIVE_REGION_SETUP_JS above for how
+            # aria-live/aria-atomic/role get attached to this element's
+            # stable host, and _announce_screen/_announce_row_select below
+            # for what populates it. Empty initial value; never rendered
+            # with visible content of its own.
+            live_announcer = gr.HTML(
+                value="", elem_id=_LIVE_ANNOUNCER_ELEM_ID, elem_classes=["aara-sr-only"],
+            )
 
             with gr.Row(elem_classes=["aara-layout-row"]):
                 with gr.Column(scale=3, min_width=380, elem_classes=["aara-list-column"]):
@@ -603,6 +744,18 @@ class DecisionCenterUI:
                 outputs=[selected_decision_id] + detail_outputs,
             )
 
+            # P1 accessibility slice: independent listeners on the same
+            # three triggers above, targeting only live_announcer -- the
+            # three listeners above, and their own outputs, are unchanged.
+            demo.load(fn=self._announce_screen, inputs=None, outputs=[live_announcer])
+            refresh_button.click(
+                fn=self._announce_screen, inputs=[selected_decision_id],
+                outputs=[live_announcer],
+            )
+            list_output.select(
+                fn=self._announce_row_select, inputs=None, outputs=[live_announcer],
+            )
+
         return demo
 
     def _render_screen(
@@ -651,6 +804,42 @@ class DecisionCenterUI:
             return (None,) + self._empty_detail()
         decision_id = evt.row_value[0]
         return (decision_id,) + self._render_detail(decision_id)
+
+    def _announce_screen(self, selected_id: Optional[str] = None) -> str:
+        """P1 accessibility slice: populates live_announcer for both
+        demo.load() and refresh_button.click() (Option 1 -- shared wording,
+        see the approved proposal). A second, independent listener on each
+        trigger (see build()) -- never touches _render_screen()'s own return
+        shape or its screen_outputs. selected_id is accepted, unused, only
+        because refresh_button.click() wires this fn with
+        inputs=[selected_decision_id] (Gradio calls fn with one positional
+        argument per declared input); demo.load() wires inputs=None, calling
+        this with zero arguments, covered by the default.
+
+        Reuses _newest_decision_id()'s own already-accepted duplicate-fetch
+        pattern (see that method's docstring) rather than inventing a new
+        one or touching controller.py/screen.py: a second
+        load_decisions() call, independent of _render_screen()'s own via
+        load_screen()."""
+        count = len(self._controller.load_decisions(self._decision_ids).decisions)
+        noun = "decision" if count == 1 else "decisions"
+        return f"Decision Center updated. Showing {count} {noun}."
+
+    @staticmethod
+    def _announce_row_select(evt: gr.SelectData) -> str:
+        """P1 accessibility slice: populates live_announcer for
+        list_output.select() -- a second, independent listener (see
+        build()), never touching _on_row_select()'s own return shape or
+        detail_outputs. Derived entirely from evt.row_value (the same event
+        _on_row_select already receives for this identical trigger) --
+        row_value[1] is the Symbol column (_LIST_HEADERS) already rendered
+        in the clicked row, so no additional controller call is made. Empty
+        string on deselection/no-row, matching _on_row_select's own guard --
+        nothing to announce when nothing was selected."""
+        if not evt.selected or not evt.row_value:
+            return ""
+        symbol = evt.row_value[1]
+        return f"Decision selected: {symbol}."
 
     @staticmethod
     def _format_list_rows(list_area: DecisionListArea) -> List[List[str]]:

@@ -24,11 +24,13 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _ILLUSTRATIVE_DATA_BODY,
     _ILLUSTRATIVE_DATA_HTML,
     _ILLUSTRATIVE_DATA_TITLE,
+    _LIVE_ANNOUNCER_ELEM_ID,
     _NAV_COMING_SOON_BADGE_HTML,
     _NAV_COMING_SOON_LABEL,
     _RISK_CONTEXT_BODY,
     _RISK_CONTEXT_HTML,
     _RISK_CONTEXT_TITLE,
+    _SELECTION_ARIA_SYNC_JS,
     _SHELL_NAV_HTML,
     _WHY_RATIONALE_BODY,
     _WHY_RATIONALE_HTML,
@@ -1387,3 +1389,137 @@ def test_illustrative_data_disclosure_block_is_present_in_the_built_layout():
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
     assert _ILLUSTRATIVE_DATA_HTML in html_values
+
+
+def test_announce_screen_wording_for_zero_decisions():
+    screen = DecisionCenterScreen(
+        list_area=DecisionListArea(decisions=[]), detail_area=DecisionDetailArea(decision=None),
+    )
+    controller = _FakeController(screen=screen)
+    ui = DecisionCenterUI(controller, [])
+
+    assert ui._announce_screen() == "Decision Center updated. Showing 0 decisions."
+
+
+def test_announce_screen_wording_for_one_decision_is_singular():
+    view = _make_view()
+    screen = DecisionCenterScreen(
+        list_area=DecisionListArea(decisions=[view]), detail_area=DecisionDetailArea(decision=view),
+    )
+    controller = _FakeController(screen=screen)
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    assert ui._announce_screen() == "Decision Center updated. Showing 1 decision."
+
+
+def test_announce_screen_wording_for_multiple_decisions_is_plural():
+    views = [_make_view(decision_id="dec-001"), _make_view(decision_id="dec-002")]
+    screen = DecisionCenterScreen(
+        list_area=DecisionListArea(decisions=views), detail_area=DecisionDetailArea(decision=None),
+    )
+    controller = _FakeController(screen=screen)
+    ui = DecisionCenterUI(controller, ["dec-001", "dec-002"])
+
+    assert ui._announce_screen() == "Decision Center updated. Showing 2 decisions."
+
+
+def test_announce_screen_ignores_its_selected_id_argument():
+    """refresh_button.click() wires this fn with inputs=[selected_decision_id]
+    (see build()) -- confirms passing a value there doesn't change the
+    wording, since the announcement only reports a count."""
+    views = [_make_view(decision_id="dec-001"), _make_view(decision_id="dec-002")]
+    screen = DecisionCenterScreen(
+        list_area=DecisionListArea(decisions=views), detail_area=DecisionDetailArea(decision=None),
+    )
+    controller = _FakeController(screen=screen)
+    ui = DecisionCenterUI(controller, ["dec-001", "dec-002"])
+
+    assert ui._announce_screen("dec-002") == "Decision Center updated. Showing 2 decisions."
+
+
+def test_announce_row_select_wording():
+    row = ["dec-002", "MSFT", "HOLD", "Decision Created", "82%"]
+
+    assert DecisionCenterUI._announce_row_select(
+        _make_select_event(row)
+    ) == "Decision selected: MSFT."
+
+
+def test_announce_row_select_is_empty_on_deselection():
+    result = DecisionCenterUI._announce_row_select(
+        _make_select_event(["dec-001"], selected=False)
+    )
+
+    assert result == ""
+
+
+def test_announce_row_select_is_empty_on_missing_row_value():
+    result = DecisionCenterUI._announce_row_select(_make_select_event(None))
+
+    assert result == ""
+
+
+def test_announce_row_select_does_not_call_the_controller():
+    """Derived entirely from evt.row_value -- no additional controller
+    lookup, per the approved proposal."""
+    controller = _FakeController()
+    row = ["dec-002", "MSFT", "HOLD", "Decision Created", "82%"]
+
+    DecisionCenterUI._announce_row_select(_make_select_event(row))
+
+    assert controller.load_decision_detail_calls == []
+    assert controller.load_decisions_calls == []
+
+
+def test_live_announcer_block_is_present_in_the_built_layout_with_empty_initial_value():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    live_announcer_blocks = [
+        block for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and getattr(block, "elem_id", None) == _LIVE_ANNOUNCER_ELEM_ID
+    ]
+    assert len(live_announcer_blocks) == 1
+    assert live_announcer_blocks[0].value == ""
+    assert "aara-sr-only" in live_announcer_blocks[0].elem_classes
+
+
+def test_selection_aria_sync_script_is_present_in_built_layout():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    assert _SELECTION_ARIA_SYNC_JS in demo.head
+
+
+def test_selection_aria_sync_script_targets_the_documented_dom_contract():
+    """Same DOM contract V3.1's keyboard bridge already depends on
+    (.aara-decisions-table anchor; a real data row is tr[slot="tbody"];
+    Gradio's own click handler marks the selected cell with a td.focus
+    class) -- asserted here as a contract check so a future edit that
+    silently breaks it fails a test instead of failing only in the
+    browser."""
+    assert "aara-decisions-table" in _SELECTION_ARIA_SYNC_JS
+    assert 'tr[slot="tbody"]' in _SELECTION_ARIA_SYNC_JS
+    assert "td.focus" in _SELECTION_ARIA_SYNC_JS
+
+
+def test_selection_aria_sync_script_discovers_the_table_containing_real_rows():
+    """Regression check: .aara-decisions-table contains two <table>
+    elements -- Gradio's own hidden column-width-measurement table (zero
+    tr[slot="tbody"] rows) and the real, interactive, virtualized table --
+    in unspecified DOM order. A live-verified defect found the script
+    using a single document.querySelector(".aara-decisions-table table"),
+    which silently bound to whichever table happened to render first
+    (the empty one), so aria-selected was never applied to any real row.
+    The fix enumerates every matching table via querySelectorAll and picks
+    the one containing a real tr[slot="tbody"] row -- asserted here as a
+    source-level contract so a future edit can't silently reintroduce the
+    single-match .querySelector(".aara-decisions-table table") call."""
+    assert "document.querySelector(\".aara-decisions-table table\")" not in _SELECTION_ARIA_SYNC_JS
+    assert "querySelectorAll(\".aara-decisions-table table\")" in _SELECTION_ARIA_SYNC_JS
+    assert 'querySelector(\'tr[slot="tbody"]\')' in _SELECTION_ARIA_SYNC_JS
+    assert "aria-selected" in _SELECTION_ARIA_SYNC_JS
