@@ -57,6 +57,14 @@ def test_head_includes_decision_centers_accessibility_bridges():
     assert "aara-decisions-table" in app.head
 
 
+def test_head_includes_the_portfolio_nav_link_bridge():
+    app = build_trading_intelligence_app()
+
+    assert "aara-shell-nav-list" in app.head
+    assert "Portfolio Intelligence" in app.head
+    assert 'role", "link"' in app.head
+
+
 def test_decision_center_content_is_present_in_the_composed_app():
     app = build_trading_intelligence_app()
 

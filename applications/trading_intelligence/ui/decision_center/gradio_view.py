@@ -523,7 +523,14 @@ _NAV_COMING_SOON_BADGE_HTML = f'<span class="aara-nav-badge">{_NAV_COMING_SOON_L
 _SHELL_NAV_HTML = (
     '<nav class="aara-shell-nav-list">'
     '<span class="nav-item active">Decision Center</span>'
-    f'<span class="nav-item muted">Portfolio Intelligence{_NAV_COMING_SOON_BADGE_HTML}</span>'
+    # Portfolio Intelligence shipped as a real screen (reachable via the
+    # gr.TabbedInterface composition in bootstrap.py's
+    # build_trading_intelligence_app(), one level above this module) --
+    # "Coming Soon" is no longer true, so the badge and muted styling are
+    # dropped. This module still never imports or references the outer
+    # Tabs/TabbedInterface (self-contained screens, unchanged); this is a
+    # copy fix only, not a real link to the other tab.
+    '<span class="nav-item">Portfolio Intelligence</span>'
     f'<span class="nav-item muted">Risk Intelligence{_NAV_COMING_SOON_BADGE_HTML}</span>'
     "</nav>"
 )

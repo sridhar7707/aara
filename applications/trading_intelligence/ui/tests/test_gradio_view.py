@@ -1377,21 +1377,36 @@ def test_why_rationale_block_is_present_in_the_built_layout():
 
 
 def test_nav_coming_soon_badge_is_the_exact_fixed_label():
-    """The two muted nav items (Portfolio Intelligence, Risk Intelligence)
-    each carry a fixed 'Coming Soon' badge -- no per-decision or
-    per-session variation, matching _WHY_RATIONALE_HTML's own
-    fixed-text-lock rationale."""
+    """The one remaining muted nav item (Risk Intelligence) carries a fixed
+    'Coming Soon' badge -- no per-decision or per-session variation,
+    matching _WHY_RATIONALE_HTML's own fixed-text-lock rationale.
+    Portfolio Intelligence no longer carries this badge -- it shipped as a
+    real screen, reachable via the gr.TabbedInterface composition one
+    level above this module (bootstrap.py's
+    build_trading_intelligence_app())."""
     assert _NAV_COMING_SOON_LABEL == "Coming Soon"
     assert _NAV_COMING_SOON_BADGE_HTML == '<span class="aara-nav-badge">Coming Soon</span>'
 
 
-def test_shell_nav_has_exactly_one_active_item_and_two_muted_coming_soon_items():
+def test_shell_nav_has_exactly_one_active_item_and_one_muted_coming_soon_item():
     assert _SHELL_NAV_HTML.count('class="nav-item active"') == 1
-    assert _SHELL_NAV_HTML.count('class="nav-item muted"') == 2
-    assert _SHELL_NAV_HTML.count(_NAV_COMING_SOON_BADGE_HTML) == 2
+    assert _SHELL_NAV_HTML.count('class="nav-item muted"') == 1
+    assert _SHELL_NAV_HTML.count(_NAV_COMING_SOON_BADGE_HTML) == 1
     assert "Decision Center" in _SHELL_NAV_HTML
     assert "Portfolio Intelligence" in _SHELL_NAV_HTML
     assert "Risk Intelligence" in _SHELL_NAV_HTML
+
+
+def test_shell_nav_portfolio_intelligence_is_no_longer_coming_soon():
+    """Portfolio Intelligence shipped (ui/portfolio_intelligence/, wired via
+    gr.TabbedInterface in bootstrap.py) -- its nav item must no longer
+    claim otherwise. Risk Intelligence remains unimplemented and must keep
+    its own badge, unaffected by this change."""
+    assert '<span class="nav-item">Portfolio Intelligence</span>' in _SHELL_NAV_HTML
+    assert f'Portfolio Intelligence{_NAV_COMING_SOON_BADGE_HTML}' not in _SHELL_NAV_HTML
+    assert f'<span class="nav-item muted">Risk Intelligence{_NAV_COMING_SOON_BADGE_HTML}</span>' in (
+        _SHELL_NAV_HTML
+    )
 
 
 def test_shell_nav_muted_items_remain_non_interactive():

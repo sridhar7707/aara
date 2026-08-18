@@ -422,6 +422,71 @@ _TAB_WARNING_SUPPRESSION_JS = """
 </script>
 """
 
+# Makes Decision Center's own inner shell-nav label ("Portfolio Intelligence",
+# a plain, non-interactive <span> per ui/decision_center/gradio_view.py's
+# _SHELL_NAV_HTML -- unchanged, still a static gr.HTML block Decision Center
+# renders once at load) actually navigate to the real Portfolio Intelligence
+# tab this composition adds. Decision Center's own file stays exactly as
+# before: unaware of tabs, no new class/attribute added to _SHELL_NAV_HTML,
+# no behavior change to that module. This bridge finds the label purely by
+# its own already-fixed text content ("Portfolio Intelligence") within
+# .aara-shell-nav-list .nav-item, then forwards a click (or Enter/Space) to
+# the real gr.TabbedInterface tab button, found the same way. Bounded
+# polling (find once, then stop) is the same pattern Decision Center's own
+# accessibility bridges already use for exactly the same reason: the label
+# doesn't exist yet when this <script> parses, since Gradio's client mounts
+# asynchronously.
+_PORTFOLIO_NAV_LINK_JS = """
+<script>
+(function () {
+  var LABEL = "Portfolio Intelligence";
+
+  function findInnerNavLabel() {
+    return Array.from(document.querySelectorAll(".aara-shell-nav-list .nav-item")).find(
+      function (span) { return span.textContent.trim() === LABEL; }
+    );
+  }
+
+  function findRealPortfolioTab() {
+    return Array.from(document.querySelectorAll('button[role="tab"]')).find(
+      function (btn) { return btn.textContent.trim() === LABEL; }
+    );
+  }
+
+  function activatePortfolioTab() {
+    var tabButton = findRealPortfolioTab();
+    if (tabButton) {
+      tabButton.click();
+    }
+  }
+
+  var attempts = 0;
+  var maxAttempts = 100;
+  var intervalId = setInterval(function () {
+    attempts += 1;
+    var label = findInnerNavLabel();
+    if (label) {
+      clearInterval(intervalId);
+      label.style.cursor = "pointer";
+      label.tabIndex = 0;
+      label.setAttribute("role", "link");
+      label.addEventListener("click", activatePortfolioTab);
+      label.addEventListener("keydown", function (event) {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          activatePortfolioTab();
+        }
+      });
+      return;
+    }
+    if (attempts >= maxAttempts) {
+      clearInterval(intervalId);
+    }
+  }, 50);
+})();
+</script>
+"""
+
 
 def build_trading_intelligence_app() -> gr.Blocks:
     """Composes every Trading Intelligence screen into one tabbed app via
@@ -447,7 +512,8 @@ def build_trading_intelligence_app() -> gr.Blocks:
     )
     merged_head = "\n".join(
         head for head in (
-            decision_blocks.head, portfolio_blocks.head, _TAB_WARNING_SUPPRESSION_JS,
+            decision_blocks.head, portfolio_blocks.head,
+            _TAB_WARNING_SUPPRESSION_JS, _PORTFOLIO_NAV_LINK_JS,
         )
         if head
     )
