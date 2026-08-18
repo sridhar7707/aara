@@ -77,6 +77,13 @@ CSS = """
   --color-navy-primary: #0B1F3A;
   --color-emerald-secondary: #176B4D;
   --color-gold-accent: #C8A45D;
+  /* WCAG contrast fix (live audit): #C8A45D is ~2.2:1 against the
+     surrounding surfaces it sits on as a thin boundary (focus ring, active
+     underline, active lifecycle dot) -- below the 3:1 UI-component floor.
+     Dedicated darker gold for those three boundary roles only; the base
+     --color-gold-accent (used for larger/text contexts that already pass)
+     is untouched. */
+  --color-gold-accent-boundary: #A8823D;
   --color-background-warm: #F8F7F3;
   --color-surface-white: #FFFFFF;
   --color-text-primary: #1A1A1A;
@@ -101,7 +108,7 @@ CSS = """
   /* Lifecycle stage tokens (DecisionState) -- our own vocabulary, not
      brand's --status-* (see module docstring). */
   --lifecycle-future: var(--color-border-subtle);
-  --lifecycle-active: var(--color-gold-accent);
+  --lifecycle-active: var(--color-gold-accent-boundary);
   --lifecycle-complete: var(--color-emerald-secondary);
 
   /* Trade action tokens (BUY/SELL/HOLD) -- quiet tints, never red/green. */
@@ -110,7 +117,14 @@ CSS = """
   --action-sell-bg: rgba(11, 31, 58, 0.08);
   --action-sell-fg: var(--color-navy-primary);
   --action-hold-bg: rgba(102, 102, 102, 0.10);
-  --action-hold-fg: var(--color-text-secondary);
+  /* WCAG contrast fix (live audit): aliasing --color-text-secondary here
+     fails 4.5:1 in the two contexts that stack --action-hold-bg's own tint
+     on top of another translucent surface (selected decision-list row, and
+     the neutral record-card pill nested inside its own tinted card) --
+     everywhere else the alias already passed. Dedicated darker value scoped
+     to this token only; --color-text-secondary itself, and its other
+     already-passing uses, are untouched. */
+  --action-hold-fg: #5D5D5D;
 }
 
 /* ==========================================================================
@@ -199,11 +213,10 @@ footer { display: none !important; }
 }
 .aara-shell-nav-list .nav-item.active {
   color: var(--color-navy-primary);
-  border-bottom-color: var(--color-gold-accent);
+  border-bottom-color: var(--color-gold-accent-boundary);
 }
 .aara-shell-nav-list .nav-item.muted {
   color: var(--color-text-secondary);
-  opacity: 0.55;
   cursor: default;
 }
 /* Coming Soon badge: no separate typographic treatment (uppercase/
@@ -673,7 +686,7 @@ footer { display: none !important; }
    exists, not a verdict. Positive/negative: an approval's real verdict. */
 .aara-record-card-state--neutral {
   background: var(--action-hold-bg);
-  color: var(--color-text-secondary);
+  color: var(--action-hold-fg);
 }
 .aara-record-card-state--positive {
   background: var(--action-buy-bg);
@@ -753,7 +766,28 @@ footer { display: none !important; }
    obvious, consistent focus ring. */
 .gradio-container button:focus-visible,
 .gradio-container [tabindex]:focus-visible {
-  outline: 2px solid var(--color-gold-accent) !important;
+  outline: 2px solid var(--color-gold-accent-boundary) !important;
   outline-offset: 2px;
+}
+
+/* Screen-reader-only utility (P1 accessibility slice): visually hidden but
+   still present in the accessibility tree -- the standard clip+1px
+   technique (matches WAI-ARIA Authoring Practices / Bootstrap's own
+   .sr-only), not display:none or visibility:hidden, both of which remove
+   an element from the accessibility tree entirely and would defeat the
+   live-region announcement this class exists for
+   (gradio_view.py's live_announcer). No layout impact: absolutely
+   positioned and 1px square, so it never affects the flow of surrounding
+   visible content. */
+.aara-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 """
