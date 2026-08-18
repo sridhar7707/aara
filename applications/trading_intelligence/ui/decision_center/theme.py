@@ -770,6 +770,55 @@ footer { display: none !important; }
   outline-offset: 2px;
 }
 
+/* ==========================================================================
+   Loading state (MVP Loading States slice). Gradio's own default pending/
+   processing treatment -- not a custom spinner or skeleton system -- is
+   kept as the mechanism; only its stock colors/typography are restyled to
+   the AARA palette instead of Gradio's default gray/accent-orange. Class
+   names (.eta-bar, .generating, .meta-text, .progress-text) are Gradio's
+   own, confirmed against the installed gradio==4.44.1 package's compiled
+   CSS (site-packages/gradio/templates/frontend/assets/Index-*.css) -- not
+   invented here. Gradio scopes its own rules with two chained
+   svelte-hash classes (e.g. .generating.svelte-au1olv.svelte-au1olv),
+   giving them higher specificity than a plain single-class selector here
+   would have without !important -- the same override technique already
+   used throughout this file (framework chrome removal, table overflow,
+   selection ring), not a new pattern.
+   .eta-bar: the translucent sweep that fills a pending component left to
+   right; recolored from Gradio's default --background-fill-secondary gray
+   to the same low-alpha navy tint already used for the Approval record
+   card surface (rgba(11, 31, 58, 0.05), reused verbatim -- no new color).
+   .generating: the pulsing border Gradio draws around a component while
+   its callback is in flight; recolored from Gradio's default orange
+   accent to --color-gold-accent-boundary, the same WCAG-safe gold already
+   used for focus rings and the active lifecycle-track dot -- consistent
+   with, not a new addition to, this file's boundary-role gold. The pulse
+   animation itself is Gradio's own and is left running (not a red/green
+   blinking ticker -- FORBIDDEN_UI_PATTERNS.md's actual prohibition -- so
+   nothing here conflicts with it).
+   .meta-text / .progress-text: the small "processing | X.Xs" badge Gradio
+   overlays on a pending component; restyled to the same card surface,
+   border, and monospace data font already used elsewhere in this sheet
+   (--color-surface-white, --color-border-subtle, --font-data) instead of
+   Gradio's plain default text-on-transparent, so it reads as part of this
+   theme rather than as leftover framework chrome. */
+.eta-bar {
+  background: rgba(11, 31, 58, 0.05) !important;
+  opacity: 1 !important;
+}
+.generating {
+  border-color: var(--color-gold-accent-boundary) !important;
+  background: transparent !important;
+}
+.meta-text,
+.progress-text {
+  background: var(--color-surface-white) !important;
+  color: var(--color-text-secondary) !important;
+  font-family: var(--font-data) !important;
+  border: 1px solid var(--color-border-subtle) !important;
+  border-radius: var(--radius-badge) !important;
+}
+
 /* Screen-reader-only utility (P1 accessibility slice): visually hidden but
    still present in the accessibility tree -- the standard clip+1px
    technique (matches WAI-ARIA Authoring Practices / Bootstrap's own

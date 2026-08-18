@@ -30,6 +30,8 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _RISK_CONTEXT_BODY,
     _RISK_CONTEXT_HTML,
     _RISK_CONTEXT_TITLE,
+    _SELECT_DECISION_HTML,
+    _SELECT_DECISION_MESSAGE,
     _SELECTION_ARIA_SYNC_JS,
     _SHELL_NAV_HTML,
     _WHY_RATIONALE_BODY,
@@ -43,6 +45,7 @@ from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionListArea,
     ReadStatus,
 )
+from applications.trading_intelligence.ui.decision_center.theme import CSS
 
 
 def _make_select_event(row_value, selected=True):
@@ -213,6 +216,57 @@ def test_refresh_after_row_select_preserves_the_selected_decision():
     assert controller.load_screen_calls == [(["dec-001", "dec-002"], "dec-002")]
 
 
+def test_disable_refresh_button_returns_a_not_interactive_update():
+    result = DecisionCenterUI._disable_refresh_button()
+
+    assert result == {"interactive": False, "__type__": "update"}
+
+
+def test_enable_refresh_button_returns_an_interactive_update():
+    result = DecisionCenterUI._enable_refresh_button()
+
+    assert result == {"interactive": True, "__type__": "update"}
+
+
+def test_refresh_button_click_chain_disables_then_renders_then_reenables():
+    """MVP Loading States slice: double-submit guard. Proves the actual
+    click().then().then() wiring in build() -- not just that the two helper
+    methods above exist in isolation, which a regression leaving them
+    defined but un-wired would still pass. Refresh's own render step must
+    still be _render_screen itself, unchanged in fn/inputs/outputs -- only
+    wrapped by the disable/enable steps."""
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    refresh_button = next(
+        block for block in demo.blocks.values()
+        if isinstance(block, gr.Button) and "aara-refresh-button" in (block.elem_classes or [])
+    )
+    refresh_button_id = next(
+        block_id for block_id, block in demo.blocks.items() if block is refresh_button
+    )
+    disable_dep = next(
+        dep for dep in demo.config["dependencies"]
+        if demo.fns[dep["id"]].fn is DecisionCenterUI._disable_refresh_button
+    )
+    enable_dep = next(
+        dep for dep in demo.config["dependencies"]
+        if demo.fns[dep["id"]].fn is DecisionCenterUI._enable_refresh_button
+    )
+    render_dep = next(
+        dep for dep in demo.config["dependencies"]
+        if dep.get("trigger_after") == disable_dep["id"]
+    )
+
+    assert disable_dep["targets"] == [(refresh_button_id, "click")]
+    assert refresh_button_id in disable_dep["outputs"]
+    assert demo.fns[render_dep["id"]].fn == ui._render_screen
+    assert enable_dep["trigger_after"] == render_dep["id"]
+    assert refresh_button_id in enable_dep["outputs"]
+
+
 def test_render_screen_maps_list_rows_and_detail_fields():
     view = _make_view(status=DecisionState.APPROVAL_RECORDED, confidence=0.91)
     screen = DecisionCenterScreen(
@@ -269,11 +323,39 @@ def test_render_screen_handles_empty_decision_list():
     assert conviction == "-"
     assert updated == "-"
     assert status == "-"
-    assert why_html == ""
-    assert evidence_html == ""
-    assert governance_html == ""
-    assert approval_html == ""
-    assert audit_html == ""
+    assert why_html == _SELECT_DECISION_HTML
+    assert evidence_html == _SELECT_DECISION_HTML
+    assert governance_html == _SELECT_DECISION_HTML
+    assert approval_html == _SELECT_DECISION_HTML
+    assert audit_html == _SELECT_DECISION_HTML
+
+
+def test_select_decision_message_is_the_exact_fixed_text():
+    """MVP Loading States slice: _empty_detail()'s why/evidence/governance/
+    approval/audit slots must show an explicit, decision-independent
+    'select a decision' cue instead of rendering as literal blank space --
+    reuses the same aara-empty-message class every other 'this section has
+    no records' case in this file already uses (no new CSS class)."""
+    assert _SELECT_DECISION_MESSAGE == "Select a decision to view details"
+    assert _SELECT_DECISION_HTML == (
+        f'<div class="aara-empty-message">{_SELECT_DECISION_MESSAGE}</div>'
+    )
+
+
+def test_missing_and_error_detail_states_are_unaffected_by_the_select_message():
+    """Scope guard: the MVP Loading States slice only touches _empty_detail()
+    (nothing selected yet) -- _missing_decision_detail() (a real lookup
+    miss) and _decision_error_detail() (a read failure) must keep rendering
+    their own distinct header message and blank sub-sections, unchanged."""
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=None))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, why_html, evidence_html, governance_html, approval_html, audit_html = ui._render_detail(
+        "missing-decision"
+    )
+
+    assert _SELECT_DECISION_MESSAGE not in why_html
+    assert why_html == "" == evidence_html == governance_html == approval_html == audit_html
 
 
 def test_render_detail_calls_controller_with_the_given_decision_id():
@@ -318,7 +400,11 @@ def test_render_detail_returns_blank_state_for_blank_decision_id():
 
     result = ui._render_detail("")
 
-    assert result == ("", "-", "-", "-", "-", "", "", "", "", "")
+    assert result == (
+        "", "-", "-", "-", "-",
+        _SELECT_DECISION_HTML, _SELECT_DECISION_HTML, _SELECT_DECISION_HTML,
+        _SELECT_DECISION_HTML, _SELECT_DECISION_HTML,
+    )
     assert controller.load_decision_detail_calls == []
 
 
@@ -511,7 +597,11 @@ def test_row_select_handles_deselection_without_crashing():
 
     result = ui._on_row_select(_make_select_event(["dec-001"], selected=False))
 
-    assert result == (None, "", "-", "-", "-", "-", "", "", "", "", "")
+    assert result == (
+        None, "", "-", "-", "-", "-",
+        _SELECT_DECISION_HTML, _SELECT_DECISION_HTML, _SELECT_DECISION_HTML,
+        _SELECT_DECISION_HTML, _SELECT_DECISION_HTML,
+    )
     assert controller.load_decision_detail_calls == []
 
 
@@ -521,7 +611,11 @@ def test_row_select_handles_missing_row_value_without_crashing():
 
     result = ui._on_row_select(_make_select_event(None))
 
-    assert result == (None, "", "-", "-", "-", "-", "", "", "", "", "")
+    assert result == (
+        None, "", "-", "-", "-", "-",
+        _SELECT_DECISION_HTML, _SELECT_DECISION_HTML, _SELECT_DECISION_HTML,
+        _SELECT_DECISION_HTML, _SELECT_DECISION_HTML,
+    )
     assert controller.load_decision_detail_calls == []
 
 
@@ -1523,3 +1617,26 @@ def test_selection_aria_sync_script_discovers_the_table_containing_real_rows():
     assert "querySelectorAll(\".aara-decisions-table table\")" in _SELECTION_ARIA_SYNC_JS
     assert 'querySelector(\'tr[slot="tbody"]\')' in _SELECTION_ARIA_SYNC_JS
     assert "aria-selected" in _SELECTION_ARIA_SYNC_JS
+
+
+def test_theme_restyles_gradios_own_pending_state_classes():
+    """MVP Loading States slice: theme.py must restyle Gradio's own
+    pending/processing classes (.eta-bar sweep, .generating pulse border,
+    .meta-text/.progress-text badge -- confirmed real, if svelte-scoped,
+    class names against the installed gradio==4.44.1 package's compiled
+    CSS) to the AARA palette, rather than leaving Gradio's stock
+    gray/accent-orange defaults unstyled."""
+    for selector in (".eta-bar", ".generating", ".meta-text", ".progress-text"):
+        assert selector in CSS
+
+
+def test_theme_does_not_introduce_a_custom_spinner_or_skeleton_system():
+    """The task is explicit: recolor Gradio's existing pending mechanism,
+    do not build a new one. No new aara-* spinner/skeleton component class,
+    no @keyframes block, should appear anywhere in this stylesheet --
+    checked as class-name/rule substrings, not a bare word search, since
+    this file's own comments legitimately discuss "spinner"/"skeleton" as
+    the thing deliberately not built."""
+    assert "aara-spinner" not in CSS
+    assert "aara-skeleton" not in CSS
+    assert "@keyframes" not in CSS

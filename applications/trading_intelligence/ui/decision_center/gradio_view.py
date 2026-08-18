@@ -538,6 +538,7 @@ _MISSING_VALUE = "-"
 
 _DECISION_READ_ERROR_MESSAGE = "Unable to load this decision."
 _DECISION_NOT_FOUND_MESSAGE = "No decision found for this ID."
+_SELECT_DECISION_MESSAGE = "Select a decision to view details"
 _EVIDENCE_EMPTY_MESSAGE = "No evidence attached yet."
 _GOVERNANCE_EMPTY_MESSAGE = "No governance evaluation recorded."
 _APPROVAL_EMPTY_MESSAGE = "No approval recorded."
@@ -546,6 +547,15 @@ _EVIDENCE_ERROR_MESSAGE = "Evidence is temporarily unavailable."
 _GOVERNANCE_ERROR_MESSAGE = "Governance information is temporarily unavailable."
 _APPROVAL_ERROR_MESSAGE = "Approval information is temporarily unavailable."
 _AUDIT_ERROR_MESSAGE = "Audit trail is temporarily unavailable."
+
+# MVP Loading States slice: _empty_detail()'s prior "" for why/evidence/
+# governance/approval/audit rendered as literal blank space under each
+# section heading -- no cue that the blank is because nothing is selected
+# yet (initial zero-decisions load, or a deselect) rather than a rendering
+# gap. Reuses the same aara-empty-message class every other "this section
+# has no records" case in this file already uses (e.g. _EVIDENCE_EMPTY_MESSAGE
+# via _record_list_html) -- no new CSS class, no new component.
+_SELECT_DECISION_HTML = f'<div class="aara-empty-message">{html.escape(_SELECT_DECISION_MESSAGE)}</div>'
 
 # Static, not decision-dependent -- see module docstring's V4 Decision Brief
 # and Detail Panel Polish pass notes. Rendered verbatim for every decision
@@ -734,8 +744,21 @@ class DecisionCenterUI:
             # user had open instead of always falling back to the first row.
             selected_decision_id = gr.State(None)
 
+            # MVP Loading States slice: double-submit guard. Refresh's own
+            # render call is unchanged (_render_screen, same inputs/outputs)
+            # -- only wrapped in a .then() chain that disables the button
+            # immediately on click and re-enables it once _render_screen
+            # returns, so a second click while a render is already in
+            # flight cannot dispatch a second concurrent call. The
+            # live-region listener below (refresh_button.click(fn=self.
+            # _announce_screen, ...)) is a separate, independent listener
+            # registration on the same trigger -- untouched by this chain.
             refresh_button.click(
+                fn=self._disable_refresh_button, inputs=None, outputs=[refresh_button],
+            ).then(
                 fn=self._render_screen, inputs=[selected_decision_id], outputs=screen_outputs,
+            ).then(
+                fn=self._enable_refresh_button, inputs=None, outputs=[refresh_button],
             )
             demo.load(fn=self._render_screen, inputs=None, outputs=screen_outputs)
 
@@ -757,6 +780,21 @@ class DecisionCenterUI:
             )
 
         return demo
+
+    @staticmethod
+    def _disable_refresh_button() -> Dict[str, Any]:
+        """First link in the Refresh double-submit guard chain (see
+        build()) -- returns a Gradio update disabling the button the
+        instant it's clicked, before _render_screen runs."""
+        return gr.update(interactive=False)
+
+    @staticmethod
+    def _enable_refresh_button() -> Dict[str, Any]:
+        """Last link in the Refresh double-submit guard chain (see
+        build()) -- re-enables the button once _render_screen has returned,
+        success or not (a .then() step always runs after its predecessor
+        completes)."""
+        return gr.update(interactive=True)
 
     def _render_screen(
         self, selected_id: Optional[str] = None,
@@ -1265,7 +1303,8 @@ class DecisionCenterUI:
     def _empty_detail() -> _DetailValues:
         return (
             "", _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE,
-            "", "", "", "", "",
+            _SELECT_DECISION_HTML, _SELECT_DECISION_HTML, _SELECT_DECISION_HTML,
+            _SELECT_DECISION_HTML, _SELECT_DECISION_HTML,
         )
 
     @staticmethod
