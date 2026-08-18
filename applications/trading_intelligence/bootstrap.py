@@ -80,6 +80,7 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import Dec
 from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
     PortfolioIntelligenceUI,
 )
+from applications.trading_intelligence.ui.risk_intelligence.gradio_view import RiskIntelligenceUI
 
 
 class _InMemoryLedgerStore(LedgerStore):
@@ -502,25 +503,30 @@ def build_trading_intelligence_app() -> gr.Blocks:
     the one thing this composition step must do that a screen's own
     build() does not.
 
-    Risk Intelligence is intentionally not composed here yet -- Portfolio
-    Intelligence only, per this task's scope."""
+    All three shipped screens are composed here -- Decision Center,
+    Portfolio Intelligence, and Risk Intelligence -- each Blocks object
+    unmodified from its own build()."""
     decision_blocks = build_application().build()
     portfolio_blocks = PortfolioIntelligenceUI().build()
+    risk_blocks = RiskIntelligenceUI().build()
 
     merged_css = "\n".join(
-        css for css in (decision_blocks.css, portfolio_blocks.css, _TABBED_LAYOUT_CSS) if css
+        css for css in (
+            decision_blocks.css, portfolio_blocks.css, risk_blocks.css, _TABBED_LAYOUT_CSS,
+        )
+        if css
     )
     merged_head = "\n".join(
         head for head in (
-            decision_blocks.head, portfolio_blocks.head,
+            decision_blocks.head, portfolio_blocks.head, risk_blocks.head,
             _TAB_WARNING_SUPPRESSION_JS, _PORTFOLIO_NAV_LINK_JS,
         )
         if head
     )
 
     return gr.TabbedInterface(
-        [decision_blocks, portfolio_blocks],
-        ["Decision Center", "Portfolio Intelligence"],
+        [decision_blocks, portfolio_blocks, risk_blocks],
+        ["Decision Center", "Portfolio Intelligence", "Risk Intelligence"],
         title=decision_blocks.title,
         css=merged_css,
         head=merged_head,
