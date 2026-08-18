@@ -204,7 +204,23 @@ def _seed_decisions(engine: SentinelEngine) -> List[str]:
     ))
     engine.attach_evidence("dec-seed-002", Evidence(
         evidence_id="ev-seed-002", evidence_type="NEWS_SENTIMENT", source="newsapi",
-        data={"score": 0.58}, collected_at=evidence_attached_002,
+        data={
+            "score": 0.58,
+            # ADR-036/ADR-037-authorized shape (data["metadata"]): illustrates
+            # the same raw_score/headlines fields the real finbert evidence
+            # record already carries, so the ADR-037 Evidence detail
+            # disclosure has something to render in the seeded demo -- see
+            # ADR-034's own "Negative consequences" section, which names this
+            # exact seed as not yet reflecting that shape.
+            "metadata": {
+                "raw_score": 0.58,
+                "headlines": [
+                    "Microsoft cloud growth steady but guidance mixed",
+                    "Analysts split on MSFT ahead of earnings",
+                ],
+            },
+        },
+        collected_at=evidence_attached_002,
     ))
     decision_ids.append("dec-seed-002")
 
