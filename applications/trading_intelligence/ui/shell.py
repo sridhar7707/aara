@@ -2,9 +2,8 @@
 Intelligence screens that are not Decision Center.
 
 Why this exists: `ui/decision_center/gradio_view.py` already defines its own
-private `_load_shell_logo_data_uri()`/`_SHELL_IDENTITY_HTML`/`_SHELL_NAV_HTML`
-and is the one screen that must stay byte-for-byte unchanged (its own tests
-pin its exact markup). Portfolio Intelligence and Risk Intelligence each
+private `_load_shell_logo_data_uri()`/`_SHELL_IDENTITY_HTML`/`_SHELL_NAV_HTML`.
+Portfolio Intelligence and Risk Intelligence each
 document themselves as not importing `ui/decision_center/` (see their own
 module docstrings and `tests/test_portfolio_intelligence_structure.py` /
 `test_risk_intelligence_structure.py`), so this module -- a sibling of all
@@ -71,12 +70,23 @@ def build_shell_nav_html(active_label: str) -> str:
     which label carries the `nav-item active` class -- Decision Center's own
     copy stays a hardcoded literal marking itself active; this is the
     equivalent for whichever screen calls it marking itself active instead.
+
+    Duplicate-navigation audit (this pass): the composed app's outer
+    gr.TabbedInterface tabs are the real ARIA Tabs pattern already
+    (role="tablist"/"tab"/aria-selected on native Gradio buttons) and are
+    now hidden in the composed app via bootstrap.py's _TABBED_LAYOUT_CSS, so
+    this markup -- the one visible nav row left -- carries that same
+    role="tablist"/"tab"/aria-selected pattern itself instead of the
+    role="link" it used before. bootstrap.py's _INNER_NAV_LINK_JS still finds
+    and wires each item by its text content and forwards clicks/Enter/Space
+    to the (now hidden but still functional) real tab button, unchanged.
     """
     if active_label not in SHELL_NAV_LABELS:
         raise ValueError(f"active_label must be one of {SHELL_NAV_LABELS!r}, got {active_label!r}")
     items = "".join(
-        f'<span class="nav-item active">{label}</span>' if label == active_label
-        else f'<span class="nav-item">{label}</span>'
+        f'<span class="nav-item active" role="tab" aria-selected="true">{label}</span>'
+        if label == active_label
+        else f'<span class="nav-item" role="tab" aria-selected="false">{label}</span>'
         for label in SHELL_NAV_LABELS
     )
-    return f'<nav class="aara-shell-nav-list">{items}</nav>'
+    return f'<nav class="aara-shell-nav-list" role="tablist">{items}</nav>'

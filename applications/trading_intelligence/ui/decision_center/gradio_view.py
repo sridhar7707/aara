@@ -519,8 +519,8 @@ _SHELL_IDENTITY_HTML = (
     "</div>"
 )
 _SHELL_NAV_HTML = (
-    '<nav class="aara-shell-nav-list">'
-    '<span class="nav-item active">Decision Center</span>'
+    '<nav class="aara-shell-nav-list" role="tablist">'
+    '<span class="nav-item active" role="tab" aria-selected="true">Decision Center</span>'
     # Portfolio Intelligence and Risk Intelligence both shipped as real
     # screens (reachable via the gr.TabbedInterface composition in
     # bootstrap.py's build_trading_intelligence_app(), one level above this
@@ -529,8 +529,16 @@ _SHELL_NAV_HTML = (
     # imports or references the outer Tabs/TabbedInterface (self-contained
     # screens, unchanged); this is a copy fix only, not a real link to the
     # other tabs.
-    '<span class="nav-item">Portfolio Intelligence</span>'
-    '<span class="nav-item">Risk Intelligence</span>'
+    #
+    # Duplicate-navigation audit (this pass): the outer gr.TabbedInterface
+    # tabs are now hidden in the composed app (bootstrap.py's
+    # _TABBED_LAYOUT_CSS), leaving this nav as the one visible row -- it now
+    # carries the same role="tablist"/"tab"/aria-selected pattern the outer
+    # tabs already had, via ui/shell.py's build_shell_nav_html("Decision
+    # Center") equivalent (kept as this module's own literal, matching
+    # ui/shell.py's byte-for-byte parity test in ui/tests/test_shell.py).
+    '<span class="nav-item" role="tab" aria-selected="false">Portfolio Intelligence</span>'
+    '<span class="nav-item" role="tab" aria-selected="false">Risk Intelligence</span>'
     "</nav>"
 )
 _PAGE_HEADER_HTML = (

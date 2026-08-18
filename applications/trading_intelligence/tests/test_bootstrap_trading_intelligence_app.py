@@ -59,20 +59,24 @@ def test_head_includes_the_inner_nav_link_bridge_for_all_three_screens():
     Portfolio and Risk Intelligence their own inner nav -- including their
     own "Decision Center" item, whose bridge was the fix for a user-reported
     bug (inner "Decision Center" unclickable while on Portfolio
-    Intelligence)."""
+    Intelligence). Duplicate-navigation audit: the bridge now sets
+    role="tab" (was role="link"), matching the inner nav's own static
+    role="tab"/aria-selected markup now that it's the app's sole visible
+    navigation."""
     app = build_trading_intelligence_app()
 
     assert "aara-shell-nav-list" in app.head
     assert "Decision Center" in app.head
     assert "Portfolio Intelligence" in app.head
     assert "Risk Intelligence" in app.head
-    assert 'role", "link"' in app.head
+    assert 'role", "tab"' in app.head
 
 
 def test_shell_header_and_nav_are_present_on_all_three_tabs():
-    """AARA shell consistency pass: Decision Center keeps its own private
-    shell constants unchanged; Portfolio and Risk Intelligence now render
-    the shared ui/shell.py equivalent, each marking itself active."""
+    """AARA shell consistency pass: Decision Center's own private shell
+    identity constant is unchanged; its nav constant gained the ARIA tab
+    markup described below, alongside Portfolio/Risk Intelligence's shared
+    ui/shell.py equivalent, each marking itself active/selected."""
     app = build_trading_intelligence_app()
 
     html_values = [
@@ -85,6 +89,18 @@ def test_shell_header_and_nav_are_present_on_all_three_tabs():
     assert SHELL_IDENTITY_HTML in html_values
     assert build_shell_nav_html("Portfolio Intelligence") in html_values
     assert build_shell_nav_html("Risk Intelligence") in html_values
+
+
+def test_css_hides_only_the_outer_tabs_not_the_inner_nav():
+    """Duplicate-navigation audit: composing all three screens produces two
+    role="tablist" elements per screen (the outer native Gradio tabs, and
+    each screen's own inner AARA nav) -- the composed app's CSS must hide
+    only the outer one, explicitly excluding .aara-shell-nav-list, so the
+    inner nav remains the app's one visible (and accessible) navigation."""
+    app = build_trading_intelligence_app()
+
+    assert '[role="tablist"]:not(.aara-shell-nav-list)' in app.css
+    assert "display: none" in app.css
 
 
 def test_decision_center_content_is_present_in_the_composed_app():

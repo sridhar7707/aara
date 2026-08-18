@@ -25,12 +25,28 @@ def test_shell_identity_html_embeds_the_logo_and_wordmark():
 
 
 def test_build_shell_nav_html_marks_exactly_the_requested_label_active():
+    """Duplicate-navigation audit: each item now carries role="tab" and
+    aria-selected, matching the outer gr.TabbedInterface tabs' own ARIA
+    pattern -- this nav becomes the app's one accessible tablist once the
+    outer tabs are hidden (see bootstrap.py's _TABBED_LAYOUT_CSS)."""
     nav_html = build_shell_nav_html("Portfolio Intelligence")
 
-    assert '<span class="nav-item active">Portfolio Intelligence</span>' in nav_html
-    assert '<span class="nav-item">Decision Center</span>' in nav_html
-    assert '<span class="nav-item">Risk Intelligence</span>' in nav_html
+    assert (
+        '<span class="nav-item active" role="tab" aria-selected="true">'
+        "Portfolio Intelligence</span>"
+    ) in nav_html
+    assert (
+        '<span class="nav-item" role="tab" aria-selected="false">'
+        "Decision Center</span>"
+    ) in nav_html
+    assert (
+        '<span class="nav-item" role="tab" aria-selected="false">'
+        "Risk Intelligence</span>"
+    ) in nav_html
     assert nav_html.count('class="nav-item active"') == 1
+    assert nav_html.count('aria-selected="true"') == 1
+    assert nav_html.count('aria-selected="false"') == 2
+    assert 'role="tablist"' in nav_html
 
 
 def test_build_shell_nav_html_matches_decision_centers_own_markup_byte_for_byte():

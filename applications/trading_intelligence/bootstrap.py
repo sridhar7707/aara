@@ -389,9 +389,30 @@ def build_application() -> DecisionCenterUI:
 # .aara-shell-header (via ui/shell.py, styled by this same globally-merged
 # theme.py CSS), this one rule already cancels the same negative margin
 # inside their .tabitem wrappers too; nothing here needed to change for that.
+#
+# Duplicate-navigation audit: composing all three screens under one
+# gr.TabbedInterface produces two visible nav rows per screen -- the outer
+# native Gradio tabs (role="tablist") this composition adds, and each
+# screen's own inner AARA nav (also role="tablist" as of this pass; see
+# ui/shell.py's build_shell_nav_html() and decision_center/gradio_view.py's
+# _SHELL_NAV_HTML). The live-verified fix (see audit notes) is to hide only
+# the outer tabs, visually and in the accessibility tree -- not remove or
+# restructure them -- since _INNER_NAV_LINK_JS below already drives the real
+# tab-switching machinery through them via .click(), which works identically
+# whether or not the target button is display:none. The selector excludes
+# .aara-shell-nav-list explicitly: both navs now carry role="tablist", so a
+# bare [role="tablist"] rule would hide the inner nav too, leaving zero
+# visible navigation. Composition-only, exact same reasoning as the
+# .aara-shell-header rule above: this selector only matches
+# gr.TabbedInterface's own markup, so DecisionCenterUI.build() (and
+# Portfolio/Risk's own build()) are completely unaffected when launched
+# standalone.
 _TABBED_LAYOUT_CSS = """
 .tabitem .aara-shell-header {
   margin-top: 0 !important;
+}
+[role="tablist"]:not(.aara-shell-nav-list) {
+  display: none !important;
 }
 """
 
@@ -457,6 +478,16 @@ _TAB_WARNING_SUPPRESSION_JS = """
 # accessibility bridges already use for exactly the same reason: the labels
 # don't exist yet when this <script> parses, since Gradio's client mounts
 # asynchronously.
+#
+# Duplicate-navigation audit (this pass): wireNavItem() now sets role="tab"
+# (was role="link"), matching the static role="tab"/aria-selected markup
+# ui/shell.py's build_shell_nav_html() and decision_center/gradio_view.py's
+# _SHELL_NAV_HTML now emit directly -- this bridge only adds the interactive
+# behavior (cursor, tabIndex, click/Enter/Space forwarding) on top of markup
+# that's already a correct ARIA Tabs pattern on its own; aria-selected itself
+# is never touched here since each screen's nav is pre-built server-side
+# with exactly one item already marked selected. This bridge's own click/
+# Enter/Space forwarding logic is otherwise unchanged from before this pass.
 _INNER_NAV_LINK_JS = """
 <script>
 (function () {
@@ -479,7 +510,7 @@ _INNER_NAV_LINK_JS = """
   function wireNavItem(span, label) {
     span.style.cursor = "pointer";
     span.tabIndex = 0;
-    span.setAttribute("role", "link");
+    span.setAttribute("role", "tab");
     span.addEventListener("click", function () { activateTab(label); });
     span.addEventListener("keydown", function (event) {
       if (event.key === "Enter" || event.key === " ") {

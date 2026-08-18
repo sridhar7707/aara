@@ -1392,9 +1392,30 @@ def test_shell_nav_portfolio_and_risk_intelligence_are_no_longer_coming_soon():
     Intelligence (ui/risk_intelligence/) both shipped, wired via
     gr.TabbedInterface in bootstrap.py -- neither nav item may claim
     otherwise."""
-    assert '<span class="nav-item">Portfolio Intelligence</span>' in _SHELL_NAV_HTML
-    assert '<span class="nav-item">Risk Intelligence</span>' in _SHELL_NAV_HTML
+    assert (
+        '<span class="nav-item" role="tab" aria-selected="false">'
+        "Portfolio Intelligence</span>"
+    ) in _SHELL_NAV_HTML
+    assert (
+        '<span class="nav-item" role="tab" aria-selected="false">'
+        "Risk Intelligence</span>"
+    ) in _SHELL_NAV_HTML
     assert "Coming Soon" not in _SHELL_NAV_HTML
+
+
+def test_shell_nav_is_an_aria_tablist_with_correct_selected_state():
+    """Duplicate-navigation audit: this nav becomes the app's single
+    accessible tablist once the outer gr.TabbedInterface tabs are hidden
+    (bootstrap.py's _TABBED_LAYOUT_CSS) -- it must carry the same
+    role="tablist"/"tab"/aria-selected pattern the outer tabs already had."""
+    assert 'role="tablist"' in _SHELL_NAV_HTML
+    assert _SHELL_NAV_HTML.count('role="tab"') == 3
+    assert _SHELL_NAV_HTML.count('aria-selected="true"') == 1
+    assert _SHELL_NAV_HTML.count('aria-selected="false"') == 2
+    assert (
+        '<span class="nav-item active" role="tab" aria-selected="true">'
+        "Decision Center</span>"
+    ) in _SHELL_NAV_HTML
 
 
 def test_shell_nav_muted_items_remain_non_interactive():
