@@ -27,6 +27,8 @@ real trading data.
 from datetime import datetime
 from typing import Dict, List, Optional
 
+import gradio as gr
+
 from sentinel_engine.domain.decision import Decision
 from sentinel_engine.evidence.evidence import Evidence
 from sentinel_engine.events.event import Event
@@ -75,6 +77,9 @@ from applications.trading_intelligence.services.decision_governance_query_servic
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
 from applications.trading_intelligence.ui.decision_center.gradio_view import DecisionCenterUI
+from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
+    PortfolioIntelligenceUI,
+)
 
 
 class _InMemoryLedgerStore(LedgerStore):
@@ -359,3 +364,98 @@ def build_application() -> DecisionCenterUI:
     )
 
     return DecisionCenterUI(controller, decision_ids)
+
+
+# Composition-only fix for a regression found in live verification: Decision
+# Center's own theme.py gives .aara-shell-header a `margin-top: -16px
+# !important` specifically to cancel .gradio-container's own 16px top
+# padding, so the header sits flush against the true top of the page when
+# DecisionCenterUI.build() runs standalone (the only context that CSS rule
+# was ever designed for). Nested inside this composition's gr.TabbedInterface,
+# the tab list now renders above it in the same document, so that same
+# negative margin pulls the header up into the tab list's own box and
+# intercepts its pointer events (confirmed via getBoundingClientRect +
+# elementFromPoint: the header's top edge sits above the tab row's bottom
+# edge). ".tabitem" is Gradio's own stable TabItem wrapper class (confirmed
+# against the live DOM), giving this override higher selector specificity
+# than the original "!important" rule without editing
+# ui/decision_center/theme.py at all -- this selector never matches when
+# DecisionCenterUI.build() is launched standalone, so that file and its
+# standalone appearance are completely unaffected.
+_TABBED_LAYOUT_CSS = """
+.tabitem .aara-shell-header {
+  margin-top: 0 !important;
+}
+"""
+
+# Composition-only fix for the second regression found in live verification:
+# gr.TabbedInterface's own bundled Tabs component (Tabs-*.js) reactively
+# re-invokes its "select the currently-selected tab" handler every time its
+# registered-tabs list is marked dirty -- verified directly in the compiled
+# source (`t.$$.dirty & 520 && m !== null && A(m)`), and that list is marked
+# dirty on every child Tab's own re-registration, which happens on every SSE
+# update Decision Center's own demo.load()/Refresh/row-select handlers
+# produce (unrelated to any tab click). If that reactive re-selection lands
+# in the transient window before a tab has re-registered, A(m) hits its own
+# "not found or not interactive/visible" branch and logs
+# console.warn("Attempted to select a non-interactive or hidden tab.") --
+# confirmed harmless (tab content, selection, and focus are all still
+# correct every time this was observed live). This is Gradio 4.44.1's own
+# internal Svelte reactivity; no Python or CSS lever in this app reaches it,
+# and patching the pinned Gradio version is out of scope. Filtering this one
+# exact, known-benign message at the console is the narrowest available
+# mitigation: matches only this single-argument, exact-string call, so every
+# other console.warn (including the pre-existing, unrelated "Too many
+# arguments provided for the endpoint." warning) is untouched.
+_TAB_WARNING_SUPPRESSION_JS = """
+<script>
+(function () {
+  var TARGET_WARNING = "Attempted to select a non-interactive or hidden tab.";
+  var originalWarn = console.warn.bind(console);
+  console.warn = function () {
+    if (arguments.length === 1 && arguments[0] === TARGET_WARNING) {
+      return;
+    }
+    originalWarn.apply(console, arguments);
+  };
+})();
+</script>
+"""
+
+
+def build_trading_intelligence_app() -> gr.Blocks:
+    """Composes every Trading Intelligence screen into one tabbed app via
+    gr.TabbedInterface -- the smallest wiring that reaches multiple
+    screens without touching any screen's own build() internals.
+    TabbedInterface.render()s each already-built gr.Blocks unmodified
+    (verified: component tree, event-dependency graph, and fn-index
+    chaining all carry over intact), but it does not inherit a child
+    Blocks' own title/css/head -- gr.TabbedInterface's own constructor
+    defaults those to "Gradio"/None/None otherwise (verified directly
+    against the installed gradio package) -- so they are read back off
+    each already-built Blocks object and re-supplied explicitly here,
+    the one thing this composition step must do that a screen's own
+    build() does not.
+
+    Risk Intelligence is intentionally not composed here yet -- Portfolio
+    Intelligence only, per this task's scope."""
+    decision_blocks = build_application().build()
+    portfolio_blocks = PortfolioIntelligenceUI().build()
+
+    merged_css = "\n".join(
+        css for css in (decision_blocks.css, portfolio_blocks.css, _TABBED_LAYOUT_CSS) if css
+    )
+    merged_head = "\n".join(
+        head for head in (
+            decision_blocks.head, portfolio_blocks.head, _TAB_WARNING_SUPPRESSION_JS,
+        )
+        if head
+    )
+
+    return gr.TabbedInterface(
+        [decision_blocks, portfolio_blocks],
+        ["Decision Center", "Portfolio Intelligence"],
+        title=decision_blocks.title,
+        css=merged_css,
+        head=merged_head,
+    )
