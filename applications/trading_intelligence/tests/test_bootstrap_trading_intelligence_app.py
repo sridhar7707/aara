@@ -5,6 +5,11 @@ Decision Center + Portfolio Intelligence + Risk Intelligence.
 import gradio as gr
 
 from applications.trading_intelligence.bootstrap import build_trading_intelligence_app
+from applications.trading_intelligence.ui.decision_center.gradio_view import (
+    _SHELL_IDENTITY_HTML,
+    _SHELL_NAV_HTML,
+)
+from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
 
 
 def test_returns_a_gradio_blocks_instance():
@@ -48,12 +53,38 @@ def test_head_includes_decision_centers_accessibility_bridges():
     assert "aara-decisions-table" in app.head
 
 
-def test_head_includes_the_portfolio_nav_link_bridge():
+def test_head_includes_the_inner_nav_link_bridge_for_all_three_screens():
+    """Generalized from a Portfolio-only bridge (see bootstrap.py's
+    _INNER_NAV_LINK_JS docstring) once the AARA shell consistency pass gave
+    Portfolio and Risk Intelligence their own inner nav -- including their
+    own "Decision Center" item, whose bridge was the fix for a user-reported
+    bug (inner "Decision Center" unclickable while on Portfolio
+    Intelligence)."""
     app = build_trading_intelligence_app()
 
     assert "aara-shell-nav-list" in app.head
+    assert "Decision Center" in app.head
     assert "Portfolio Intelligence" in app.head
+    assert "Risk Intelligence" in app.head
     assert 'role", "link"' in app.head
+
+
+def test_shell_header_and_nav_are_present_on_all_three_tabs():
+    """AARA shell consistency pass: Decision Center keeps its own private
+    shell constants unchanged; Portfolio and Risk Intelligence now render
+    the shared ui/shell.py equivalent, each marking itself active."""
+    app = build_trading_intelligence_app()
+
+    html_values = [
+        block.value for block in app.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+
+    assert _SHELL_IDENTITY_HTML in html_values
+    assert _SHELL_NAV_HTML in html_values
+    assert SHELL_IDENTITY_HTML in html_values
+    assert build_shell_nav_html("Portfolio Intelligence") in html_values
+    assert build_shell_nav_html("Risk Intelligence") in html_values
 
 
 def test_decision_center_content_is_present_in_the_composed_app():

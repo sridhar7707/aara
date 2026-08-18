@@ -3,8 +3,15 @@
 Self-contained: does not import ui/decision_center/ (no gradio_view.py,
 theme.py, screen.py, or mock_data.py cross-import). Renders mock_data.py's
 PortfolioScreen only -- no controller, no service, no sentinel_engine/bot
-import. Not wired into main.py/bootstrap.py; DecisionCenterUI's own build
-output is untouched by this module.
+import. Wired into main.py/bootstrap.py as the 2nd Trading Intelligence tab.
+
+AARA shell consistency pass: renders the same AARA logo header + inter-screen
+nav Decision Center shows, via `ui/shell.py` (a sibling of all three screen
+packages, not `ui/decision_center/` -- see that module's own docstring for
+why this doesn't violate this package's self-containment). No new CSS is
+added here; `.aara-shell-header`/`.aara-shell-nav`/`.nav-item` and the tokens
+they use are Decision Center's theme.py rules, already merged into the
+composed app's single stylesheet by `bootstrap.py`.
 """
 import html
 from typing import List, Tuple
@@ -18,6 +25,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     PortfolioScreen,
 )
 from applications.trading_intelligence.ui.portfolio_intelligence.theme import CSS
+from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
 
 # gr.Dataframe's row-height-budget kwarg is named `height` on gradio 4.44.1
 # but was renamed `max_height` by gradio 5.x -- same compat shim as
@@ -57,6 +65,9 @@ class PortfolioIntelligenceUI:
         with gr.Blocks(
             title="AARA Trading Intelligence — Portfolio Intelligence", css=CSS,
         ) as demo:
+            gr.HTML(SHELL_IDENTITY_HTML, elem_classes=["aara-shell-header"])
+            gr.HTML(build_shell_nav_html("Portfolio Intelligence"), elem_classes=["aara-shell-nav"])
+
             gr.HTML(_PAGE_HEADER_HTML)
             gr.HTML(_ILLUSTRATIVE_DATA_HTML)
 

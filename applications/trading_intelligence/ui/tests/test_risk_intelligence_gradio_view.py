@@ -11,6 +11,7 @@ from applications.trading_intelligence.ui.risk_intelligence.screen import (
     RiskScreen,
     RiskSnapshot,
 )
+from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
 
 
 def _make_snapshot(**overrides):
@@ -59,6 +60,33 @@ def test_illustrative_data_disclosure_block_is_present_in_the_built_layout():
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
     assert _ILLUSTRATIVE_DATA_HTML in html_values
+
+
+def test_shell_header_and_nav_are_present_in_the_built_layout():
+    """AARA shell consistency pass: Risk Intelligence now renders the same
+    shell header/nav Decision Center does, reused via ui/shell.py -- see
+    that module's docstring for why it isn't imported from
+    ui/decision_center/ or ui/portfolio_intelligence/ directly."""
+    ui = RiskIntelligenceUI()
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    assert SHELL_IDENTITY_HTML in html_values
+    assert build_shell_nav_html("Risk Intelligence") in html_values
+
+
+def test_shell_header_and_nav_blocks_carry_the_expected_elem_classes():
+    ui = RiskIntelligenceUI()
+
+    demo = ui.build()
+
+    html_blocks = [block for block in demo.blocks.values() if isinstance(block, gr.HTML)]
+    assert any("aara-shell-header" in (block.elem_classes or []) for block in html_blocks)
+    assert any("aara-shell-nav" in (block.elem_classes or []) for block in html_blocks)
 
 
 def test_state_badge_html_reflects_every_state():

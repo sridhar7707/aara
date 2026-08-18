@@ -383,6 +383,12 @@ def build_application() -> DecisionCenterUI:
 # ui/decision_center/theme.py at all -- this selector never matches when
 # DecisionCenterUI.build() is launched standalone, so that file and its
 # standalone appearance are completely unaffected.
+#
+# Class selector, not scoped to Decision Center specifically -- since the
+# AARA shell consistency pass gave Portfolio and Risk Intelligence their own
+# .aara-shell-header (via ui/shell.py, styled by this same globally-merged
+# theme.py CSS), this one rule already cancels the same negative margin
+# inside their .tabitem wrappers too; nothing here needed to change for that.
 _TABBED_LAYOUT_CSS = """
 .tabitem .aara-shell-header {
   margin-top: 0 !important;
@@ -423,61 +429,81 @@ _TAB_WARNING_SUPPRESSION_JS = """
 </script>
 """
 
-# Makes Decision Center's own inner shell-nav label ("Portfolio Intelligence",
-# a plain, non-interactive <span> per ui/decision_center/gradio_view.py's
-# _SHELL_NAV_HTML -- unchanged, still a static gr.HTML block Decision Center
-# renders once at load) actually navigate to the real Portfolio Intelligence
-# tab this composition adds. Decision Center's own file stays exactly as
-# before: unaware of tabs, no new class/attribute added to _SHELL_NAV_HTML,
-# no behavior change to that module. This bridge finds the label purely by
-# its own already-fixed text content ("Portfolio Intelligence") within
+# Makes every screen's own inner shell-nav labels ("Decision Center",
+# "Portfolio Intelligence", "Risk Intelligence" -- plain, non-interactive
+# <span>s per each screen's own gr.HTML nav block: Decision Center's
+# _SHELL_NAV_HTML, and, since the AARA shell consistency pass, Portfolio/Risk
+# Intelligence's own ui/shell.py-built nav) actually navigate to the real tab
+# this composition adds. None of the three screens' own files gain any new
+# class/attribute or behavior change from this -- this bridge finds each
+# label purely by its own already-fixed text content within
 # .aara-shell-nav-list .nav-item, then forwards a click (or Enter/Space) to
-# the real gr.TabbedInterface tab button, found the same way. Bounded
-# polling (find once, then stop) is the same pattern Decision Center's own
-# accessibility bridges already use for exactly the same reason: the label
-# doesn't exist yet when this <script> parses, since Gradio's client mounts
+# the matching real gr.TabbedInterface tab button, found the same way.
+#
+# Originally scoped to "Portfolio Intelligence" only, and to the first
+# matching label found in the whole document (Decision Center was the only
+# screen with a shell nav, so only one occurrence of that text ever existed,
+# and nothing ever needed to link back to Decision Center since it was the
+# only landing screen). The AARA shell consistency pass gave Portfolio and
+# Risk Intelligence their own copy of the same nav -- including their own
+# "Decision Center" item -- so all three labels now need wiring, and each
+# appears up to three times in the composed DOM (once per screen's own nav).
+# A user-reported bug (inner "Decision Center" unclickable while on Portfolio
+# Intelligence) surfaced that the original 2-label list missed this: this
+# bridge now wires every occurrence of all three managed labels, not just
+# "Portfolio Intelligence"/"Risk Intelligence" and not just the first match.
+# Bounded polling (wait for all three screens' own .aara-shell-nav-list to
+# exist, wire once, then stop) is the same pattern Decision Center's own
+# accessibility bridges already use for exactly the same reason: the labels
+# don't exist yet when this <script> parses, since Gradio's client mounts
 # asynchronously.
-_PORTFOLIO_NAV_LINK_JS = """
+_INNER_NAV_LINK_JS = """
 <script>
 (function () {
-  var LABEL = "Portfolio Intelligence";
+  var LABELS = ["Decision Center", "Portfolio Intelligence", "Risk Intelligence"];
+  var EXPECTED_NAV_LISTS = 3;
 
-  function findInnerNavLabel() {
-    return Array.from(document.querySelectorAll(".aara-shell-nav-list .nav-item")).find(
-      function (span) { return span.textContent.trim() === LABEL; }
-    );
-  }
-
-  function findRealPortfolioTab() {
+  function findRealTab(label) {
     return Array.from(document.querySelectorAll('button[role="tab"]')).find(
-      function (btn) { return btn.textContent.trim() === LABEL; }
+      function (btn) { return btn.textContent.trim() === label; }
     );
   }
 
-  function activatePortfolioTab() {
-    var tabButton = findRealPortfolioTab();
+  function activateTab(label) {
+    var tabButton = findRealTab(label);
     if (tabButton) {
       tabButton.click();
     }
+  }
+
+  function wireNavItem(span, label) {
+    span.style.cursor = "pointer";
+    span.tabIndex = 0;
+    span.setAttribute("role", "link");
+    span.addEventListener("click", function () { activateTab(label); });
+    span.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activateTab(label);
+      }
+    });
   }
 
   var attempts = 0;
   var maxAttempts = 100;
   var intervalId = setInterval(function () {
     attempts += 1;
-    var label = findInnerNavLabel();
-    if (label) {
+    var navLists = document.querySelectorAll(".aara-shell-nav-list");
+    if (navLists.length >= EXPECTED_NAV_LISTS) {
       clearInterval(intervalId);
-      label.style.cursor = "pointer";
-      label.tabIndex = 0;
-      label.setAttribute("role", "link");
-      label.addEventListener("click", activatePortfolioTab);
-      label.addEventListener("keydown", function (event) {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          activatePortfolioTab();
+      Array.from(document.querySelectorAll(".aara-shell-nav-list .nav-item")).forEach(
+        function (span) {
+          var text = span.textContent.trim();
+          if (LABELS.indexOf(text) !== -1) {
+            wireNavItem(span, text);
+          }
         }
-      });
+      );
       return;
     }
     if (attempts >= maxAttempts) {
@@ -519,7 +545,7 @@ def build_trading_intelligence_app() -> gr.Blocks:
     merged_head = "\n".join(
         head for head in (
             decision_blocks.head, portfolio_blocks.head, risk_blocks.head,
-            _TAB_WARNING_SUPPRESSION_JS, _PORTFOLIO_NAV_LINK_JS,
+            _TAB_WARNING_SUPPRESSION_JS, _INNER_NAV_LINK_JS,
         )
         if head
     )
