@@ -257,6 +257,21 @@ footer {{ display: none !important; }}
   .nt-countdown {{ display: none !important; }}
   .nt-refresh-label {{ display: none !important; }}
 }}
+
+/* ── ADR-041: visually-hidden accessibility live region ──────────────────── */
+/* Present in the accessibility tree (not display:none/visibility:hidden),
+   clipped from visual layout — standard sr-only pattern. */
+.sr-only-live {{
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}}
 """
 
 # ── Tab switching fix injected via gr.Blocks(js=TAB_FIX_JS) ──────────────────
@@ -343,6 +358,20 @@ TAB_FIX_JS = """
     _ps.onerror = function() {};
     document.head.appendChild(_ps);
   }
+
+  // ADR-041: attach aria-live to the persistent #refresh-announcer wrapper.
+  // gr.HTML exposes no ARIA parameter, so this is a one-time attribute
+  // injection against the Gradio-generated wrapper itself (verified stable
+  // across value updates) -- never touches the wrapper's swapped children,
+  // and never re-runs. Retried on the same short-timeout pattern as
+  // _initEquityPeriod above, since the wrapper may not exist yet at first run.
+  function _initRefreshAnnouncer() {
+    var el = document.getElementById('refresh-announcer');
+    if (!el) { setTimeout(_initRefreshAnnouncer, 500); return; }
+    el.setAttribute('aria-live', 'polite');
+    el.setAttribute('aria-atomic', 'true');
+  }
+  _initRefreshAnnouncer();
 }
 """
 

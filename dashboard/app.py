@@ -127,6 +127,13 @@ _ci = prerender_all()
 
 with gr.Blocks(title="TradeGenius AI", theme=_theme, css=GRADIO_CSS, js=TAB_FIX_JS) as _demo:
     gr.HTML(HEADER_HTML)
+    # ADR-041: global screen-reader announcer for background refreshes.
+    # Outside gr.Tabs() on purpose — Gradio hides inactive tab panels via
+    # display:none, which silences aria-live regions nested inside them.
+    refresh_announcer = registry.mount("refresh_announcer", gr.HTML(
+        value="", elem_id="refresh-announcer", elem_classes=["sr-only-live"],
+        show_label=False,
+    ))
     with gr.Tabs():
         # ── Tab 1: Brief (5-card end-user view) ──────────────────────────────
         with gr.TabItem("📋 Brief"):
