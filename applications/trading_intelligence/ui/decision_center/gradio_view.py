@@ -902,19 +902,31 @@ class DecisionCenterUI:
         Reuses _why_summary_sentence -- the exact plain-text logic
         _format_why_summary_html already renders into the Why? panel --
         so the announcement and the visible panel can never drift out of
-        sync. Falls back to the bare "Decision selected: {symbol}."
-        wording when the detail read fails (ReadStatus.ERROR) or returns
-        empty: no rationale claim is made when the read itself did not
-        succeed. Empty string on deselection/no-row, matching
-        _on_row_select's own guard -- nothing to announce when nothing was
-        selected."""
+        sync.
+
+        P2 Loading States accessibility pass: a read error and an empty
+        (not-found) result previously both fell back to the same bare
+        "Decision selected: {symbol}." wording -- indistinguishable from a
+        normal successful selection to a screen-reader user, even though
+        the visible header simultaneously shows a distinct
+        _DECISION_READ_ERROR_MESSAGE / _DECISION_NOT_FOUND_MESSAGE (see
+        _decision_error_header_html/_missing_decision_header_html). Each
+        case now reuses those exact same constants in the announcement, so
+        a screen-reader user gets the same failure information a sighted
+        user already sees, and the wording can never drift between the two
+        surfaces. Checked in the same order _format_looked_up_detail
+        already uses (ReadStatus.ERROR before is_empty). Empty string on
+        deselection/no-row, matching _on_row_select's own guard -- nothing
+        to announce when nothing was selected."""
         if not evt.selected or not evt.row_value:
             return ""
         decision_id = evt.row_value[0]
         symbol = evt.row_value[1]
         detail_area = self._controller.load_decision_detail(decision_id)
-        if detail_area.decision_status is ReadStatus.ERROR or detail_area.is_empty:
-            return f"Decision selected: {symbol}."
+        if detail_area.decision_status is ReadStatus.ERROR:
+            return f"Decision selected: {symbol}. {_DECISION_READ_ERROR_MESSAGE}"
+        if detail_area.is_empty:
+            return f"Decision selected: {symbol}. {_DECISION_NOT_FOUND_MESSAGE}"
         summary = self._why_summary_sentence(detail_area.evidence)
         if summary is None:
             summary = f"{_WHY_RATIONALE_TITLE}. {_WHY_RATIONALE_BODY}"

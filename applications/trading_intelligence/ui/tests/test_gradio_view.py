@@ -21,6 +21,8 @@ from applications.trading_intelligence.projections.decision_view import Decision
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 from applications.trading_intelligence.ui.decision_center.gradio_view import (
+    _DECISION_NOT_FOUND_MESSAGE,
+    _DECISION_READ_ERROR_MESSAGE,
     _ILLUSTRATIVE_DATA_BODY,
     _ILLUSTRATIVE_DATA_HTML,
     _ILLUSTRATIVE_DATA_TITLE,
@@ -1599,7 +1601,13 @@ def test_announce_row_select_wording_falls_back_to_the_placeholder_for_zero_evid
     )
 
 
-def test_announce_row_select_wording_omits_rationale_on_a_read_error():
+def test_announce_row_select_wording_is_error_specific_on_a_read_error():
+    """P2 Loading States accessibility pass: a read error must be
+    announced distinctly from a normal selection, reusing the exact same
+    _DECISION_READ_ERROR_MESSAGE the visible header already shows for this
+    case (_decision_error_header_html) -- not the old ambiguous bare
+    "Decision selected: {symbol}." wording, which read identically to a
+    successful selection to a screen-reader user."""
     controller = _FakeController(
         detail_area=DecisionDetailArea(decision=None, decision_status=ReadStatus.ERROR)
     )
@@ -1608,17 +1616,22 @@ def test_announce_row_select_wording_omits_rationale_on_a_read_error():
 
     result = ui._announce_row_select(_make_select_event(row))
 
-    assert result == "Decision selected: AAPL."
+    assert result == f"Decision selected: AAPL. {_DECISION_READ_ERROR_MESSAGE}"
 
 
-def test_announce_row_select_wording_omits_rationale_when_the_decision_is_missing():
+def test_announce_row_select_wording_is_not_found_specific_when_the_decision_is_missing():
+    """P2 Loading States accessibility pass: a genuine not-found result
+    (decision_status is OK but no decision was returned) must be announced
+    with _DECISION_NOT_FOUND_MESSAGE, reusing the exact text the visible
+    header already shows (_missing_decision_header_html) -- distinct from
+    both a successful selection and a read error."""
     controller = _FakeController(detail_area=DecisionDetailArea(decision=None))
     ui = DecisionCenterUI(controller, ["dec-001"])
     row = ["dec-001", "AAPL", "BUY", "Decision Created", "71%"]
 
     result = ui._announce_row_select(_make_select_event(row))
 
-    assert result == "Decision selected: AAPL."
+    assert result == f"Decision selected: AAPL. {_DECISION_NOT_FOUND_MESSAGE}"
 
 
 def test_announce_row_select_is_empty_on_deselection():
