@@ -87,7 +87,10 @@ CSS = """
 }
 .ri-state-badge.state-warning {
   background: rgba(200, 164, 93, 0.20);
-  color: #8a6a2f;
+  /* WCAG contrast fix: #8a6a2f measured ~4.30:1 against this badge's actual
+     rendered (blended) background, below the 4.5:1 AA text floor. Same hue,
+     darkened, verified 5.11:1 against the blended background. */
+  color: #7c5f2a;
 }
 .ri-state-badge.state-defensive {
   background: var(--ri-color-navy);

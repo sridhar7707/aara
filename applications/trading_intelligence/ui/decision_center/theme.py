@@ -321,7 +321,7 @@ footer { display: none !important; }
   padding: 4px var(--space-sm) !important;
 }
 .aara-refresh-button button:hover {
-  border-color: var(--color-gold-accent) !important;
+  border-color: var(--color-gold-accent-boundary) !important;
   color: var(--color-navy-primary) !important;
 }
 
