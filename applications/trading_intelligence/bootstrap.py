@@ -407,11 +407,40 @@ def build_application() -> DecisionCenterUI:
 # gr.TabbedInterface's own markup, so DecisionCenterUI.build() (and
 # Portfolio/Risk's own build()) are completely unaffected when launched
 # standalone.
+#
+# P3 Other Visual Polish audit (read-only, this session) found a third
+# composition-only regression, same root cause as the two above: passing
+# title="AARA Trading Intelligence" to gr.TabbedInterface() makes it render
+# that title itself as a plain "# {title}" Markdown block above the tabs --
+# an unstyled Gradio-default <h1> (confirmed live: no elem_id/elem_classes
+# hook exists on gr.TabbedInterface's own title param to style or suppress
+# it directly, Gradio's default gray/Inter font, sitting immediately above
+# the fully-branded .aara-shell-header, which already states the same
+# "AARA / Trading Intelligence" identity). Confirmed via live DOM inspection
+# (all three tabs) that exactly one `.prose h1` exists in the composed app
+# at any time, always this title block -- neither Decision Center's own
+# page header (converted to a custom `<h2 class="aara-eyebrow">`, not
+# Markdown, specifically to replace "the plain H1" per theme.py's own
+# comment) nor Portfolio/Risk Intelligence's own `<h2>` page headers
+# (plain gr.HTML, never Markdown-rendered, so never wrapped in `.prose`)
+# collide with this selector. `.block` is Gradio's own generic per-component
+# wrapper class (confirmed already relied on implicitly elsewhere in this
+# app, e.g. the live-announcer's own rendered wrapper carries it); `:has()`
+# is already an established selector technique in this exact codebase
+# (`ui/decision_center/theme.py`'s row-selection rules), not a new pattern.
+# Hides the whole title block, not just the heading text, so the padded
+# band collapses instead of leaving empty vertical space. This is a hide,
+# not a restyle -- no color, font, or spacing token from either screen's
+# own theme.py is touched, and the rule only ever matches this one
+# composition-level block.
 _TABBED_LAYOUT_CSS = """
 .tabitem .aara-shell-header {
   margin-top: 0 !important;
 }
 [role="tablist"]:not(.aara-shell-nav-list) {
+  display: none !important;
+}
+.block:has(.prose h1) {
   display: none !important;
 }
 """
@@ -555,10 +584,16 @@ def build_trading_intelligence_app() -> gr.Blocks:
     chaining all carry over intact), but it does not inherit a child
     Blocks' own title/css/head -- gr.TabbedInterface's own constructor
     defaults those to "Gradio"/None/None otherwise (verified directly
-    against the installed gradio package) -- so they are read back off
-    each already-built Blocks object and re-supplied explicitly here,
-    the one thing this composition step must do that a screen's own
-    build() does not.
+    against the installed gradio package) -- so css/head are read back off
+    each already-built Blocks object and re-supplied explicitly here, the
+    one thing this composition step must do that a screen's own build()
+    does not. title is the one exception: gr.Blocks renders its `title`
+    as a visible page <h1> (not just the browser tab title), and a
+    UI-polish audit found this composition reusing Decision Center's own
+    title verbatim left that <h1> permanently reading "-- Decision Center"
+    on the Portfolio/Risk Intelligence tabs too -- so this composition
+    uses its own neutral, screen-agnostic title instead of any one
+    screen's.
 
     All three shipped screens are composed here -- Decision Center,
     Portfolio Intelligence, and Risk Intelligence -- each Blocks object
@@ -584,7 +619,7 @@ def build_trading_intelligence_app() -> gr.Blocks:
     return gr.TabbedInterface(
         [decision_blocks, portfolio_blocks, risk_blocks],
         ["Decision Center", "Portfolio Intelligence", "Risk Intelligence"],
-        title=decision_blocks.title,
+        title="AARA Trading Intelligence",
         css=merged_css,
         head=merged_head,
     )

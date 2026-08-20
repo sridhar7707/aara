@@ -29,10 +29,15 @@ def test_has_exactly_three_tabs_in_order():
     assert tab_labels == ["Decision Center", "Portfolio Intelligence", "Risk Intelligence"]
 
 
-def test_title_matches_decision_centers_own_title():
+def test_title_is_neutral_and_not_scoped_to_any_one_screen():
+    """UI-polish audit (P1): gr.Blocks renders `title` as a visible page
+    <h1>, not just the browser tab title -- reusing Decision Center's own
+    title here left that <h1> reading "-- Decision Center" on the
+    Portfolio/Risk Intelligence tabs too. The composed app now uses its own
+    neutral title instead of any one screen's."""
     app = build_trading_intelligence_app()
 
-    assert app.title == "AARA Trading Intelligence — Decision Center"
+    assert app.title == "AARA Trading Intelligence"
 
 
 def test_css_includes_all_three_screens_own_styles():
@@ -100,6 +105,19 @@ def test_css_hides_only_the_outer_tabs_not_the_inner_nav():
     app = build_trading_intelligence_app()
 
     assert '[role="tablist"]:not(.aara-shell-nav-list)' in app.css
+    assert "display: none" in app.css
+
+
+def test_css_hides_the_redundant_outer_title_block():
+    """P3 Other Visual Polish audit: gr.TabbedInterface(title=...) renders
+    the composed app's title as a plain, unstyled Gradio-default <h1>
+    (wrapped in Gradio's own .prose class) directly above the fully-branded
+    .aara-shell-header, which already states the same identity -- confirmed
+    live to be the only `.prose h1` anywhere in the composed app on all
+    three tabs. The composed app's CSS must hide that whole title block."""
+    app = build_trading_intelligence_app()
+
+    assert ".block:has(.prose h1)" in app.css
     assert "display: none" in app.css
 
 
