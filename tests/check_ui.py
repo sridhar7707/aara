@@ -226,12 +226,112 @@ def _check(page, description: str, selector: str) -> tuple[bool, str]:
         return False, str(exc)[:120]
 
 
+# -- Accessibility: refresh-announcer checks (ADR-041) --------------------------
+
+def _check_refresh_announcer_initial(page) -> list[tuple[bool, str, str]]:
+    """Structural checks + tags the live node so a later pass can confirm the
+    same DOM element (not a replacement) is still there after a real tick."""
+    checks: list[tuple[bool, str, str]] = []
+    try:
+        info = page.evaluate("""
+        () => {
+            const el = document.getElementById('refresh-announcer');
+            if (!el) return null;
+            el.setAttribute('data-check-ui-probe', 'refresh-announcer-probe');
+            return {
+                ariaLive: el.getAttribute('aria-live'),
+                ariaAtomic: el.getAttribute('aria-atomic'),
+                text: el.textContent || ''
+            };
+        }
+        """)
+    except Exception as exc:
+        info = None
+        _fail(f"#refresh-announcer evaluate failed: {str(exc)[:120]}")
+
+    exists = info is not None
+    checks.append((exists, "#refresh-announcer exists", "" if exists else "element not found"))
+    _ok("#refresh-announcer exists") if exists else _fail("#refresh-announcer exists")
+
+    if exists:
+        live_ok = info["ariaLive"] == "polite"
+        checks.append((live_ok, 'aria-live="polite"', "" if live_ok else f"got {info['ariaLive']!r}"))
+        _ok('aria-live="polite"') if live_ok else _fail(f'aria-live="polite"  got {info["ariaLive"]!r}')
+
+        atomic_ok = info["ariaAtomic"] == "true"
+        checks.append((atomic_ok, 'aria-atomic="true"', "" if atomic_ok else f"got {info['ariaAtomic']!r}"))
+        _ok('aria-atomic="true"') if atomic_ok else _fail(f'aria-atomic="true"  got {info["ariaAtomic"]!r}')
+
+    return checks, (info["text"] if info else None)
+
+
+def _check_refresh_announcer_persistence(page, initial_text) -> list[tuple[bool, str, str]]:
+    """Re-checked after a real FAST (60s) tick has had time to fire: the
+    probe-tagged node must still be the one in the DOM (not replaced) and its
+    text must have changed (proving the tick actually wrote a new value)."""
+    checks: list[tuple[bool, str, str]] = []
+    try:
+        info = page.evaluate("""
+        () => {
+            const el = document.getElementById('refresh-announcer');
+            if (!el) return null;
+            return {
+                stillProbed: el.getAttribute('data-check-ui-probe') === 'refresh-announcer-probe',
+                ariaLive: el.getAttribute('aria-live'),
+                ariaAtomic: el.getAttribute('aria-atomic'),
+                text: el.textContent || ''
+            };
+        }
+        """)
+    except Exception as exc:
+        info = None
+        _fail(f"#refresh-announcer re-check failed: {str(exc)[:120]}")
+
+    exists = info is not None
+    if not exists:
+        checks.append((False, "refresh-announcer node survives a tick", "element not found after tick"))
+        _fail("refresh-announcer node survives a tick")
+        return checks
+
+    same_node = info["stillProbed"]
+    checks.append((same_node, "refresh-announcer DOM node identity persisted across a tick",
+                   "" if same_node else "probe marker lost -- node was replaced, not patched"))
+    _ok("refresh-announcer DOM node identity persisted across a tick") if same_node else \
+        _fail("refresh-announcer DOM node identity persisted across a tick  -- node was replaced")
+
+    live_ok = info["ariaLive"] == "polite"
+    checks.append((live_ok, 'aria-live still "polite" after tick', "" if live_ok else f"got {info['ariaLive']!r}"))
+    _ok('aria-live still "polite" after tick') if live_ok else _fail('aria-live still "polite" after tick')
+
+    atomic_ok = info["ariaAtomic"] == "true"
+    checks.append((atomic_ok, 'aria-atomic still "true" after tick', "" if atomic_ok else f"got {info['ariaAtomic']!r}"))
+    _ok('aria-atomic still "true" after tick') if atomic_ok else _fail('aria-atomic still "true" after tick')
+
+    content_changed = info["text"] != initial_text
+    checks.append((content_changed, "announcer text changed (a real FAST tick fired)",
+                   "" if content_changed else "text identical to initial value -- no tick observed"))
+    _ok("announcer text changed (a real FAST tick fired)") if content_changed else \
+        _fail("announcer text changed (a real FAST tick fired)")
+
+    return checks
+
+
 def run_all_tabs(page, snap_dir: Path) -> list[dict]:
     results = []
     # Not "networkidle" — Gradio keeps a live SSE/WebSocket connection open for
     # timer ticks, so the network never goes idle and this would always time out.
     page.goto(DASH_URL, wait_until="load", timeout=60_000)
+    load_ts = time.time()
     time.sleep(3)
+
+    _head("[Accessibility: refresh-announcer]")
+    announcer_checks, announcer_initial_text = _check_refresh_announcer_initial(page)
+    results.append({
+        "tab": "Accessibility (initial)",
+        "passed": all(ok for ok, _, _ in announcer_checks),
+        "checks": announcer_checks,
+        "screenshot": None,
+    })
 
     for tab_name, btn_text, assertions, wait_secs in TAB_SPECS:
         _head(f"[{tab_name}]")
@@ -275,6 +375,23 @@ def run_all_tabs(page, snap_dir: Path) -> list[dict]:
             "checks":     checks,
             "screenshot": snap_path,
         })
+
+    # timer_ui (FAST) fires every 60s -- top up the wait so at least one real
+    # tick has landed since page load before checking DOM-identity persistence.
+    elapsed = time.time() - load_ts
+    remaining = 62 - elapsed
+    if remaining > 0:
+        _head(f"[Accessibility: waiting {remaining:.0f}s more for a FAST tick]")
+        time.sleep(remaining)
+
+    _head("[Accessibility: refresh-announcer after a tick]")
+    persistence_checks = _check_refresh_announcer_persistence(page, announcer_initial_text)
+    results.append({
+        "tab": "Accessibility (after tick)",
+        "passed": all(ok for ok, _, _ in persistence_checks),
+        "checks": persistence_checks,
+        "screenshot": None,
+    })
 
     return results
 

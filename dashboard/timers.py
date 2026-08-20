@@ -30,7 +30,8 @@ from loguru import logger
 
 from dashboard.registry import RefreshGroup, by_group, widget, require_widgets
 
-require_widgets("sim_sym_dd", "perf_tabs", "perf_out", "symbol_selector", "symbol_detail_out")
+require_widgets("sim_sym_dd", "perf_tabs", "perf_out", "symbol_selector", "symbol_detail_out",
+                 "refresh_announcer")
 
 _logger = logger
 
@@ -44,6 +45,7 @@ def register_all_timers(timer_ui: gr.Timer, timer_data: gr.Timer) -> None:
     """Register batched timer.tick() callbacks using ComponentSpec discovery."""
     _register_ui_tick(timer_ui)
     _register_data_tick(timer_data)
+    _register_refresh_announcer(timer_ui)
 
 
 # ── Shared helper ─────────────────────────────────────────────────────────────
@@ -116,3 +118,23 @@ def _register_data_tick(timer: gr.Timer) -> None:
     # removes the race entirely — auto-refreshing an already-open detail view
     # every few minutes is not worth reintroducing a bug that shows the wrong
     # thing under the right label.
+
+
+# ── Accessibility: background-refresh announcer (ADR-041) ─────────────────────
+
+def _announce_refresh() -> str:
+    """Plain-text status for the visually-hidden #refresh-announcer live
+    region. Bound to timer_ui (FAST/60s) only — see ADR-041's Timer
+    Ownership finding. Text must change every tick so assistive tech
+    detects the mutation; a timestamp guarantees that."""
+    import datetime
+    from zoneinfo import ZoneInfo
+    now = datetime.datetime.now(datetime.timezone.utc).astimezone(ZoneInfo("America/Chicago"))
+    return f"Dashboard updated {now.strftime('%I:%M:%S %p %Z')}"
+
+
+def _register_refresh_announcer(timer: gr.Timer) -> None:
+    """Standalone tick (ADR-041): refresh_announcer's only writer. Never
+    listed in any .change()/.click() outputs, so background refreshes are
+    never conflated with user-triggered updates."""
+    timer.tick(fn=_announce_refresh, outputs=[widget("refresh_announcer")])
