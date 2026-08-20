@@ -1555,38 +1555,107 @@ def test_announce_screen_ignores_its_selected_id_argument():
     assert ui._announce_screen("dec-002") == "Decision Center updated. Showing 2 decisions."
 
 
-def test_announce_row_select_wording():
+def test_announce_row_select_wording_includes_the_rationale_for_a_single_evidence_entry():
+    view = _make_view(decision_id="dec-002", symbol="MSFT")
+    entry = _make_entry(evidence_type="NEWS_SENTIMENT", source="newsapi")
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-002"])
     row = ["dec-002", "MSFT", "HOLD", "Decision Created", "82%"]
 
-    assert DecisionCenterUI._announce_row_select(
-        _make_select_event(row)
-    ) == "Decision selected: MSFT."
+    result = ui._announce_row_select(_make_select_event(row))
+
+    assert result == "Decision selected: MSFT. 1 NEWS_SENTIMENT signal from newsapi."
+
+
+def test_announce_row_select_wording_includes_the_rationale_for_multiple_evidence_entries():
+    view = _make_view(decision_id="dec-002", symbol="MSFT")
+    entry_a = _make_entry(evidence_type="NEWS_SENTIMENT", source="newsapi")
+    entry_b = _make_entry(evidence_id="ev-002", evidence_type="PRICE_ACTION", source="alpaca")
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, evidence=(entry_a, entry_b))
+    )
+    ui = DecisionCenterUI(controller, ["dec-002"])
+    row = ["dec-002", "MSFT", "HOLD", "Decision Created", "82%"]
+
+    result = ui._announce_row_select(_make_select_event(row))
+
+    assert result == (
+        "Decision selected: MSFT. 2 signals: NEWS_SENTIMENT from newsapi; "
+        "PRICE_ACTION from alpaca."
+    )
+
+
+def test_announce_row_select_wording_falls_back_to_the_placeholder_for_zero_evidence():
+    view = _make_view(decision_id="dec-001", symbol="AAPL")
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=()))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+    row = ["dec-001", "AAPL", "BUY", "Decision Created", "71%"]
+
+    result = ui._announce_row_select(_make_select_event(row))
+
+    assert result == (
+        "Decision selected: AAPL. Rationale not captured. "
+        "The decision thesis has not yet been recorded."
+    )
+
+
+def test_announce_row_select_wording_omits_rationale_on_a_read_error():
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=None, decision_status=ReadStatus.ERROR)
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+    row = ["dec-001", "AAPL", "BUY", "Decision Created", "71%"]
+
+    result = ui._announce_row_select(_make_select_event(row))
+
+    assert result == "Decision selected: AAPL."
+
+
+def test_announce_row_select_wording_omits_rationale_when_the_decision_is_missing():
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=None))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+    row = ["dec-001", "AAPL", "BUY", "Decision Created", "71%"]
+
+    result = ui._announce_row_select(_make_select_event(row))
+
+    assert result == "Decision selected: AAPL."
 
 
 def test_announce_row_select_is_empty_on_deselection():
-    result = DecisionCenterUI._announce_row_select(
-        _make_select_event(["dec-001"], selected=False)
-    )
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    result = ui._announce_row_select(_make_select_event(["dec-001"], selected=False))
 
     assert result == ""
+    assert controller.load_decision_detail_calls == []
 
 
 def test_announce_row_select_is_empty_on_missing_row_value():
-    result = DecisionCenterUI._announce_row_select(_make_select_event(None))
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    result = ui._announce_row_select(_make_select_event(None))
 
     assert result == ""
+    assert controller.load_decision_detail_calls == []
 
 
-def test_announce_row_select_does_not_call_the_controller():
-    """Derived entirely from evt.row_value -- no additional controller
-    lookup, per the approved proposal."""
-    controller = _FakeController()
+def test_announce_row_select_calls_the_controller_for_the_selected_decision():
+    """P2 accessibility pass: unlike P1's original wording, the
+    rationale-inclusive announcement needs the decision's evidence, so
+    this now makes one load_decision_detail() call per selection --
+    mirroring _announce_screen's own already-accepted duplicate-fetch
+    precedent (re-fetching via load_decisions()) rather than threading
+    _on_row_select's own render through to this independent listener."""
+    view = _make_view(decision_id="dec-002", symbol="MSFT")
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=()))
+    ui = DecisionCenterUI(controller, ["dec-002"])
     row = ["dec-002", "MSFT", "HOLD", "Decision Created", "82%"]
 
-    DecisionCenterUI._announce_row_select(_make_select_event(row))
+    ui._announce_row_select(_make_select_event(row))
 
-    assert controller.load_decision_detail_calls == []
-    assert controller.load_decisions_calls == []
+    assert controller.load_decision_detail_calls == ["dec-002"]
 
 
 def test_live_announcer_block_is_present_in_the_built_layout_with_empty_initial_value():

@@ -877,21 +877,48 @@ class DecisionCenterUI:
         noun = "decision" if count == 1 else "decisions"
         return f"Decision Center updated. Showing {count} {noun}."
 
-    @staticmethod
-    def _announce_row_select(evt: gr.SelectData) -> str:
-        """P1 accessibility slice: populates live_announcer for
+    def _announce_row_select(self, evt: gr.SelectData) -> str:
+        """P1 accessibility slice, extended by the P2 Why/Rationale
+        accessibility pass: populates live_announcer for
         list_output.select() -- a second, independent listener (see
         build()), never touching _on_row_select()'s own return shape or
-        detail_outputs. Derived entirely from evt.row_value (the same event
-        _on_row_select already receives for this identical trigger) --
-        row_value[1] is the Symbol column (_LIST_HEADERS) already rendered
-        in the clicked row, so no additional controller call is made. Empty
-        string on deselection/no-row, matching _on_row_select's own guard --
-        nothing to announce when nothing was selected."""
+        detail_outputs.
+
+        P1 originally derived this wording entirely from evt.row_value,
+        deliberately avoiding a second controller call ("Option 1 --
+        shared wording, see the approved proposal"). The P2 investigation
+        found that minimal wording ("Decision selected: {symbol}.") left
+        screen-reader users with no indication that a rationale -- the
+        same one sighted users see appear in the Why? panel below -- was
+        even available, let alone what it said; closing that gap requires
+        the decision's evidence, which row_value alone doesn't carry. This
+        now makes one additional controller call per selection, following
+        the same already-accepted duplicate-fetch precedent
+        _announce_screen uses above (re-fetching via load_decisions()
+        instead of threading _render_screen's result) -- these announcer
+        listeners stay deliberately independent of the render listeners
+        rather than sharing state with them.
+
+        Reuses _why_summary_sentence -- the exact plain-text logic
+        _format_why_summary_html already renders into the Why? panel --
+        so the announcement and the visible panel can never drift out of
+        sync. Falls back to the bare "Decision selected: {symbol}."
+        wording when the detail read fails (ReadStatus.ERROR) or returns
+        empty: no rationale claim is made when the read itself did not
+        succeed. Empty string on deselection/no-row, matching
+        _on_row_select's own guard -- nothing to announce when nothing was
+        selected."""
         if not evt.selected or not evt.row_value:
             return ""
+        decision_id = evt.row_value[0]
         symbol = evt.row_value[1]
-        return f"Decision selected: {symbol}."
+        detail_area = self._controller.load_decision_detail(decision_id)
+        if detail_area.decision_status is ReadStatus.ERROR or detail_area.is_empty:
+            return f"Decision selected: {symbol}."
+        summary = self._why_summary_sentence(detail_area.evidence)
+        if summary is None:
+            summary = f"{_WHY_RATIONALE_TITLE}. {_WHY_RATIONALE_BODY}"
+        return f"Decision selected: {symbol}. {summary}"
 
     @staticmethod
     def _format_list_rows(list_area: DecisionListArea) -> List[List[str]]:
@@ -994,25 +1021,41 @@ class DecisionCenterUI:
         )
 
     @staticmethod
-    def _format_why_summary_html(evidence: Tuple[EvidenceEntry, ...]) -> str:
-        """Composes a real, decision-specific summary from already-loaded
-        EvidenceEntry data (evidence_type/source) -- the one real signal
-        already available in this read chain, not a substitute for a
-        thesis/rationale field (none exists anywhere, and this pass invents
-        none). Falls back to the original, unchanged _WHY_RATIONALE_HTML
-        when there is no evidence to summarize -- including the
-        evidence-read-error case (detail_area.evidence is empty then too),
-        which already surfaces its own message in the Evidence section."""
+    def _why_summary_sentence(evidence: Tuple[EvidenceEntry, ...]) -> Optional[str]:
+        """Plain-text rationale sentence, factored out of
+        _format_why_summary_html so the P2 accessibility pass's
+        _announce_row_select can announce the same rationale a sighted
+        user sees in the Why? panel instead of re-deriving it. Composes a
+        real, decision-specific summary from already-loaded EvidenceEntry
+        data (evidence_type/source) -- the one real signal already
+        available in this read chain, not a substitute for a
+        thesis/rationale field (none exists anywhere, and this pass
+        invents none). None when there is no evidence to summarize --
+        including the evidence-read-error case (detail_area.evidence is
+        empty then too) -- callers render their own fallback for that
+        case, since the HTML and plain-text renderings of "no rationale"
+        differ (_WHY_RATIONALE_HTML's two-line disclosure vs. a single
+        announced sentence)."""
         if not evidence:
-            return _WHY_RATIONALE_HTML
+            return None
         if len(evidence) == 1:
             entry = evidence[0]
-            summary = f"1 {entry.evidence_type} signal from {entry.source}."
-        else:
-            descriptions = "; ".join(
-                f"{entry.evidence_type} from {entry.source}" for entry in evidence
-            )
-            summary = f"{len(evidence)} signals: {descriptions}."
+            return f"1 {entry.evidence_type} signal from {entry.source}."
+        descriptions = "; ".join(
+            f"{entry.evidence_type} from {entry.source}" for entry in evidence
+        )
+        return f"{len(evidence)} signals: {descriptions}."
+
+    @staticmethod
+    def _format_why_summary_html(evidence: Tuple[EvidenceEntry, ...]) -> str:
+        """Falls back to the original, unchanged _WHY_RATIONALE_HTML when
+        there is no evidence to summarize -- including the
+        evidence-read-error case, which already surfaces its own message
+        in the Evidence section. See _why_summary_sentence for the shared
+        summary logic (also used by _announce_row_select)."""
+        summary = DecisionCenterUI._why_summary_sentence(evidence)
+        if summary is None:
+            return _WHY_RATIONALE_HTML
         return (
             '<div class="aara-disclosure-message">'
             f'<div class="aara-disclosure-body">{html.escape(summary)}</div>'
