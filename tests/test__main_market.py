@@ -12,13 +12,20 @@ from __future__ import annotations
 import json
 import os
 from datetime import date, datetime
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 from alpaca.trading.requests import GetCalendarRequest
 
-from bot._main_market import _fetch_symbol, _is_market_hours, _load_premarket_sentiment
+import config
+from bot._main_market import (
+    _fetch_symbol, _is_market_hours, _load_premarket_sentiment, _trim_incomplete_daily_bar,
+)
 import bot._main_market as main_market
+from bot.strategy.features import compute_features, FEATURE_COLS_V4
+from tests.conftest import make_ohlcv
 
 
 def test_load_premarket_sentiment_returns_scores_and_saved_at(tmp_path, monkeypatch):
@@ -179,3 +186,190 @@ def test_fetch_symbol_both_empty_when_yfinance_also_has_nothing():
     assert symbol == "ZZZZ"
     assert bars_5m.empty
     assert bars_daily.empty
+
+
+# --- ADR-040: exclude in-progress "today" daily bar before compute_features() ---
+
+def _daily_ohlcv(n: int = 270, end: date = date(2026, 8, 17), seed: int = 42) -> pd.DataFrame:
+    """Realistic daily OHLCV (via conftest.make_ohlcv) with a business-day
+    DatetimeIndex ending at `end` -- mirrors the shape prefetch_bars() hands
+    _fetch_symbol() (yf_batch[sym] indexed by trading date, as yf.download()
+    returns it)."""
+    df = make_ohlcv(n, seed=seed)
+    df.index = pd.bdate_range(end=end, periods=n)
+    return df
+
+
+# _FixedDatetime._fixed is 2026-08-17 10:00 local (a real Monday) -- reused
+# here so "today" in America/New_York resolves the same way it does for the
+# _is_market_hours tests above. The prior business day is Friday 2026-08-14.
+
+def test_trim_incomplete_daily_bar_drops_todays_row(monkeypatch):
+    monkeypatch.setattr(main_market, "datetime", _FixedDatetime)
+    df = _daily_ohlcv(270, end=date(2026, 8, 17))
+    expected = df.iloc[:-1]
+
+    result = _trim_incomplete_daily_bar(df)
+
+    pd.testing.assert_frame_equal(result, expected)
+
+
+def test_trim_incomplete_daily_bar_noop_when_last_row_not_today(monkeypatch):
+    monkeypatch.setattr(main_market, "datetime", _FixedDatetime)
+    df = _daily_ohlcv(270, end=date(2026, 8, 14))  # last row is Friday, not "today"
+
+    result = _trim_incomplete_daily_bar(df)
+
+    pd.testing.assert_frame_equal(result, df)
+
+
+def test_trim_incomplete_daily_bar_handles_none():
+    assert _trim_incomplete_daily_bar(None) is None
+
+
+def test_trim_incomplete_daily_bar_handles_empty():
+    result = _trim_incomplete_daily_bar(pd.DataFrame())
+    assert result.empty
+
+
+def test_fetch_symbol_excludes_in_progress_today_bar(monkeypatch):
+    """ADR-040 §5 item 1: an in-progress "today" daily bar must not reach
+    compute_features() -- bars_daily's last index date must be the prior
+    completed session, not today."""
+    monkeypatch.setattr(main_market, "datetime", _FixedDatetime)
+    raw = _daily_ohlcv(270, end=date(2026, 8, 17))
+    expected_last = raw.index[-2]  # prior completed session
+
+    client = MagicMock()
+    client.get_bars.return_value = _stale_5m_bars()
+    yf_batch = {"AAPL": raw.copy()}
+
+    _, _, bars_daily = _fetch_symbol("AAPL", client, yf_batch)
+
+    assert bars_daily.index[-1] == expected_last
+    assert bars_daily.index[-1].date() != date(2026, 8, 17)
+
+
+def test_fetch_symbol_daily_features_match_pretrimmed_reference(monkeypatch):
+    """ADR-040 §5 items 2 & 4: bars_daily's latest row, across every one of
+    the 22 FEATURE_COLS_V4 columns, must be bit-identical to computing
+    features directly on the raw frame with the synthetic today-row removed
+    beforehand -- proving the trim point is equivalent to computing features
+    on an already-pre-trimmed frame."""
+    monkeypatch.setattr(main_market, "datetime", _FixedDatetime)
+    raw = _daily_ohlcv(280, end=date(2026, 8, 17))
+
+    client = MagicMock()
+    client.get_bars.return_value = _stale_5m_bars()
+    yf_batch = {"AAPL": raw.copy()}
+
+    _, _, bars_daily = _fetch_symbol("AAPL", client, yf_batch)
+    reference = compute_features(raw.iloc[:-1].copy())
+
+    assert len(FEATURE_COLS_V4) == 22
+    for col in FEATURE_COLS_V4:
+        assert bars_daily.iloc[-1][col] == reference.iloc[-1][col], f"mismatch in {col}"
+
+
+def test_min_volume_ratio_gate_unchanged():
+    """ADR-040 §5 item 6: this ADR's trim must not require, and did not
+    receive, any change to MIN_VOLUME_RATIO or the Gate 2 comparison that
+    reads it -- both stay exactly as they were before this ADR."""
+    assert config.MIN_VOLUME_RATIO == 0.3
+
+    cycle_src = (Path(__file__).parent.parent / "bot" / "_main_cycle.py").read_text(encoding="utf-8")
+    lines = cycle_src.splitlines()
+    assert lines[109] == "    if ctx.volume_ratio < MIN_VOLUME_RATIO:"  # line 110 (1-indexed)
+
+
+def test_fetch_symbol_spy_rs_trim_before_close_derivation(monkeypatch):
+    """ADR-040 §5 item 7 (part 1): for a non-SPY symbol, an in-progress
+    "today" SPY bar must be trimmed before spy_close is derived from it --
+    rs_vs_spy_21d/63d must match a reference computed from SPY with that
+    row excluded, not from the untrimmed SPY close."""
+    monkeypatch.setattr(main_market, "datetime", _FixedDatetime)
+
+    aapl_raw = _daily_ohlcv(280, end=date(2026, 8, 14), seed=1)  # AAPL: historical, not "today"
+    spy_hist = _daily_ohlcv(280, end=date(2026, 8, 14), seed=2)  # same date index as aapl_raw
+    today_row = pd.DataFrame(
+        {"open": [1.0], "high": [1.0], "low": [1.0], "close": [1.0], "volume": [1.0]},
+        index=[pd.Timestamp(date(2026, 8, 17))],
+    )
+    spy_raw = pd.concat([spy_hist, today_row])  # SPY: last row IS "today"
+
+    client = MagicMock()
+    client.get_bars.return_value = _stale_5m_bars()
+    yf_batch = {"AAPL": aapl_raw.copy(), "SPY": spy_raw.copy()}
+
+    _, _, bars_daily = _fetch_symbol("AAPL", client, yf_batch)
+
+    reference = compute_features(aapl_raw.copy(), spy_close=spy_hist["close"])
+
+    assert bars_daily.iloc[-1]["rs_vs_spy_21d"] == reference.iloc[-1]["rs_vs_spy_21d"]
+    assert bars_daily.iloc[-1]["rs_vs_spy_63d"] == reference.iloc[-1]["rs_vs_spy_63d"]
+
+
+def test_fetch_symbol_spy_missing_key_stays_safe(monkeypatch):
+    """ADR-040 §5 item 7 (part 2): the trim must preserve the existing
+    missing-SPY safety -- no "SPY" key in yf_batch at all must still return
+    successfully, with rs_vs_spy_21d/63d at their existing null-SPY default."""
+    monkeypatch.setattr(main_market, "datetime", _FixedDatetime)
+    aapl_raw = _daily_ohlcv(270, end=date(2026, 8, 14), seed=1)
+
+    client = MagicMock()
+    client.get_bars.return_value = _stale_5m_bars()
+    yf_batch = {"AAPL": aapl_raw.copy()}  # no "SPY" key at all
+
+    symbol, bars_5m, bars_daily = _fetch_symbol("AAPL", client, yf_batch)
+
+    assert symbol == "AAPL"
+    assert not bars_daily.empty
+    assert (bars_daily["rs_vs_spy_21d"] == 0.0).all()
+    assert (bars_daily["rs_vs_spy_63d"] == 0.0).all()
+
+
+def test_fetch_symbol_spy_empty_frame_stays_safe(monkeypatch):
+    """ADR-040 §5 item 7 (part 2): an empty "SPY" frame in yf_batch must
+    also stay safe -- same existing null-SPY default, no exception."""
+    monkeypatch.setattr(main_market, "datetime", _FixedDatetime)
+    aapl_raw = _daily_ohlcv(270, end=date(2026, 8, 14), seed=1)
+
+    client = MagicMock()
+    client.get_bars.return_value = _stale_5m_bars()
+    yf_batch = {"AAPL": aapl_raw.copy(), "SPY": pd.DataFrame()}
+
+    symbol, bars_5m, bars_daily = _fetch_symbol("AAPL", client, yf_batch)
+
+    assert symbol == "AAPL"
+    assert not bars_daily.empty
+    assert (bars_daily["rs_vs_spy_21d"] == 0.0).all()
+    assert (bars_daily["rs_vs_spy_63d"] == 0.0).all()
+
+
+def test_fetch_symbol_bit_identical_predictions_for_historical_fixture(monkeypatch):
+    """ADR-040 §5 item 5: the trim only activates when the last row is
+    dated "today". For an already-complete historical fixture, bars_daily
+    must be bit-identical to computing features on the untrimmed raw data --
+    and therefore XGB/LSTM predict_proba on that identical input produce
+    bit-identical output, whether or not ADR-040's trim code runs."""
+    monkeypatch.setattr(main_market, "datetime", _FixedDatetime)
+    raw = _daily_ohlcv(300, end=date(2026, 8, 10), seed=3)  # a week before "today" -- unambiguously historical
+
+    client = MagicMock()
+    client.get_bars.return_value = _stale_5m_bars()
+    yf_batch = {"AAPL": raw.copy()}
+
+    _, _, bars_daily = _fetch_symbol("AAPL", client, yf_batch)
+    reference = compute_features(raw.copy())  # untrimmed -- trim must have been a no-op here
+
+    pd.testing.assert_frame_equal(bars_daily, reference)
+
+    from bot.strategy.xgb_predictor import XGBPredictor
+    from bot.strategy.lstm_predictor import LSTMPredictor
+    xgb = XGBPredictor()
+    lstm = LSTMPredictor()
+    if xgb.model is None or lstm.model is None:
+        pytest.skip("No trained XGB/LSTM model on disk -- bit-identical predict_proba check requires one")
+
+    assert xgb.predict_proba(bars_daily.iloc[-1]) == xgb.predict_proba(reference.iloc[-1])
+    assert lstm.predict_proba(bars_daily) == lstm.predict_proba(reference)

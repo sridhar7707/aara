@@ -361,6 +361,19 @@ def _maybe_push_db(last_sync: float, interval: float) -> float:
     return last_sync
 
 
+def _trim_incomplete_daily_bar(df: pd.DataFrame | None) -> pd.DataFrame | None:
+    """Drop a daily OHLCV frame's last row when it's dated "today" in
+    America/New_York -- yfinance's last daily bar is still in progress
+    (partial volume/OHLC) whenever fetched during market hours (ADR-040)."""
+    if df is None or df.empty:
+        return df
+    import zoneinfo
+    today_et = datetime.now(zoneinfo.ZoneInfo("America/New_York")).date()
+    if pd.Timestamp(df.index[-1]).date() == today_et:
+        return df.iloc[:-1]
+    return df
+
+
 def _fetch_symbol(symbol: str, client: AlpacaClient, yf_batch: dict) -> tuple[str, pd.DataFrame, pd.DataFrame]:
     """Return (symbol, bars_5m, bars_daily).
 
@@ -407,10 +420,10 @@ def _fetch_symbol(symbol: str, client: AlpacaClient, yf_batch: dict) -> tuple[st
 
     # Daily bars from pre-fetched batch (thread-safe; computed before thread pool)
     bars_daily = pd.DataFrame()
-    raw_d = yf_batch.get(symbol)
+    raw_d = _trim_incomplete_daily_bar(yf_batch.get(symbol))
     if raw_d is not None and not raw_d.empty:
         try:
-            spy_raw   = yf_batch.get("SPY")
+            spy_raw   = _trim_incomplete_daily_bar(yf_batch.get("SPY"))
             spy_close = spy_raw["close"] if (spy_raw is not None and not spy_raw.empty) else None
             bars_daily = compute_features(raw_d, spy_close=spy_close)
         except Exception as e:
