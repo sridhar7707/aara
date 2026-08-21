@@ -2091,6 +2091,27 @@ def test_accessible_name_setup_script_targets_the_documented_dom_contract():
     assert 'setAttribute("aria-label", "Decisions")' in _ACCESSIBLE_NAME_SETUP_JS
 
 
+def test_theme_focus_ring_covers_decision_journey_anchor_links():
+    """P2 #2 fix: the Decision Journey's four stage links
+    (.aara-lifecycle-track .label -- see _lifecycle_track_html) are plain
+    <a href="#..."> anchors, natively focusable without a tabindex
+    attribute. theme.py's keyboard-focus-visibility rule previously only
+    listed `button:focus-visible` and `[tabindex]:focus-visible`, so these
+    links matched neither selector and fell through with no visible focus
+    ring, unlike every other focusable element in this app. Asserted as a
+    single contiguous rule (not just a same-file substring) so a future
+    edit can't silently split `a:focus-visible` into a different
+    declaration, or drop it, without failing a test."""
+    assert (
+        ".gradio-container button:focus-visible,\n"
+        ".gradio-container [tabindex]:focus-visible,\n"
+        ".gradio-container a:focus-visible {\n"
+        "  outline: 2px solid var(--color-gold-accent-boundary) !important;\n"
+        "  outline-offset: 2px;\n"
+        "}"
+    ) in CSS
+
+
 def test_theme_restyles_gradios_own_pending_state_classes():
     """MVP Loading States slice: theme.py must restyle Gradio's own
     pending/processing classes (.eta-bar sweep, .generating pulse border,

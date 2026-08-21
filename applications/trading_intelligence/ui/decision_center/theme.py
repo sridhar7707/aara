@@ -765,9 +765,22 @@ footer { display: none !important; }
 }
 
 /* Keyboard focus visibility -- buttons and any interactive element get an
-   obvious, consistent focus ring. */
+   obvious, consistent focus ring.
+   P2 #2 fix: the Decision Journey's four stage links
+   (.aara-lifecycle-track .label, see gradio_view.py's _lifecycle_track_html)
+   are plain <a href="#..."> anchors -- natively focusable without a
+   tabindex attribute, so they matched neither `button:focus-visible` nor
+   `[tabindex]:focus-visible` above and fell through to no visible focus
+   ring at all (or the browser default, inconsistent with every other
+   focusable element in this app). These are also the only <a> elements
+   anywhere in this application (verified: grep for "<a " across
+   applications/trading_intelligence/ finds only these four), so adding a
+   generic `a:focus-visible` selector, scoped to .gradio-container like the
+   rules above, has no blast radius beyond them -- same declaration reused
+   verbatim, no new color or visual style introduced. */
 .gradio-container button:focus-visible,
-.gradio-container [tabindex]:focus-visible {
+.gradio-container [tabindex]:focus-visible,
+.gradio-container a:focus-visible {
   outline: 2px solid var(--color-gold-accent-boundary) !important;
   outline-offset: 2px;
 }
