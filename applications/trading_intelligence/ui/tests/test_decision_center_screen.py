@@ -14,7 +14,22 @@ from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionDetailArea,
     DecisionListArea,
     ReadStatus,
+    format_display_timestamp,
 )
+
+
+def test_format_display_timestamp_converts_naive_utc_to_america_chicago_summer_cdt():
+    assert (
+        format_display_timestamp(datetime.datetime(2026, 8, 21, 19, 45, 0))
+        == "2026-08-21 14:45 CDT"
+    )
+
+
+def test_format_display_timestamp_converts_naive_utc_to_america_chicago_winter_cst():
+    assert (
+        format_display_timestamp(datetime.datetime(2026, 1, 8, 15, 40, 0))
+        == "2026-01-08 09:40 CST"
+    )
 
 
 def _make_view(**overrides):
@@ -119,7 +134,29 @@ def test_decision_detail_area_formats_timestamp():
         decision=_make_view(updated_at=datetime.datetime(2026, 8, 4, 12, 30, 0))
     )
 
-    assert area.timestamp_display == "2026-08-04 12:30 UTC"
+    assert area.timestamp_display == "2026-08-04 07:30 CDT"
+
+
+def test_decision_detail_area_formats_timestamp_in_america_chicago_summer_cdt():
+    """P1 UI-only timestamp fix: all Decision Center timestamps are stored
+    as naive-but-UTC (see format_display_timestamp's own docstring) and
+    must display converted to America/Chicago, DST-aware. August is CDT
+    (UTC-5)."""
+    area = DecisionDetailArea(
+        decision=_make_view(updated_at=datetime.datetime(2026, 8, 21, 19, 45, 0))
+    )
+
+    assert area.timestamp_display == "2026-08-21 14:45 CDT"
+
+
+def test_decision_detail_area_formats_timestamp_in_america_chicago_winter_cst():
+    """Same conversion, but January is CST (UTC-6) -- proves the DST
+    transition is honored automatically, not a fixed offset."""
+    area = DecisionDetailArea(
+        decision=_make_view(updated_at=datetime.datetime(2026, 1, 8, 15, 40, 0))
+    )
+
+    assert area.timestamp_display == "2026-01-08 09:40 CST"
 
 
 def test_decision_detail_area_defaults_to_no_evidence():
@@ -144,7 +181,7 @@ def test_decision_detail_area_with_evidence_still_formats_core_decision_fields()
 
     assert area.confidence_display == "78%"
     assert area.status_display == "Decision Created"
-    assert area.timestamp_display == "2026-08-04 12:00 UTC"
+    assert area.timestamp_display == "2026-08-04 07:00 CDT"
 
 
 def test_decision_detail_area_is_immutable_including_evidence():

@@ -178,7 +178,7 @@ def test_controller_produces_a_correctly_formatted_screen_model_from_real_projec
 
     assert screen.detail_area.confidence_display == "78%"
     assert screen.detail_area.status_display == "Decision Created"
-    assert screen.detail_area.timestamp_display == "2026-08-04 09:35 UTC"
+    assert screen.detail_area.timestamp_display == "2026-08-04 04:35 CDT"
 
 
 def test_no_writes_occur_anywhere_in_the_chain():

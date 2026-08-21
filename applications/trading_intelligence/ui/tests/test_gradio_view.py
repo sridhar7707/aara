@@ -12,6 +12,7 @@ than matching a byte-exact HTML string, since exact markup is an
 implementation detail, not the contract.
 """
 import datetime
+import html
 
 import gradio as gr
 
@@ -38,6 +39,9 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _SELECT_DECISION_MESSAGE,
     _SELECTION_ARIA_SYNC_JS,
     _SHELL_NAV_HTML,
+    _TIMESTAMP_DISCLOSURE_BODY,
+    _TIMESTAMP_DISCLOSURE_HTML,
+    _TIMESTAMP_DISCLOSURE_TITLE,
     _WHY_RATIONALE_BODY,
     _WHY_RATIONALE_HTML,
     _WHY_RATIONALE_TITLE,
@@ -288,7 +292,7 @@ def test_render_screen_maps_list_rows_and_detail_fields():
     assert list_rows == [[
         "dec-001", "AAPL",
         '<span class="aara-list-action-badge action-buy">BUY</span>',
-        "Approval Recorded", "91%", "2026-08-08 09:00 UTC", "-",
+        "Approval Recorded", "91%", "2026-08-08 04:00 CDT", "-",
     ]]
     assert list_empty_html == ""
     assert "AAPL" in header
@@ -296,7 +300,7 @@ def test_render_screen_maps_list_rows_and_detail_fields():
     assert "dec-001" not in header
     assert "Approval" in lifecycle
     assert conviction == "91%"
-    assert updated == "2026-08-08 09:00 UTC"
+    assert updated == "2026-08-08 04:00 CDT"
     assert status == "Approval Recorded"
     assert why_html == _WHY_RATIONALE_HTML
     assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
@@ -305,6 +309,23 @@ def test_render_screen_maps_list_rows_and_detail_fields():
     )
     assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
     assert audit_html == '<div class="aara-empty-message">No audit events recorded.</div>'
+
+
+def test_render_screen_formats_list_row_timestamp_in_cst_during_winter():
+    """DST-aware in gradio_view.py's own list-row rendering path too, not
+    just screen.py's timestamp_display -- winter (January) is CST (UTC-6),
+    proving the conversion isn't a fixed CDT offset."""
+    view = _make_view(updated_at=datetime.datetime(2026, 1, 8, 15, 40, 0))
+    screen = DecisionCenterScreen(
+        list_area=DecisionListArea(decisions=[view]),
+        detail_area=DecisionDetailArea(decision=view),
+    )
+    controller = _FakeController(screen=screen)
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    list_rows = ui._render_screen()[0]
+
+    assert list_rows[0][5] == "2026-01-08 09:40 CST"
 
 
 def test_render_screen_handles_empty_decision_list():
@@ -725,7 +746,7 @@ def test_render_detail_renders_a_single_evidence_card():
 
     assert "NEWS_SENTIMENT" in evidence_html
     assert "newsapi" in evidence_html
-    assert "2026-08-08 09:05 UTC" in evidence_html
+    assert "2026-08-08 04:05 CDT" in evidence_html
     assert 'class="aara-record-card"' in evidence_html
 
 
@@ -891,7 +912,7 @@ def test_render_detail_renders_a_single_governance_card():
 
     assert "pol-max-pos" in governance_html
     assert "Yes" in governance_html
-    assert "2026-08-08 09:06 UTC" in governance_html
+    assert "2026-08-08 04:06 CDT" in governance_html
 
 
 def test_render_detail_renders_a_disabled_policy_as_no():
@@ -948,7 +969,7 @@ def test_render_detail_renders_a_single_approval_card():
 
     assert "Approved" in approval_html
     assert "risk_officer" in approval_html
-    assert "2026-08-08 09:07 UTC" in approval_html
+    assert "2026-08-08 04:07 CDT" in approval_html
 
 
 def test_render_detail_renders_a_rejected_approval():
@@ -978,7 +999,7 @@ def test_approval_card_does_not_render_the_fabricated_authorization_recorded_lab
     assert "Authorization Recorded" not in approval_html
     assert "Approved" in approval_html
     assert "risk_officer" in approval_html
-    assert "2026-08-08 09:07 UTC" in approval_html
+    assert "2026-08-08 04:07 CDT" in approval_html
 
 
 def test_render_detail_renders_an_empty_approval_message_for_a_decision_with_no_approvals():
@@ -1002,7 +1023,7 @@ def test_render_detail_renders_a_single_audit_card():
     *_, audit_html = ui._render_detail("dec-001")
 
     assert "Decision Created" in audit_html
-    assert "2026-08-08 09:00 UTC" in audit_html
+    assert "2026-08-08 04:00 CDT" in audit_html
     assert 'class="aara-record-card"' in audit_html
 
 
@@ -1685,6 +1706,37 @@ def test_illustrative_data_disclosure_block_is_present_in_the_built_layout():
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
     assert _ILLUSTRATIVE_DATA_HTML in html_values
+
+
+def test_timestamp_disclosure_clarifies_last_updated_may_be_governance_evaluation_time():
+    """P1 UI-only timestamp fix: GovernanceService.evaluate_policy() stamps
+    real evaluation-time (unlike every other lifecycle step, which uses a
+    caller-supplied/seed timestamp) -- out of scope to change without
+    touching sentinel_engine. Since "Last Updated" can therefore be that
+    real evaluation time rather than illustrative demo-timeline data, the
+    Decisions list must disclose that explicitly."""
+    assert _TIMESTAMP_DISCLOSURE_TITLE == "About Last Updated"
+    assert "governance evaluation time" in _TIMESTAMP_DISCLOSURE_BODY
+    assert "latest lifecycle event" in _TIMESTAMP_DISCLOSURE_BODY
+    assert _TIMESTAMP_DISCLOSURE_HTML == (
+        '<div class="aara-disclosure-message">'
+        '<div class="aara-disclosure-title">About Last Updated</div>'
+        f'<div class="aara-disclosure-body">{html.escape(_TIMESTAMP_DISCLOSURE_BODY)}</div>'
+        "</div>"
+    )
+
+
+def test_timestamp_disclosure_block_is_present_in_the_built_layout():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    assert _TIMESTAMP_DISCLOSURE_HTML in html_values
 
 
 def test_announce_screen_wording_for_zero_decisions():

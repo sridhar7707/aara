@@ -49,6 +49,16 @@ starlette==0.52.1
 # unrelated to this addition, not introduced or fixed by it.
 supabase-auth==2.31.0
 
+# zoneinfo (stdlib since Python 3.8) needs an IANA time zone database to
+# resolve "America/Chicago" -- Decision Center's timestamps are converted
+# to it for display (ui/decision_center/screen.py's
+# format_display_timestamp(), P1 UI-only timestamp fix). Not guaranteed
+# present on this minimal HF Space image (unlike a full OS install, which
+# usually ships /usr/share/zoneinfo); tzdata is the official CPython
+# fallback package providing that data cross-platform, so this doesn't
+# depend on the deploy image happening to include system tzdata.
+tzdata
+
 # HF ZeroGPU runtime requirement (see main.py's _zero_gpu_startup_probe) --
 # this Space's hardware (zero-a10g) refuses to start without at least one
 # @spaces.GPU-decorated function present. Deliberately unpinned: HF's own

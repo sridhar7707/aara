@@ -264,6 +264,7 @@ from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionDetailArea,
     DecisionListArea,
     ReadStatus,
+    format_display_timestamp,
 )
 from applications.trading_intelligence.ui.decision_center.theme import CSS
 
@@ -641,6 +642,34 @@ _ILLUSTRATIVE_DATA_HTML = (
     "</div>"
 )
 
+# P1 UI-only timestamp-semantics disclosure (GOOGL/dec-seed-004 timestamp
+# audit): "Last Updated" in the Decisions table (and the mirrored Last
+# Updated field in Decision Intelligence, via screen.py's own
+# timestamp_display) is not always narrative/seed-timeline data -- for a
+# decision whose latest recorded lifecycle stage is Governance Evaluated,
+# GovernanceService.evaluate_policy() stamps real evaluation-time
+# (datetime.utcnow(), sentinel_engine/services/governance_service.py) --
+# unlike every other lifecycle step, which uses a caller-supplied/seed
+# timestamp -- and that is out of scope to change without touching
+# sentinel_engine (see bootstrap.py's own _seed_decisions() docstring).
+# Same static/decision-independent/persistent pattern as
+# _ILLUSTRATIVE_DATA_HTML above -- a separate disclosure because it covers
+# a different topic (timestamp semantics, not data authenticity) that
+# _ILLUSTRATIVE_DATA_BODY's own docstring deliberately keeps out of scope
+# for that single line. Placed in the list toolbar, directly associated
+# with the Decisions table's own "Last Updated" column.
+_TIMESTAMP_DISCLOSURE_TITLE = "About Last Updated"
+_TIMESTAMP_DISCLOSURE_BODY = (
+    '"Last Updated" may represent the latest lifecycle event recorded '
+    "for a decision, including governance evaluation time."
+)
+_TIMESTAMP_DISCLOSURE_HTML = (
+    '<div class="aara-disclosure-message">'
+    f'<div class="aara-disclosure-title">{html.escape(_TIMESTAMP_DISCLOSURE_TITLE)}</div>'
+    f'<div class="aara-disclosure-body">{html.escape(_TIMESTAMP_DISCLOSURE_BODY)}</div>'
+    "</div>"
+)
+
 _ACTION_BADGE_CLASSES = {"BUY": "action-buy", "SELL": "action-sell", "HOLD": "action-hold"}
 
 _LIFECYCLE_STAGES = [
@@ -717,6 +746,10 @@ class DecisionCenterUI:
                             "↻ Refresh", size="sm", scale=0,
                             elem_classes=["aara-refresh-button"],
                         )
+                    gr.HTML(
+                        _TIMESTAMP_DISCLOSURE_HTML,
+                        elem_classes=["aara-list-timestamp-disclosure"],
+                    )
                     list_output = gr.Dataframe(
                         # height/max_height (see _DATAFRAME_HEIGHT_KWARG) is a
                         # navigator viewport budget, not a fit for today's 3
@@ -1031,7 +1064,7 @@ class DecisionCenterUI:
                 DecisionCenterUI._list_action_badge_html(view.action),
                 view.status.value.replace("_", " ").title(),
                 f"{view.confidence * 100:.0f}%",
-                view.updated_at.strftime("%Y-%m-%d %H:%M UTC"),
+                format_display_timestamp(view.updated_at),
                 DecisionCenterUI._verdict_badge_html(view.approval_status),
             ]
             for view in decisions
@@ -1169,7 +1202,7 @@ class DecisionCenterUI:
                 "Attached",
                 [
                     ("Source", entry.source, False),
-                    ("Attached", entry.attached_at.strftime("%Y-%m-%d %H:%M UTC"), True),
+                    ("Attached", format_display_timestamp(entry.attached_at), True),
                 ],
                 "neutral",
                 DecisionCenterUI._format_evidence_detail_html(entry.data.get("metadata", {})),
@@ -1250,7 +1283,7 @@ class DecisionCenterUI:
                 "Evaluated",
                 [
                     ("Enabled", "Yes" if entry.enabled else "No", False),
-                    ("Evaluated", entry.evaluated_at.strftime("%Y-%m-%d %H:%M UTC"), True),
+                    ("Evaluated", format_display_timestamp(entry.evaluated_at), True),
                 ],
                 "neutral",
             )
@@ -1268,7 +1301,7 @@ class DecisionCenterUI:
                 entry.status.value.replace("_", " ").title(),
                 [
                     ("Approved By", entry.approved_by, False),
-                    ("Approved At", entry.approved_at.strftime("%Y-%m-%d %H:%M UTC"), True),
+                    ("Approved At", format_display_timestamp(entry.approved_at), True),
                 ],
                 "positive" if entry.status is ApprovalStatus.APPROVED else "negative",
             )
@@ -1284,7 +1317,7 @@ class DecisionCenterUI:
             DecisionCenterUI._record_card_html(
                 entry.event_type.replace("_", " ").title(),
                 "Recorded",
-                [("Recorded At", entry.created_at.strftime("%Y-%m-%d %H:%M UTC"), True)],
+                [("Recorded At", format_display_timestamp(entry.created_at), True)],
                 "neutral",
                 DecisionCenterUI._format_audit_detail_html(entry.event_id, entry.payload),
             )

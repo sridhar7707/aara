@@ -300,11 +300,11 @@ def test_build_application_seeds_evidence_for_decisions_that_had_it_attached():
 
     assert "NEWS_SENTIMENT" in evidence_002
     assert "newsapi" in evidence_002
-    assert "2026-08-08 08:52 UTC" in evidence_002
+    assert "2026-08-08 03:52 CDT" in evidence_002
 
     assert "NEWS_SENTIMENT" in evidence_003
     assert "newsapi" in evidence_003
-    assert "2026-08-08 09:11 UTC" in evidence_003
+    assert "2026-08-08 04:11 CDT" in evidence_003
 
 
 def test_build_application_seeded_decision_without_attached_evidence_has_none():
@@ -333,13 +333,16 @@ def test_build_application_seeds_governance_and_approval_for_the_fully_approved_
     # evaluate_policy() timestamps with datetime.utcnow() (unlike
     # record_approval(), which uses the seed's own fixed approval
     # timestamp), so only policy_id/enabled are asserted precisely here;
-    # evaluated_at is only checked for well-formed presence.
+    # evaluated_at is only checked for well-formed presence -- rendered in
+    # America/Chicago like every other Decision Center timestamp (P1
+    # UI-only timestamp fix), so real-clock evaluated_at shows CDT or CST
+    # depending on when the test runs, never a fixed value.
     assert "pol-seed-001" in governance_html
     assert "Yes" in governance_html
-    assert "UTC" in governance_html
+    assert ("CDT" in governance_html) or ("CST" in governance_html)
     assert "Approved" in approval_html
     assert "risk_officer" in approval_html
-    assert "2026-08-08 09:34 UTC" in approval_html
+    assert "2026-08-08 04:34 CDT" in approval_html
 
     # dec-seed-003 runs the full lifecycle (create -> evidence -> governance
     # -> approval), so its audit trail carries all four event types.
@@ -399,7 +402,7 @@ def test_build_application_seeds_a_rejected_decision_end_to_end():
     assert "pol-seed-001" in governance_html
     assert "Rejected" in approval_html
     assert "risk_officer" in approval_html
-    assert "2026-08-08 10:04 UTC" in approval_html
+    assert "2026-08-08 05:04 CDT" in approval_html
     assert "Approval Recorded" in audit_html
 
 
