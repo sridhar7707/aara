@@ -112,13 +112,29 @@ def test_css_hides_the_redundant_outer_title_block():
     """P3 Other Visual Polish audit: gr.TabbedInterface(title=...) renders
     the composed app's title as a plain, unstyled Gradio-default <h1>
     (wrapped in Gradio's own .prose class) directly above the fully-branded
-    .aara-shell-header, which already states the same identity -- confirmed
-    live to be the only `.prose h1` anywhere in the composed app on all
-    three tabs. The composed app's CSS must hide that whole title block."""
+    .aara-shell-header, which already states the same identity. The
+    composed app's CSS must hide that whole title block."""
     app = build_trading_intelligence_app()
 
-    assert ".block:has(.prose h1)" in app.css
+    assert ".block:has(.prose h1:not(.aara-eyebrow))" in app.css
     assert "display: none" in app.css
+
+
+def test_css_title_hiding_selector_does_not_hide_aara_own_headings():
+    """P0 regression (live-DOM audit): Decision Center's heading-hierarchy
+    fix promoted its own page header from `<h2 class="aara-eyebrow">` to
+    `<h1 class="aara-eyebrow">`. Since gr.HTML output is also wrapped in
+    Gradio's `.prose` class, a bare `.block:has(.prose h1)` selector started
+    matching -- and hiding -- that legitimate page header too, alongside
+    Gradio's own unstyled default title. The selector must exclude any h1
+    carrying `aara-eyebrow` so only Gradio's classless default title is
+    hidden."""
+    app = build_trading_intelligence_app()
+
+    assert ":not(.aara-eyebrow)" in app.css
+    assert ".block:has(.prose h1)" not in app.css.replace(
+        ".block:has(.prose h1:not(.aara-eyebrow))", ""
+    )
 
 
 def test_decision_center_content_is_present_in_the_composed_app():

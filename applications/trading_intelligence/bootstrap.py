@@ -416,22 +416,34 @@ def build_application() -> DecisionCenterUI:
 # hook exists on gr.TabbedInterface's own title param to style or suppress
 # it directly, Gradio's default gray/Inter font, sitting immediately above
 # the fully-branded .aara-shell-header, which already states the same
-# "AARA / Trading Intelligence" identity). Confirmed via live DOM inspection
-# (all three tabs) that exactly one `.prose h1` exists in the composed app
-# at any time, always this title block -- neither Decision Center's own
-# page header (converted to a custom `<h2 class="aara-eyebrow">`, not
-# Markdown, specifically to replace "the plain H1" per theme.py's own
-# comment) nor Portfolio/Risk Intelligence's own `<h2>` page headers
-# (plain gr.HTML, never Markdown-rendered, so never wrapped in `.prose`)
-# collide with this selector. `.block` is Gradio's own generic per-component
-# wrapper class (confirmed already relied on implicitly elsewhere in this
-# app, e.g. the live-announcer's own rendered wrapper carries it); `:has()`
-# is already an established selector technique in this exact codebase
+# "AARA / Trading Intelligence" identity). Per gradio/interface.py's
+# TabbedInterface.__init__, this default title always renders as
+# `Markdown(f"<h1 style='...'>{title}</h1>")` -- an h1 with an inline
+# `style` attribute and no class or elem_id of its own, wrapped (like every
+# gr.Markdown/gr.HTML output) in Gradio's own generic `.prose` div
+# (confirmed in the installed gradio package's HTML.svelte: `.prose` is
+# applied unconditionally to gr.HTML's wrapper too, not only gr.Markdown's
+# -- an earlier version of this comment claimed otherwise and was wrong).
+# `.block` is Gradio's own generic per-component wrapper class (confirmed
+# already relied on implicitly elsewhere in this app, e.g. the
+# live-announcer's own rendered wrapper carries it); `:has()` is already an
+# established selector technique in this exact codebase
 # (`ui/decision_center/theme.py`'s row-selection rules), not a new pattern.
-# Hides the whole title block, not just the heading text, so the padded
-# band collapses instead of leaving empty vertical space. This is a hide,
-# not a restyle -- no color, font, or spacing token from either screen's
-# own theme.py is touched, and the rule only ever matches this one
+# A bare `.block:has(.prose h1)` therefore matches *any* `.prose`-wrapped
+# h1, not just Gradio's own -- and after the Decision Center heading
+# hierarchy fix promoted its own page header from `<h2 class="aara-eyebrow">`
+# to `<h1 class="aara-eyebrow">` (see decision_center/gradio_view.py's
+# _PAGE_HEADER_HTML, rendered via gr.HTML so it too lands inside `.prose`),
+# the bare selector started hiding Decision Center's own legitimate page
+# header as a false positive (live-verified P0 regression). The two h1s are
+# distinguished by class: Gradio's default title carries no class at all,
+# AARA's own page-header h1s always carry `aara-eyebrow` (see
+# decision_center/gradio_view.py and ui/shell.py) -- so `:not(.aara-eyebrow)`
+# excludes AARA's own headers while still matching Gradio's unstyled
+# default. Hides the whole title block, not just the heading text, so the
+# padded band collapses instead of leaving empty vertical space. This is a
+# hide, not a restyle -- no color, font, or spacing token from either
+# screen's own theme.py is touched, and the rule only ever matches this one
 # composition-level block.
 _TABBED_LAYOUT_CSS = """
 .tabitem .aara-shell-header {
@@ -440,7 +452,7 @@ _TABBED_LAYOUT_CSS = """
 [role="tablist"]:not(.aara-shell-nav-list) {
   display: none !important;
 }
-.block:has(.prose h1) {
+.block:has(.prose h1:not(.aara-eyebrow)) {
   display: none !important;
 }
 """
