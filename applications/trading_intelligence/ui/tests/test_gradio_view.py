@@ -415,6 +415,50 @@ def test_render_detail_header_shows_raw_evidence_and_risk_reference():
     assert "unresolved" in header.lower()
 
 
+def test_render_detail_header_clarifies_risk_reference_is_not_resolved_risk_intelligence():
+    """P1 (Decision Center UI audit): "Risk Reference (raw, unresolved)"
+    is an opaque DecisionContract pointer, not resolved risk analysis --
+    the Risk section separately states Risk Intelligence is not currently
+    implemented. Without an explicit connection, the header field could be
+    read as if some risk analysis already exists. Assert the header carries
+    wording that ties the two together, without asserting on exact markup
+    (see module docstring)."""
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(
+            decision=view, evidence_reference="evidence-001", risk_reference="risk-001",
+        )
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    header = ui._render_detail("dec-001")[0]
+
+    assert "risk-001" in header
+    assert "raw" in header.lower()
+    assert "unresolved" in header.lower()
+    assert "opaque pointer" in header.lower()
+    assert "not currently implemented" in header.lower()
+
+
+def test_render_detail_header_omits_risk_clarification_when_no_risk_reference():
+    """The clarification note is tied to the Risk Reference field existing
+    -- an Evidence-only decision must not carry Risk wording in its header,
+    keeping Evidence Reference's existing behavior unchanged."""
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(
+            decision=view, evidence_reference="evidence-001", risk_reference=None,
+        )
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    header = ui._render_detail("dec-001")[0]
+
+    assert "evidence-001" in header
+    assert "opaque pointer" not in header.lower()
+    assert "Risk" not in header
+
+
 def test_render_detail_header_omits_reference_fields_when_none_are_present():
     view = _make_view()
     controller = _FakeController(
@@ -426,6 +470,7 @@ def test_render_detail_header_omits_reference_fields_when_none_are_present():
 
     assert "Evidence Reference" not in header
     assert "Risk Reference" not in header
+    assert "opaque pointer" not in header.lower()
 
 
 def test_render_detail_header_escapes_raw_reference_values():

@@ -599,6 +599,26 @@ _RISK_CONTEXT_HTML = (
     "</div>"
 )
 
+# P1 (Decision Center UI audit): the header's "Risk Reference (raw,
+# unresolved)" field is an opaque DecisionContract pointer (see
+# _raw_reference_fields_html) -- without this note, showing a real-looking
+# reference value next to a decision could be read as if some risk
+# analysis already exists, even though _RISK_CONTEXT_HTML (the Risk
+# section) separately states Risk Intelligence is not implemented. This is
+# wording only: it does not resolve, interpret, or validate the reference,
+# and does not touch Evidence Reference, which has no such ambiguity since
+# the Evidence section is real. Reuses the body-only aara-disclosure-message
+# variant _format_why_summary_html already uses -- no new CSS class.
+_RISK_REFERENCE_CLARIFICATION = (
+    "This is an opaque pointer, not resolved risk analysis -- Risk "
+    "Intelligence is not currently implemented for this workspace."
+)
+_RISK_REFERENCE_CLARIFICATION_HTML = (
+    '<div class="aara-disclosure-message">'
+    f'<div class="aara-disclosure-body">{html.escape(_RISK_REFERENCE_CLARIFICATION)}</div>'
+    "</div>"
+)
+
 # P0 illustrative-data disclosure (UI-completion Product/UX audit): static,
 # decision-independent, persistent -- built once at build() time like
 # _SHELL_NAV_HTML, never wired into detail_outputs/_DetailValues/any
@@ -1336,7 +1356,11 @@ class DecisionCenterUI:
         language rather than a new component. None means the caller has no
         reference data (e.g. the blank/not-found/error detail states, which
         never construct a decision header with references at all) -- no
-        field is rendered for a None value."""
+        field is rendered for a None value. When risk_reference is present,
+        appends _RISK_REFERENCE_CLARIFICATION_HTML (P1, Decision Center UI
+        audit) so the raw pointer can't be mistaken for resolved Risk
+        Intelligence -- Evidence Reference is unaffected, since only the
+        Risk field carries that ambiguity."""
         fields = [
             (label, value)
             for label, value in (
@@ -1354,7 +1378,10 @@ class DecisionCenterUI:
             "</div>"
             for label, value in fields
         )
-        return f'<div class="aara-record-card-fields">{field_html}</div>'
+        clarification_html = (
+            _RISK_REFERENCE_CLARIFICATION_HTML if risk_reference is not None else ""
+        )
+        return f'<div class="aara-record-card-fields">{field_html}</div>{clarification_html}'
 
     @staticmethod
     def _missing_decision_header_html() -> str:
