@@ -107,7 +107,13 @@ CSS = """
 
   /* Lifecycle stage tokens (DecisionState) -- our own vocabulary, not
      brand's --status-* (see module docstring). */
-  --lifecycle-future: var(--color-border-subtle);
+  /* WCAG contrast fix (live audit): --color-border-subtle measured ~1.15:1
+     against the surrounding warm/white surfaces where it was used as the
+     future-stage dot border and connector -- effectively invisible,
+     against the 3:1 UI-component/graphical-object floor. Dedicated darker
+     slate for this future-stage boundary only; --color-border-subtle's
+     other (decorative, non-essential) hairline/divider uses are untouched. */
+  --lifecycle-future: #7C8CA0;
   --lifecycle-active: var(--color-gold-accent-boundary);
   --lifecycle-complete: var(--color-emerald-secondary);
 
