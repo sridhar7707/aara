@@ -21,8 +21,12 @@ from applications.trading_intelligence.projections.decision_view import Decision
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 from applications.trading_intelligence.ui.decision_center.gradio_view import (
+    _APPROVAL_ERROR_MESSAGE,
+    _AUDIT_ERROR_MESSAGE,
     _DECISION_NOT_FOUND_MESSAGE,
     _DECISION_READ_ERROR_MESSAGE,
+    _EVIDENCE_ERROR_MESSAGE,
+    _GOVERNANCE_ERROR_MESSAGE,
     _ILLUSTRATIVE_DATA_BODY,
     _ILLUSTRATIVE_DATA_HTML,
     _ILLUSTRATIVE_DATA_TITLE,
@@ -1703,6 +1707,122 @@ def test_announce_row_select_wording_is_not_found_specific_when_the_decision_is_
     result = ui._announce_row_select(_make_select_event(row))
 
     assert result == f"Decision selected: AAPL. {_DECISION_NOT_FOUND_MESSAGE}"
+
+
+def test_announce_row_select_wording_includes_the_evidence_error_message():
+    """P1 accessibility audit fix: a successfully-loaded decision whose
+    Evidence read failed must have that failure spoken, reusing the exact
+    same _EVIDENCE_ERROR_MESSAGE the visible Evidence section already shows
+    (_format_evidence_html) -- not silently omitted, which previously left
+    screen-reader users with no signal that a section failed to load."""
+    view = _make_view(decision_id="dec-002", symbol="MSFT")
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, evidence_status=ReadStatus.ERROR)
+    )
+    ui = DecisionCenterUI(controller, ["dec-002"])
+    row = ["dec-002", "MSFT", "HOLD", "Decision Created", "82%"]
+
+    result = ui._announce_row_select(_make_select_event(row))
+
+    assert result == (
+        "Decision selected: MSFT. Rationale not captured. "
+        "The decision thesis has not yet been recorded. "
+        f"{_EVIDENCE_ERROR_MESSAGE}"
+    )
+
+
+def test_announce_row_select_wording_includes_the_governance_error_message():
+    view = _make_view(decision_id="dec-001", symbol="AAPL")
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, governance_status=ReadStatus.ERROR)
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+    row = ["dec-001", "AAPL", "BUY", "Decision Created", "71%"]
+
+    result = ui._announce_row_select(_make_select_event(row))
+
+    assert result == (
+        "Decision selected: AAPL. Rationale not captured. "
+        "The decision thesis has not yet been recorded. "
+        f"{_GOVERNANCE_ERROR_MESSAGE}"
+    )
+
+
+def test_announce_row_select_wording_includes_the_approval_error_message():
+    view = _make_view(decision_id="dec-001", symbol="AAPL")
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, approvals_status=ReadStatus.ERROR)
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+    row = ["dec-001", "AAPL", "BUY", "Decision Created", "71%"]
+
+    result = ui._announce_row_select(_make_select_event(row))
+
+    assert result == (
+        "Decision selected: AAPL. Rationale not captured. "
+        "The decision thesis has not yet been recorded. "
+        f"{_APPROVAL_ERROR_MESSAGE}"
+    )
+
+
+def test_announce_row_select_wording_includes_the_audit_trail_error_message():
+    view = _make_view(decision_id="dec-001", symbol="AAPL")
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, audit_trail_status=ReadStatus.ERROR)
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+    row = ["dec-001", "AAPL", "BUY", "Decision Created", "71%"]
+
+    result = ui._announce_row_select(_make_select_event(row))
+
+    assert result == (
+        "Decision selected: AAPL. Rationale not captured. "
+        "The decision thesis has not yet been recorded. "
+        f"{_AUDIT_ERROR_MESSAGE}"
+    )
+
+
+def test_announce_row_select_wording_includes_every_failed_section_error_in_a_fixed_order():
+    """Multiple simultaneous section failures are announced together, in a
+    fixed Evidence -> Governance -> Approval -> Audit Trail order matching
+    the detail panel's own top-to-bottom section order -- not just the
+    first one encountered."""
+    view = _make_view(decision_id="dec-001", symbol="AAPL")
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(
+            decision=view,
+            evidence_status=ReadStatus.ERROR,
+            governance_status=ReadStatus.ERROR,
+            approvals_status=ReadStatus.ERROR,
+            audit_trail_status=ReadStatus.ERROR,
+        )
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+    row = ["dec-001", "AAPL", "BUY", "Decision Created", "71%"]
+
+    result = ui._announce_row_select(_make_select_event(row))
+
+    assert result == (
+        "Decision selected: AAPL. Rationale not captured. "
+        "The decision thesis has not yet been recorded. "
+        f"{_EVIDENCE_ERROR_MESSAGE} {_GOVERNANCE_ERROR_MESSAGE} "
+        f"{_APPROVAL_ERROR_MESSAGE} {_AUDIT_ERROR_MESSAGE}"
+    )
+
+
+def test_announce_row_select_wording_has_no_section_errors_when_all_sections_succeed():
+    """Regression guard: a fully successful selection's wording must stay
+    byte-identical to the pre-existing behavior -- no trailing space, no
+    empty section-error text appended."""
+    view = _make_view(decision_id="dec-002", symbol="MSFT")
+    entry = _make_entry(evidence_type="NEWS_SENTIMENT", source="newsapi")
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-002"])
+    row = ["dec-002", "MSFT", "HOLD", "Decision Created", "82%"]
+
+    result = ui._announce_row_select(_make_select_event(row))
+
+    assert result == "Decision selected: MSFT. 1 NEWS_SENTIMENT signal from newsapi."
 
 
 def test_announce_row_select_is_empty_on_deselection():

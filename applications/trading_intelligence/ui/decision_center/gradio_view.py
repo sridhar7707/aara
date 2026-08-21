@@ -940,7 +940,20 @@ class DecisionCenterUI:
         surfaces. Checked in the same order _format_looked_up_detail
         already uses (ReadStatus.ERROR before is_empty). Empty string on
         deselection/no-row, matching _on_row_select's own guard -- nothing
-        to announce when nothing was selected."""
+        to announce when nothing was selected.
+
+        P1 accessibility audit fix: a successful decision-level load can
+        still have one or more of its four sections (Evidence/Governance/
+        Approval/Audit Trail) fail independently -- controller.py's own
+        load_decision_detail() isolates each read behind its own
+        ReadStatus. Previously only the visible section HTML showed
+        _EVIDENCE_ERROR_MESSAGE/etc. (_format_evidence_html and siblings);
+        the live region said nothing, so a screen-reader user had no signal
+        a section failed short of manually navigating into it. Reuses
+        _section_error_summary (built from the same *_ERROR_MESSAGE
+        constants those section renderers already use) and appends it here
+        -- no new domain semantics, no change to the decision-level
+        error/not-found/success branches above."""
         if not evt.selected or not evt.row_value:
             return ""
         decision_id = evt.row_value[0]
@@ -953,7 +966,34 @@ class DecisionCenterUI:
         summary = self._why_summary_sentence(detail_area.evidence)
         if summary is None:
             summary = f"{_WHY_RATIONALE_TITLE}. {_WHY_RATIONALE_BODY}"
+        section_errors = DecisionCenterUI._section_error_summary(detail_area)
+        if section_errors:
+            return f"Decision selected: {symbol}. {summary} {section_errors}"
         return f"Decision selected: {symbol}. {summary}"
+
+    @staticmethod
+    def _section_error_summary(detail_area: DecisionDetailArea) -> str:
+        """Announces which detail sections failed to load, reusing the
+        exact same _EVIDENCE_ERROR_MESSAGE/_GOVERNANCE_ERROR_MESSAGE/
+        _APPROVAL_ERROR_MESSAGE/_AUDIT_ERROR_MESSAGE constants each
+        section's own inline HTML already shows (_format_evidence_html/
+        _format_governance_html/_format_approval_html/_format_audit_html)
+        -- no new domain semantics, just relaying an already-computed
+        ReadStatus to the live region. Fixed Evidence -> Governance ->
+        Approval -> Audit Trail order, matching the detail panel's own
+        top-to-bottom section order. Empty string when every section
+        succeeded (the common case), so callers don't append a stray
+        trailing space."""
+        messages = []
+        if detail_area.evidence_status is ReadStatus.ERROR:
+            messages.append(_EVIDENCE_ERROR_MESSAGE)
+        if detail_area.governance_status is ReadStatus.ERROR:
+            messages.append(_GOVERNANCE_ERROR_MESSAGE)
+        if detail_area.approvals_status is ReadStatus.ERROR:
+            messages.append(_APPROVAL_ERROR_MESSAGE)
+        if detail_area.audit_trail_status is ReadStatus.ERROR:
+            messages.append(_AUDIT_ERROR_MESSAGE)
+        return " ".join(messages)
 
     @staticmethod
     def _format_list_rows(list_area: DecisionListArea) -> List[List[str]]:
