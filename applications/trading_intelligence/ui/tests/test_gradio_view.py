@@ -22,6 +22,7 @@ from applications.trading_intelligence.projections.decision_view import Decision
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 from applications.trading_intelligence.ui.decision_center.gradio_view import (
+    _ACCESSIBLE_NAME_SETUP_JS,
     _APPROVAL_ERROR_MESSAGE,
     _AUDIT_ERROR_MESSAGE,
     _DECISION_NOT_FOUND_MESSAGE,
@@ -2067,6 +2068,27 @@ def test_selection_aria_sync_script_discovers_the_table_containing_real_rows():
     assert "querySelectorAll(\".aara-decisions-table table\")" in _SELECTION_ARIA_SYNC_JS
     assert 'querySelector(\'tr[slot="tbody"]\')' in _SELECTION_ARIA_SYNC_JS
     assert "aria-selected" in _SELECTION_ARIA_SYNC_JS
+
+
+def test_accessible_name_setup_script_is_present_in_built_layout():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    assert _ACCESSIBLE_NAME_SETUP_JS in demo.head
+
+
+def test_accessible_name_setup_script_targets_the_documented_dom_contract():
+    """P1 accessibility fix: gr.Dataframe's label="Decisions" only reaches
+    a <caption> inside the child <table> elements, never the interactive
+    role="grid" div a screen reader actually names (see gradio_view.py's
+    own docstring on _ACCESSIBLE_NAME_SETUP_JS for the verified DOM
+    contract). Asserted here as a contract check so a future edit can't
+    silently drop the selector or the aria-label value without failing a
+    test instead of only failing in the browser."""
+    assert '.aara-decisions-table [role="grid"]' in _ACCESSIBLE_NAME_SETUP_JS
+    assert 'setAttribute("aria-label", "Decisions")' in _ACCESSIBLE_NAME_SETUP_JS
 
 
 def test_theme_restyles_gradios_own_pending_state_classes():

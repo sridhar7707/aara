@@ -512,6 +512,63 @@ _SELECTION_ARIA_SYNC_JS = """
 </script>
 """
 
+# P1 accessibility slice: Decisions grid accessible name. A fourth,
+# independent JS bridge (not merged into any bridge above -- distinct
+# concern from keyboard activation, live-region announcement, and
+# selection ARIA sync): the Decisions gr.Dataframe below is passed
+# label="Decisions" (show_label=False only suppresses the *visible* label
+# row above the table -- it has no effect on this), but that label never
+# reaches the interactive grid element a screen reader actually names.
+# Verified directly against the shipped Svelte source
+# (gradio/_frontend_code/dataframe/shared/Table.svelte), not assumed:
+#   - The focusable, ARIA-grid landmark is `<div class="table-wrap"
+#     role="grid" tabindex="0">`.
+#   - `label` only ever reaches a `<caption class="sr-only">{label}</caption>`
+#     nested inside the two *child* <table> elements that div wraps (the
+#     hidden column-width-measurement table and the real, interactive
+#     VirtualTable) -- never as an attribute on the role="grid" div itself.
+#   - A <caption> names its own <table>; it does not propagate to an
+#     ancestor carrying an explicit ARIA role, and role="grid" does not
+#     compute its accessible name from subtree content the way a native
+#     <table> does from <caption>. So the grid element a screen reader
+#     actually lands on and announces has no programmatic accessible name
+#     at all, despite label="Decisions" being set in Python.
+# There is no supported non-JS way to close this gap: no aria_* kwarg
+# exists on gr.Dataframe (same constraint the keyboard bridge above
+# documents), and this needs an attribute, not rendered content, so CSS
+# cannot do it either. The fix below does exactly one thing: find
+# .aara-decisions-table's role="grid" element and set
+# aria-label="Decisions" on it once -- the same literal text already
+# passed as label= in Python, not a new/different string.
+#
+# A one-shot bounded poll (not a MutationObserver) is sufficient here,
+# following _LIVE_REGION_SETUP_JS's own precedent rather than
+# _SELECTION_ARIA_SYNC_JS's: this div is created once by Table.svelte and
+# never destroyed/recreated by Refresh or row selection (only the row data
+# inside it mutates), so a name set once persists for the life of the
+# page -- unlike aria-selected in _SELECTION_ARIA_SYNC_JS, which tracks an
+# ongoing state change and needs to keep re-syncing.
+_ACCESSIBLE_NAME_SETUP_JS = """
+<script>
+(function () {
+  var attempts = 0;
+  var maxAttempts = 100;
+  var intervalId = setInterval(function () {
+    attempts += 1;
+    var grid = document.querySelector('.aara-decisions-table [role="grid"]');
+    if (grid) {
+      grid.setAttribute("aria-label", "Decisions");
+      clearInterval(intervalId);
+      return;
+    }
+    if (attempts >= maxAttempts) {
+      clearInterval(intervalId);
+    }
+  }, 50);
+})();
+</script>
+"""
+
 _SHELL_IDENTITY_HTML = (
     f'<img class="aara-shell-logo" src="{_load_shell_logo_data_uri()}" alt="AARA" />'
     '<div class="aara-shell-wordmark-group">'
@@ -718,7 +775,10 @@ class DecisionCenterUI:
     def build(self) -> gr.Blocks:
         with gr.Blocks(
             title="AARA Trading Intelligence — Decision Center", css=CSS,
-            head=_KEYBOARD_SELECTION_BRIDGE_JS + _LIVE_REGION_SETUP_JS + _SELECTION_ARIA_SYNC_JS,
+            head=(
+                _KEYBOARD_SELECTION_BRIDGE_JS + _LIVE_REGION_SETUP_JS
+                + _SELECTION_ARIA_SYNC_JS + _ACCESSIBLE_NAME_SETUP_JS
+            ),
         ) as demo:
             gr.HTML(_SHELL_IDENTITY_HTML, elem_classes=["aara-shell-header"])
             gr.HTML(_SHELL_NAV_HTML, elem_classes=["aara-shell-nav"])
