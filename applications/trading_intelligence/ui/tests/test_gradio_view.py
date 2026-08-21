@@ -1565,6 +1565,62 @@ def test_shell_nav_block_is_present_in_the_built_layout():
     assert _SHELL_NAV_HTML in html_values
 
 
+def _built_markup_blocks(ui: DecisionCenterUI):
+    """gr.HTML and gr.Markdown blocks both render literal markup in this
+    module's built layout (see build()'s page header vs. section-label
+    calls) -- collect both kinds' static values so heading-hierarchy
+    assertions can see the whole rendered page, not just the gr.HTML
+    subset the other _built_layout tests check."""
+    demo = ui.build()
+    return [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, (gr.HTML, gr.Markdown))
+        and isinstance(getattr(block, "value", None), str)
+    ]
+
+
+def test_decision_center_page_has_exactly_one_page_level_h1():
+    """P2 #1 (Decision Center UI audit): the page needs exactly one
+    semantic <h1> identifying it as Decision Center -- _PAGE_HEADER_HTML
+    is the only page-title block in the built layout, so it must be the
+    sole <h1> anywhere on the page."""
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    combined = "".join(_built_markup_blocks(ui))
+
+    assert combined.count("<h1") == 1
+    assert '<h1 class="aara-eyebrow">Decision Center</h1>' in combined
+
+
+def test_decision_center_major_section_headings_remain_h2():
+    """Promoting the page title to <h1> must not shift the "Decisions"
+    (list column toolbar) or "Decision Intelligence" (detail column group
+    label) headings -- they stay <h2>, logically below the new <h1>."""
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    combined = "".join(_built_markup_blocks(ui))
+
+    assert '<h2 class="aara-eyebrow">Decisions</h2>' in combined
+    assert '<h2 class="aara-eyebrow">Decision Intelligence</h2>' in combined
+
+
+def test_decision_center_title_is_not_duplicated_as_a_lower_level_heading():
+    """The promoted <h1> must be the only heading carrying the "Decision
+    Center" page title -- no leftover <h2>/<h3> copy of it anywhere in the
+    built layout (the nav tab's plain <span> at the same text is not a
+    heading and is unaffected -- see _SHELL_NAV_HTML)."""
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    combined = "".join(_built_markup_blocks(ui))
+
+    assert combined.count("Decision Center</h1>") == 1
+    assert "Decision Center</h2>" not in combined
+    assert "Decision Center</h3>" not in combined
+
+
 def test_risk_context_is_the_exact_fixed_placeholder_text():
     """Slice 1 (UI-completion audit): the Risk section is a static,
     decision-independent disclosure -- no RiskEvaluation/RiskEntry contract

@@ -542,7 +542,7 @@ _SHELL_NAV_HTML = (
     "</nav>"
 )
 _PAGE_HEADER_HTML = (
-    '<h2 class="aara-eyebrow">Decision Center</h2>'
+    '<h1 class="aara-eyebrow">Decision Center</h1>'
     '<div class="aara-page-subtitle">Governed investment decisions</div>'
 )
 

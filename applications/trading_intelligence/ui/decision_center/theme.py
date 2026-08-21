@@ -234,7 +234,9 @@ footer { display: none !important; }
 }
 
 /* ==========================================================================
-   Page header -- eyebrow title + subtitle, replaces the plain H1.
+   Page header -- eyebrow-styled H1 title + subtitle (P2 #1, Decision
+   Center UI audit: promoted from a plain H2 so the page has exactly one
+   semantic H1).
    ========================================================================== */
 .aara-page-header {
   padding: var(--space-lg) 0 var(--space-sm) 0 !important;
@@ -246,7 +248,7 @@ footer { display: none !important; }
   color: var(--color-text-secondary);
   margin: 0;
 }
-.aara-page-header h2.aara-eyebrow {
+.aara-page-header h1.aara-eyebrow {
   font-size: 22px;
   color: var(--color-navy-primary);
   letter-spacing: 0.04em;
