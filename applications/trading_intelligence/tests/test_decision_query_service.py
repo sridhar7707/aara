@@ -125,3 +125,18 @@ def test_get_decision_view_still_works_after_list_support_added():
 
     assert view is not None
     assert view.decision_id == "dec-001"
+
+
+def test_get_decision_references_returns_the_raw_evidence_and_risk_reference():
+    contract = _make_contract(evidence_reference="evidence-001", risk_reference="risk-001")
+    service = DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract}))
+
+    references = service.get_decision_references("dec-001")
+
+    assert references == ("evidence-001", "risk-001")
+
+
+def test_get_decision_references_returns_none_when_source_has_no_decision():
+    service = DecisionQueryService(_InMemoryDecisionSource())
+
+    assert service.get_decision_references("missing-decision") is None

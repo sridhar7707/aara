@@ -28,6 +28,16 @@ list-vs-detail split to isolate (audit is already Detail-only by
 construction) and no second implementation to abstract over, so the
 extra layer added no behavior. This is an intentional, accepted asymmetry
 for this slice, not a pattern to replicate onto evidence/governance.
+
+get_decision_references() is called alongside get_decision_view() inside
+the same "decision" try/except -- it re-reads the same DecisionContract
+solely to surface the two raw, opaque evidence_reference/risk_reference
+pointer values DecisionView deliberately excludes (see decision_view.py's
+own docstring). Not a new concern with its own ReadStatus: both calls read
+the same underlying decision record, so a failure here is reported exactly
+like a decision-read failure. The two values are passed through to
+DecisionDetailArea unresolved, uninterpreted -- display-only, per the
+read-only audit that scoped this change.
 """
 from typing import List, Optional
 
@@ -68,10 +78,12 @@ class DecisionCenterController:
     def load_decision_detail(self, decision_id: str) -> DecisionDetailArea:
         try:
             view = self._query_service.get_decision_view(decision_id)
+            references = self._query_service.get_decision_references(decision_id)
         except TradingIntelligenceReadError:
             return DecisionDetailArea(decision=None, decision_status=ReadStatus.ERROR)
         if view is None:
             return DecisionDetailArea(decision=None)
+        evidence_reference, risk_reference = references if references is not None else (None, None)
 
         try:
             evidence = tuple(self._evidence_query_service.get_evidence(decision_id))
@@ -103,6 +115,7 @@ class DecisionCenterController:
 
         return DecisionDetailArea(
             decision=view,
+            evidence_reference=evidence_reference, risk_reference=risk_reference,
             evidence=evidence, evidence_status=evidence_status,
             governance=governance, governance_status=governance_status,
             approvals=approvals, approvals_status=approvals_status,

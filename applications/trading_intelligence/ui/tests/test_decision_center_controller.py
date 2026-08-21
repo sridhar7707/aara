@@ -202,6 +202,26 @@ def test_load_decision_detail_missing_decision_is_ok_not_error():
     assert detail_area.decision_status is ReadStatus.OK
 
 
+def test_load_decision_detail_carries_raw_evidence_and_risk_reference():
+    controller = _make_controller(
+        {"dec-001": _make_contract(evidence_reference="evidence-001", risk_reference="risk-001")}
+    )
+
+    detail_area = controller.load_decision_detail("dec-001")
+
+    assert detail_area.evidence_reference == "evidence-001"
+    assert detail_area.risk_reference == "risk-001"
+
+
+def test_load_decision_detail_leaves_references_none_for_a_missing_decision():
+    controller = _make_controller()
+
+    detail_area = controller.load_decision_detail("does-not-exist")
+
+    assert detail_area.evidence_reference is None
+    assert detail_area.risk_reference is None
+
+
 class _BoomDecisionSource(DecisionSource):
     def get_decision(self, decision_id):
         raise TradingIntelligenceReadError("boom")

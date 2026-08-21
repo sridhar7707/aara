@@ -290,6 +290,22 @@ def test_decision_detail_area_read_status_fields_are_immutable():
         area.decision_status = ReadStatus.ERROR
 
 
+def test_decision_detail_area_defaults_evidence_and_risk_reference_to_none():
+    area = DecisionDetailArea(decision=_make_view())
+
+    assert area.evidence_reference is None
+    assert area.risk_reference is None
+
+
+def test_decision_detail_area_carries_raw_evidence_and_risk_reference():
+    area = DecisionDetailArea(
+        decision=_make_view(), evidence_reference="evidence-001", risk_reference="risk-001",
+    )
+
+    assert area.evidence_reference == "evidence-001"
+    assert area.risk_reference == "risk-001"
+
+
 def test_decision_center_screen_composes_list_and_detail_areas():
     view = _make_view()
     list_area = DecisionListArea(decisions=[view])

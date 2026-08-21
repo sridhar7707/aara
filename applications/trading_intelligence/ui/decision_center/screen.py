@@ -44,6 +44,12 @@ class DecisionListArea:
 class DecisionDetailArea:
     decision: Optional[DecisionView]
     decision_status: ReadStatus = ReadStatus.OK
+    # Raw, opaque, unresolved pointer values from DecisionContract -- not
+    # part of DecisionView (which deliberately excludes them). Displayed
+    # verbatim in the detail header; never interpreted, resolved, or
+    # validated here.
+    evidence_reference: Optional[str] = None
+    risk_reference: Optional[str] = None
     evidence: Tuple[EvidenceEntry, ...] = field(default=())
     evidence_status: ReadStatus = ReadStatus.OK
     governance: Tuple[GovernanceEntry, ...] = field(default=())

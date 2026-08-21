@@ -394,6 +394,53 @@ def test_render_detail_maps_fields_from_the_returned_decision():
     assert audit_html == '<div class="aara-empty-message">No audit events recorded.</div>'
 
 
+def test_render_detail_header_shows_raw_evidence_and_risk_reference():
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(
+            decision=view, evidence_reference="evidence-001", risk_reference="risk-001",
+        )
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    header = ui._render_detail("dec-001")[0]
+
+    assert "evidence-001" in header
+    assert "risk-001" in header
+    assert "raw" in header.lower()
+    assert "unresolved" in header.lower()
+
+
+def test_render_detail_header_omits_reference_fields_when_none_are_present():
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, evidence_reference=None, risk_reference=None)
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    header = ui._render_detail("dec-001")[0]
+
+    assert "Evidence Reference" not in header
+    assert "Risk Reference" not in header
+
+
+def test_render_detail_header_escapes_raw_reference_values():
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(
+            decision=view,
+            evidence_reference="<script>alert(1)</script>",
+            risk_reference="risk-001",
+        )
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    header = ui._render_detail("dec-001")[0]
+
+    assert "<script>" not in header
+    assert "&lt;script&gt;" in header
+
+
 def test_render_detail_returns_blank_state_for_blank_decision_id():
     controller = _FakeController()
     ui = DecisionCenterUI(controller, ["dec-001"])
@@ -1321,7 +1368,7 @@ def test_audit_card_renders_an_expandable_payload_disclosure():
 def test_audit_payload_disclosure_escapes_html_in_values():
     view = _make_view()
     entry = _make_audit_entry(
-        payload={"decision_id": "dec-001", "note": "<img src=x onerror=alert(1)>"},
+        payload={"decision_id": "dec-001", "action": "<img src=x onerror=alert(1)>"},
     )
     controller = _FakeController(detail_area=DecisionDetailArea(decision=view, audit_trail=(entry,)))
     ui = DecisionCenterUI(controller, ["dec-001"])
@@ -1330,6 +1377,30 @@ def test_audit_payload_disclosure_escapes_html_in_values():
 
     assert "<img" not in audit_html
     assert "&lt;img" in audit_html
+
+
+def test_audit_payload_disclosure_excludes_decision_id_but_keeps_authorized_fields():
+    """P0 fix (accessibility/completeness audit): decision_id must never
+    appear in rendered UI, matching the same rule already enforced on the
+    decision header (test_decision_header_escapes_symbol_and_never_exposes_
+    the_raw_decision_id) -- but every real Event.payload
+    (DecisionService.create_decision(), etc.) includes decision_id, and the
+    old _format_audit_detail_html rendered every payload key unfiltered, so
+    it leaked here. Proves: the raw value is absent, the literal key is
+    absent, and already-authorized fields (symbol, action) still render."""
+    view = _make_view()
+    entry = _make_audit_entry(
+        payload={"decision_id": "dec-001", "symbol": "AAPL", "action": "BUY"},
+    )
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, audit_trail=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    audit_html = ui._render_detail("dec-001")[9]
+
+    assert "dec-001" not in audit_html
+    assert "decision_id" not in audit_html
+    assert "AAPL" in audit_html
+    assert "BUY" in audit_html
 
 
 def test_lifecycle_track_links_each_stage_to_its_existing_detail_section():

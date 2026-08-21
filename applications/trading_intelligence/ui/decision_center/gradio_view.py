@@ -637,6 +637,29 @@ _LIFECYCLE_STAGES = [
 # trailing four elements unchanged.
 _DetailValues = Tuple[str, str, str, str, str, str, str, str, str, str]
 
+# Audit Trail payload disclosure allowlist (P0 fix, accessibility/completeness
+# audit): every key the real sentinel_engine event producers currently put on
+# Event.payload, across all four implemented event types --
+# DecisionService.create_decision() (DECISION_CREATED: symbol, action,
+# confidence, evidence_reference, risk_reference), EvidenceService.
+# associate_evidence() (EVIDENCE_ATTACHED: evidence_id, evidence_type,
+# source, data), GovernanceService.evaluate_policy() (GOVERNANCE_EVALUATED:
+# policy_id, enabled), GovernanceService.record_approval()
+# (APPROVAL_RECORDED: approval_id, status, approved_by). Mirrors
+# _format_evidence_detail_html's own allowlist discipline (there, ADR-037's
+# 5 metadata keys). decision_id is deliberately never in this set: every one
+# of those four real payloads also includes it, and the old
+# _format_audit_detail_html rendered every payload key unfiltered, leaking
+# it into the Audit Trail's expandable disclosure -- the same raw internal
+# identifier already excluded, and tested as excluded, from every other
+# rendered fragment (see _decision_header_html).
+_AUDIT_PAYLOAD_ALLOWED_KEYS = frozenset({
+    "symbol", "action", "confidence", "evidence_reference", "risk_reference",
+    "evidence_id", "evidence_type", "source", "data",
+    "policy_id", "enabled",
+    "approval_id", "status", "approved_by",
+})
+
 
 class DecisionCenterUI:
     def __init__(self, controller: DecisionCenterController, decision_ids: List[str]):
@@ -1020,7 +1043,9 @@ class DecisionCenterUI:
     def _success_detail(detail_area: DecisionDetailArea) -> _DetailValues:
         decision = detail_area.decision
         return (
-            DecisionCenterUI._decision_header_html(decision),
+            DecisionCenterUI._decision_header_html(
+                decision, detail_area.evidence_reference, detail_area.risk_reference,
+            ),
             DecisionCenterUI._lifecycle_track_html(decision.status),
             detail_area.confidence_display,
             detail_area.timestamp_display,
@@ -1209,15 +1234,22 @@ class DecisionCenterUI:
 
     @staticmethod
     def _format_audit_detail_html(event_id: str, payload: Dict[str, Any]) -> str:
-        """Expandable, structured presentation of exactly what
+        """Expandable, structured presentation of what
         DecisionQuery.get_decision_timeline() already returns on the
-        underlying Event -- event_id plus every payload key as-is, nothing
-        invented or transformed beyond str()/html.escape() for display.
-        Native <details>/<summary> disclosure, no JS. Reuses the record
+        underlying Event -- event_id plus every _AUDIT_PAYLOAD_ALLOWED_KEYS
+        payload key, as-is, nothing invented or transformed beyond
+        str()/html.escape() for display. Any other payload key -- most
+        notably decision_id, which every real Event.payload carries -- is
+        silently dropped; see _AUDIT_PAYLOAD_ALLOWED_KEYS's own comment for
+        why. Native <details>/<summary> disclosure, no JS. Reuses the record
         card's own aara-record-card-fields/aara-record-field/record-label/
         record-value classes rather than introducing new, unstyled ones."""
         rows = [("Event ID", event_id)]
-        rows.extend((str(key), str(value)) for key, value in payload.items())
+        rows.extend(
+            (str(key), str(value))
+            for key, value in payload.items()
+            if key in _AUDIT_PAYLOAD_ALLOWED_KEYS
+        )
         field_html = "".join(
             '<div class="aara-record-field">'
             f'<span class="record-label">{html.escape(label)}</span>'
@@ -1233,13 +1265,56 @@ class DecisionCenterUI:
         )
 
     @staticmethod
-    def _decision_header_html(decision: DecisionView) -> str:
+    def _decision_header_html(
+        decision: DecisionView,
+        evidence_reference: Optional[str] = None,
+        risk_reference: Optional[str] = None,
+    ) -> str:
         badge = DecisionCenterUI._action_badge_html(decision.action)
+        references_html = DecisionCenterUI._raw_reference_fields_html(
+            evidence_reference, risk_reference,
+        )
         return (
             '<div class="aara-decision-header">'
             f'<div class="identity-line">{html.escape(decision.symbol)} &middot; {badge}</div>'
+            f"{references_html}"
             "</div>"
         )
+
+    @staticmethod
+    def _raw_reference_fields_html(
+        evidence_reference: Optional[str], risk_reference: Optional[str],
+    ) -> str:
+        """evidence_reference/risk_reference are opaque DecisionContract
+        pointer strings (see decision_query_service.py's
+        get_decision_references()) -- displayed verbatim, labeled explicitly
+        as raw/unresolved, never interpreted, resolved, or validated here,
+        per the read-only audit that scoped this P0 change. Reuses the
+        existing aara-record-card-fields/aara-record-field/record-label/
+        record-value classes (theme.py) the Evidence/Governance/Approval/
+        Audit record cards already use, so this reads as the same visual
+        language rather than a new component. None means the caller has no
+        reference data (e.g. the blank/not-found/error detail states, which
+        never construct a decision header with references at all) -- no
+        field is rendered for a None value."""
+        fields = [
+            (label, value)
+            for label, value in (
+                ("Evidence Reference (raw, unresolved)", evidence_reference),
+                ("Risk Reference (raw, unresolved)", risk_reference),
+            )
+            if value is not None
+        ]
+        if not fields:
+            return ""
+        field_html = "".join(
+            '<div class="aara-record-field">'
+            f'<span class="record-label">{html.escape(label)}</span>'
+            f'<span class="record-value">{html.escape(value)}</span>'
+            "</div>"
+            for label, value in fields
+        )
+        return f'<div class="aara-record-card-fields">{field_html}</div>'
 
     @staticmethod
     def _missing_decision_header_html() -> str:

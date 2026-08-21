@@ -15,7 +15,7 @@ decisions it wants; this is a real, current limitation, not a design
 preference.
 """
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from applications.trading_intelligence.contracts.decision_contract import DecisionContract
 from applications.trading_intelligence.projections.decision_view import DecisionView
@@ -44,3 +44,12 @@ class DecisionQueryService:
     def list_decision_views(self, decision_ids: List[str]) -> List[DecisionView]:
         contracts = self._source.list_decisions(decision_ids)
         return [DecisionView.from_contract(contract) for contract in contracts]
+
+    def get_decision_references(self, decision_id: str) -> Optional[Tuple[str, str]]:
+        """Raw, unresolved (evidence_reference, risk_reference) pointer pair
+        straight from DecisionContract -- deliberately bypasses DecisionView,
+        which excludes these fields (see decision_view.py's own docstring)."""
+        contract = self._source.get_decision(decision_id)
+        if contract is None:
+            return None
+        return (contract.evidence_reference, contract.risk_reference)
