@@ -43,6 +43,7 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _TIMESTAMP_DISCLOSURE_BODY,
     _TIMESTAMP_DISCLOSURE_HTML,
     _TIMESTAMP_DISCLOSURE_TITLE,
+    _WHY_EVIDENCE_CLARIFICATION,
     _WHY_RATIONALE_BODY,
     _WHY_RATIONALE_HTML,
     _WHY_RATIONALE_TITLE,
@@ -1375,7 +1376,8 @@ def test_why_summary_renders_a_real_sentence_for_a_single_evidence_entry():
 
     assert why_html == (
         '<div class="aara-disclosure-message">'
-        '<div class="aara-disclosure-body">1 NEWS_SENTIMENT signal from newsapi.</div>'
+        '<div class="aara-disclosure-body">1 NEWS_SENTIMENT signal from newsapi. '
+        f"{html.escape(_WHY_EVIDENCE_CLARIFICATION)}</div>"
         "</div>"
     )
 
@@ -1394,6 +1396,22 @@ def test_why_summary_renders_multiple_evidence_entries():
     assert "2 signals" in why_html
     assert "NEWS_SENTIMENT from newsapi" in why_html
     assert "PRICE_ACTION from alpaca" in why_html
+    assert html.escape(_WHY_EVIDENCE_CLARIFICATION) in why_html
+
+
+def test_why_summary_clarification_is_not_shown_for_the_zero_evidence_fallback():
+    """P2 trust clarification pass: the clarification is appended only to
+    the real-evidence sentence -- _WHY_RATIONALE_HTML's zero-evidence
+    fallback ("Rationale not captured") already makes no thesis/causal
+    claim, so there is nothing for it to clarify."""
+    view = _make_view()
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=()))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    why_html = ui._render_detail("dec-001")[5]
+
+    assert _WHY_EVIDENCE_CLARIFICATION not in why_html
+    assert why_html == _WHY_RATIONALE_HTML
 
 
 def test_why_summary_falls_back_to_the_static_placeholder_for_zero_evidence():
@@ -1795,7 +1813,10 @@ def test_announce_row_select_wording_includes_the_rationale_for_a_single_evidenc
 
     result = ui._announce_row_select(_make_select_event(row))
 
-    assert result == "Decision selected: MSFT. 1 NEWS_SENTIMENT signal from newsapi."
+    assert result == (
+        "Decision selected: MSFT. 1 NEWS_SENTIMENT signal from newsapi. "
+        f"{_WHY_EVIDENCE_CLARIFICATION}"
+    )
 
 
 def test_announce_row_select_wording_includes_the_rationale_for_multiple_evidence_entries():
@@ -1812,7 +1833,7 @@ def test_announce_row_select_wording_includes_the_rationale_for_multiple_evidenc
 
     assert result == (
         "Decision selected: MSFT. 2 signals: NEWS_SENTIMENT from newsapi; "
-        "PRICE_ACTION from alpaca."
+        f"PRICE_ACTION from alpaca. {_WHY_EVIDENCE_CLARIFICATION}"
     )
 
 
@@ -1966,8 +1987,9 @@ def test_announce_row_select_wording_includes_every_failed_section_error_in_a_fi
 
 def test_announce_row_select_wording_has_no_section_errors_when_all_sections_succeed():
     """Regression guard: a fully successful selection's wording must stay
-    byte-identical to the pre-existing behavior -- no trailing space, no
-    empty section-error text appended."""
+    byte-identical to the pre-existing behavior (plus the P2 trust
+    clarification appended to the rationale sentence itself) -- no trailing
+    space, no empty section-error text appended."""
     view = _make_view(decision_id="dec-002", symbol="MSFT")
     entry = _make_entry(evidence_type="NEWS_SENTIMENT", source="newsapi")
     controller = _FakeController(detail_area=DecisionDetailArea(decision=view, evidence=(entry,)))
@@ -1976,7 +1998,10 @@ def test_announce_row_select_wording_has_no_section_errors_when_all_sections_suc
 
     result = ui._announce_row_select(_make_select_event(row))
 
-    assert result == "Decision selected: MSFT. 1 NEWS_SENTIMENT signal from newsapi."
+    assert result == (
+        "Decision selected: MSFT. 1 NEWS_SENTIMENT signal from newsapi. "
+        f"{_WHY_EVIDENCE_CLARIFICATION}"
+    )
 
 
 def test_announce_row_select_is_empty_on_deselection():

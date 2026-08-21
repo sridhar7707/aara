@@ -641,6 +641,20 @@ _WHY_RATIONALE_HTML = (
     "</div>"
 )
 
+# P2 Why/Rationale trust clarification (UI-completion audit, ADR-037-adjacent
+# but not authorized or governed by it -- wording only, no data/semantics
+# change): the real-evidence sentence _why_summary_sentence composes below
+# lists what evidence is attached (type/source), which reads as a causal
+# "why" without being one. Appended (not a separate constant rendered
+# elsewhere) so the announced and visible text can never drift, matching
+# this file's existing single-source-of-truth discipline for this sentence.
+# Deliberately not applied to _WHY_RATIONALE_HTML's zero-evidence fallback --
+# "Rationale not captured" already makes no thesis/causal claim to clarify.
+_WHY_EVIDENCE_CLARIFICATION = (
+    "Evidence attached to this decision — not a recorded investment "
+    "thesis or causal explanation."
+)
+
 # Slice 1 (UI-completion audit): static, decision-independent disclosure --
 # no RiskEvaluation/RiskEntry contract or reader exists anywhere in this
 # codebase. Built once at build() time like _SHELL_NAV_HTML, never wired
@@ -1225,16 +1239,26 @@ class DecisionCenterUI:
         empty then too) -- callers render their own fallback for that
         case, since the HTML and plain-text renderings of "no rationale"
         differ (_WHY_RATIONALE_HTML's two-line disclosure vs. a single
-        announced sentence)."""
+        announced sentence).
+
+        P2 trust clarification pass: _WHY_EVIDENCE_CLARIFICATION is appended
+        to the composed sentence itself (not rendered as a second, separate
+        fragment by callers) so _format_why_summary_html's visible panel and
+        _announce_row_select's screen-reader announcement always carry the
+        identical clarification -- no new data, no change to what evidence
+        is summarized or how, only this one sentence appended to the end."""
         if not evidence:
             return None
         if len(evidence) == 1:
             entry = evidence[0]
-            return f"1 {entry.evidence_type} signal from {entry.source}."
+            return (
+                f"1 {entry.evidence_type} signal from {entry.source}. "
+                f"{_WHY_EVIDENCE_CLARIFICATION}"
+            )
         descriptions = "; ".join(
             f"{entry.evidence_type} from {entry.source}" for entry in evidence
         )
-        return f"{len(evidence)} signals: {descriptions}."
+        return f"{len(evidence)} signals: {descriptions}. {_WHY_EVIDENCE_CLARIFICATION}"
 
     @staticmethod
     def _format_why_summary_html(evidence: Tuple[EvidenceEntry, ...]) -> str:
