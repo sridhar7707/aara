@@ -266,7 +266,22 @@ def _seed_decisions(engine: SentinelEngine) -> List[str]:
     ))
     engine.attach_evidence("dec-seed-004", Evidence(
         evidence_id="ev-seed-004", evidence_type="NEWS_SENTIMENT", source="newsapi",
-        data={"score": 0.69}, collected_at=evidence_attached_004,
+        data={
+            "score": 0.69,
+            # ADR-036/ADR-037-authorized shape (data["metadata"]), same
+            # pattern as ev-seed-002 above -- gives the ADR-037 Evidence
+            # detail disclosure something to render for this seed too (was
+            # previously the one remaining seed left in the pre-ADR-034
+            # bare-score-only shape).
+            "metadata": {
+                "raw_score": 0.69,
+                "headlines": [
+                    "Alphabet cloud unit narrows losses as AI demand grows",
+                    "Google search ad revenue tops estimates for the quarter",
+                ],
+            },
+        },
+        collected_at=evidence_attached_004,
     ))
     engine.evaluate_policy("dec-seed-004", "pol-seed-001")
     decision_ids.append("dec-seed-004")
