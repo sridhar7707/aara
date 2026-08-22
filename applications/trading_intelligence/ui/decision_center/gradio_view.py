@@ -701,6 +701,28 @@ _WHY_RATIONALE_HTML = (
     "</div>"
 )
 
+# P2 Why/Rationale error-wording fix (UI-completion audit): _WHY_RATIONALE_HTML
+# above and this block render for two genuinely different situations that
+# previously shared the exact same "Rationale not captured / thesis has not
+# yet been recorded" wording -- a decision that has no evidence yet (still
+# _WHY_RATIONALE_HTML's job) vs. a decision whose Evidence read failed
+# (detail_area.evidence_status is ReadStatus.ERROR, which also forces
+# evidence to () -- structurally indistinguishable from "no evidence" to
+# _why_summary_sentence, but not the same fact). Telling a user "not yet
+# recorded" during a transient read failure misstates a temporary system
+# problem as a permanent absence of data. Reuses _EVIDENCE_ERROR_MESSAGE
+# verbatim as the body -- the exact same sentence the Evidence section
+# itself already shows for this identical failure (_format_evidence_html) --
+# rather than inventing new copy, so the two surfaces can never say
+# different things about the same read error.
+_WHY_EVIDENCE_ERROR_TITLE = "Rationale unavailable"
+_WHY_EVIDENCE_ERROR_HTML = (
+    '<div class="aara-disclosure-message">'
+    f'<div class="aara-disclosure-title">{html.escape(_WHY_EVIDENCE_ERROR_TITLE)}</div>'
+    f'<div class="aara-disclosure-body">{html.escape(_EVIDENCE_ERROR_MESSAGE)}</div>'
+    "</div>"
+)
+
 # P2 Why/Rationale trust clarification (UI-completion audit, ADR-037-adjacent
 # but not authorized or governed by it -- wording only, no data/semantics
 # change): the real-evidence sentence _why_summary_sentence composes below
@@ -925,8 +947,27 @@ class DecisionCenterUI:
                             label="Status", interactive=False,
                             elem_classes=["aara-field-value"],
                         )
+                    # P2 Why/Rationale heading-clarity fix (UI-completion
+                    # audit): "Why?" reads as a promise of a causal
+                    # explanation this panel has never provided -- its own
+                    # content was already carrying that clarification in
+                    # prose (_WHY_EVIDENCE_CLARIFICATION: "not a recorded
+                    # investment thesis or causal explanation"), forcing a
+                    # sighted or screen-reader user to read the body before
+                    # learning what the heading actually means. "Evidence
+                    # Summary" states the section's real scope directly in
+                    # the heading itself -- same short, sibling-parallel
+                    # style as "Evidence"/"Governance & Policy"/"Approval"
+                    # below, makes no causal claim, and does not need to
+                    # change to keep matching this file's fallback/error
+                    # copy (_WHY_RATIONALE_HTML, _WHY_EVIDENCE_ERROR_HTML),
+                    # which already states plainly when nothing has been
+                    # captured. why_output/detail_outputs and every
+                    # controller/screen.py contract are unchanged -- this is
+                    # the rendered heading string only.
                     gr.Markdown(
-                        '<h3 class="aara-eyebrow">Why?</h3>', elem_classes=["aara-section-label"],
+                        '<h3 class="aara-eyebrow">Evidence Summary</h3>',
+                        elem_classes=["aara-section-label"],
                     )
                     why_output = gr.HTML()
                     gr.Markdown(
@@ -1141,7 +1182,18 @@ class DecisionCenterUI:
         _section_error_summary (built from the same *_ERROR_MESSAGE
         constants those section renderers already use) and appends it here
         -- no new domain semantics, no change to the decision-level
-        error/not-found/success branches above."""
+        error/not-found/success branches above.
+
+        P2 Why/Rationale error-wording fix (UI-completion audit): an
+        evidence read failure previously fell through to the same
+        "{_WHY_RATIONALE_TITLE}. {_WHY_RATIONALE_BODY}" wording a
+        genuinely evidence-free decision gets (_why_summary_sentence
+        returns None for both -- evidence_status ERROR forces evidence to
+        () same as a real empty result), announcing a transient failure as
+        if the thesis had permanently "not yet been recorded". Now checked
+        before falling into _why_summary_sentence, mirroring
+        _format_why_summary_html's own evidence_status check for the
+        visible panel."""
         if not evt.selected or not evt.row_value:
             return ""
         decision_id = evt.row_value[0]
@@ -1151,9 +1203,18 @@ class DecisionCenterUI:
             return f"Decision selected: {symbol}. {_DECISION_READ_ERROR_MESSAGE}"
         if detail_area.is_empty:
             return f"Decision selected: {symbol}. {_DECISION_NOT_FOUND_MESSAGE}"
-        summary = self._why_summary_sentence(detail_area.evidence)
-        if summary is None:
-            summary = f"{_WHY_RATIONALE_TITLE}. {_WHY_RATIONALE_BODY}"
+        if detail_area.evidence_status is ReadStatus.ERROR:
+            # P2 Why/Rationale error-wording fix: short title only -- the
+            # detailed _EVIDENCE_ERROR_MESSAGE sentence is not repeated here
+            # since section_errors below already appends it (evidence_status
+            # ERROR is always the first thing _section_error_summary reports),
+            # matching _format_why_summary_html's own visible title/body
+            # split for the same case (_WHY_EVIDENCE_ERROR_HTML).
+            summary = f"{_WHY_EVIDENCE_ERROR_TITLE}."
+        else:
+            summary = self._why_summary_sentence(detail_area.evidence)
+            if summary is None:
+                summary = f"{_WHY_RATIONALE_TITLE}. {_WHY_RATIONALE_BODY}"
         section_errors = DecisionCenterUI._section_error_summary(detail_area)
         if section_errors:
             return f"Decision selected: {symbol}. {summary} {section_errors}"
@@ -1278,7 +1339,7 @@ class DecisionCenterUI:
             detail_area.confidence_display,
             detail_area.timestamp_display,
             detail_area.status_display,
-            DecisionCenterUI._format_why_summary_html(detail_area.evidence),
+            DecisionCenterUI._format_why_summary_html(detail_area),
             DecisionCenterUI._format_evidence_html(detail_area),
             DecisionCenterUI._format_governance_html(detail_area),
             DecisionCenterUI._format_approval_html(detail_area),
@@ -1322,13 +1383,20 @@ class DecisionCenterUI:
         return f"{len(evidence)} signals: {descriptions}. {_WHY_EVIDENCE_CLARIFICATION}"
 
     @staticmethod
-    def _format_why_summary_html(evidence: Tuple[EvidenceEntry, ...]) -> str:
-        """Falls back to the original, unchanged _WHY_RATIONALE_HTML when
-        there is no evidence to summarize -- including the
-        evidence-read-error case, which already surfaces its own message
-        in the Evidence section. See _why_summary_sentence for the shared
-        summary logic (also used by _announce_row_select)."""
-        summary = DecisionCenterUI._why_summary_sentence(evidence)
+    def _format_why_summary_html(detail_area: DecisionDetailArea) -> str:
+        """P2 Why/Rationale error-wording fix: evidence_status is checked
+        first, and separately from "no evidence to summarize" -- an
+        evidence read failure now renders _WHY_EVIDENCE_ERROR_HTML (reusing
+        _EVIDENCE_ERROR_MESSAGE, the same wording the Evidence section
+        itself already shows for this identical failure) instead of
+        falling into the same "Rationale not captured" wording a genuinely
+        evidence-free decision gets. Falls back to the original, unchanged
+        _WHY_RATIONALE_HTML only for the real zero-evidence case. See
+        _why_summary_sentence for the shared summary logic (also used by
+        _announce_row_select)."""
+        if detail_area.evidence_status is ReadStatus.ERROR:
+            return _WHY_EVIDENCE_ERROR_HTML
+        summary = DecisionCenterUI._why_summary_sentence(detail_area.evidence)
         if summary is None:
             return _WHY_RATIONALE_HTML
         return (

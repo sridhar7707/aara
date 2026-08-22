@@ -45,6 +45,8 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _TIMESTAMP_DISCLOSURE_HTML,
     _TIMESTAMP_DISCLOSURE_TITLE,
     _WHY_EVIDENCE_CLARIFICATION,
+    _WHY_EVIDENCE_ERROR_HTML,
+    _WHY_EVIDENCE_ERROR_TITLE,
     _WHY_RATIONALE_BODY,
     _WHY_RATIONALE_HTML,
     _WHY_RATIONALE_TITLE,
@@ -586,6 +588,14 @@ def test_render_detail_shows_a_message_when_the_decision_read_fails():
 
 
 def test_render_detail_shows_a_message_when_evidence_read_fails_but_decision_still_renders():
+    """P2 Why/Rationale error-wording fix: an evidence read failure must
+    render distinctly from a genuinely evidence-free decision -- both used
+    to collapse to the same "Rationale not captured / thesis has not yet
+    been recorded" wording (_WHY_RATIONALE_HTML), which misstates a
+    transient read failure as a permanent absence of data. why_html must
+    now be _WHY_EVIDENCE_ERROR_HTML, reusing the exact same
+    _EVIDENCE_ERROR_MESSAGE text the Evidence section itself already shows
+    for this identical failure."""
     view = _make_view()
     controller = _FakeController(
         detail_area=DecisionDetailArea(
@@ -600,7 +610,10 @@ def test_render_detail_shows_a_message_when_evidence_read_fails_but_decision_sti
     ) = ui._render_detail("dec-001")
 
     assert "AAPL" in header
-    assert why_html == _WHY_RATIONALE_HTML
+    assert why_html == _WHY_EVIDENCE_ERROR_HTML
+    assert why_html != _WHY_RATIONALE_HTML
+    assert _WHY_EVIDENCE_ERROR_TITLE in why_html
+    assert _EVIDENCE_ERROR_MESSAGE in why_html
     assert "Evidence is temporarily unavailable." in evidence_html
     assert 'class="aara-error-message"' in evidence_html
     assert governance_html == (
@@ -1562,6 +1575,67 @@ def test_why_rationale_block_is_present_in_the_built_layout():
     assert why_html == _WHY_RATIONALE_HTML
 
 
+def test_why_evidence_error_html_is_the_exact_fixed_title_and_reused_evidence_error_body():
+    """P2 Why/Rationale error-wording fix: the evidence-read-error variant
+    of the Why panel is a distinct, fixed constant -- not the zero-evidence
+    _WHY_RATIONALE_HTML -- whose body is _EVIDENCE_ERROR_MESSAGE verbatim
+    (the exact same sentence the Evidence section itself already shows for
+    this failure), not new copy invented for this panel."""
+    assert _WHY_EVIDENCE_ERROR_TITLE == "Rationale unavailable"
+    assert _WHY_EVIDENCE_ERROR_HTML == (
+        '<div class="aara-disclosure-message">'
+        '<div class="aara-disclosure-title">Rationale unavailable</div>'
+        f'<div class="aara-disclosure-body">{_EVIDENCE_ERROR_MESSAGE}</div>'
+        "</div>"
+    )
+    assert _WHY_EVIDENCE_ERROR_HTML != _WHY_RATIONALE_HTML
+
+
+def test_why_evidence_error_html_is_present_in_the_built_layout_on_an_evidence_read_failure():
+    """Same real-render-path guarantee as
+    test_why_rationale_block_is_present_in_the_built_layout above, for the
+    evidence-read-error branch specifically."""
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, evidence=(), evidence_status=ReadStatus.ERROR)
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    why_html = ui._render_detail("dec-001")[5]
+
+    assert why_html == _WHY_EVIDENCE_ERROR_HTML
+    assert why_html != _WHY_RATIONALE_HTML
+
+
+def test_why_summary_html_distinguishes_zero_evidence_from_evidence_read_error():
+    """Direct regression guard for the P2 Why/Rationale error-wording fix:
+    two DecisionDetailArea inputs that both carry an empty evidence tuple
+    (previously indistinguishable to _why_summary_sentence) must render
+    different why_html depending on evidence_status alone."""
+    view = _make_view()
+    zero_evidence = DecisionDetailArea(decision=view, evidence=(), evidence_status=ReadStatus.OK)
+    evidence_error = DecisionDetailArea(decision=view, evidence=(), evidence_status=ReadStatus.ERROR)
+
+    assert DecisionCenterUI._format_why_summary_html(zero_evidence) == _WHY_RATIONALE_HTML
+    assert DecisionCenterUI._format_why_summary_html(evidence_error) == _WHY_EVIDENCE_ERROR_HTML
+
+
+def test_evidence_summary_heading_is_present_in_the_built_layout():
+    """P2 Why/Rationale heading-clarity fix: "Why?" (which reads as a
+    promise of a causal explanation this panel has never provided) is
+    replaced with "Evidence Summary" -- states the section's real scope
+    directly in the heading, same short sibling-parallel style as the
+    Evidence/Governance & Policy/Approval headings around it."""
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    combined = "".join(_built_markup_blocks(ui))
+
+    assert '<h3 class="aara-eyebrow">Evidence Summary</h3>' in combined
+    assert '<h3 class="aara-eyebrow">Why?</h3>' not in combined
+    assert ">Why?<" not in combined
+
+
 def test_shell_nav_has_exactly_one_active_item_and_no_muted_items():
     """Both Portfolio Intelligence and Risk Intelligence have shipped as
     real screens (wired via gr.TabbedInterface in bootstrap.py) -- neither
@@ -1915,7 +1989,17 @@ def test_announce_row_select_wording_includes_the_evidence_error_message():
     Evidence read failed must have that failure spoken, reusing the exact
     same _EVIDENCE_ERROR_MESSAGE the visible Evidence section already shows
     (_format_evidence_html) -- not silently omitted, which previously left
-    screen-reader users with no signal that a section failed to load."""
+    screen-reader users with no signal that a section failed to load.
+
+    P2 Why/Rationale error-wording fix: the announcement previously said
+    "Rationale not captured. The decision thesis has not yet been
+    recorded." immediately before this same _EVIDENCE_ERROR_MESSAGE --
+    self-contradictory wording (a permanent "not yet recorded" claim right
+    next to a "temporarily unavailable" one for the same read failure).
+    Now uses the short _WHY_EVIDENCE_ERROR_TITLE ("Rationale unavailable.")
+    instead, with _EVIDENCE_ERROR_MESSAGE supplying the one and only
+    detailed explanation, matching the visible panel's own
+    title/body split (_WHY_EVIDENCE_ERROR_HTML)."""
     view = _make_view(decision_id="dec-002", symbol="MSFT")
     controller = _FakeController(
         detail_area=DecisionDetailArea(decision=view, evidence_status=ReadStatus.ERROR)
@@ -1926,10 +2010,10 @@ def test_announce_row_select_wording_includes_the_evidence_error_message():
     result = ui._announce_row_select(_make_select_event(row))
 
     assert result == (
-        "Decision selected: MSFT. Rationale not captured. "
-        "The decision thesis has not yet been recorded. "
+        f"Decision selected: MSFT. {_WHY_EVIDENCE_ERROR_TITLE}. "
         f"{_EVIDENCE_ERROR_MESSAGE}"
     )
+    assert "The decision thesis has not yet been recorded." not in result
 
 
 def test_announce_row_select_wording_includes_the_governance_error_message():
@@ -2003,9 +2087,12 @@ def test_announce_row_select_wording_includes_every_failed_section_error_in_a_fi
 
     result = ui._announce_row_select(_make_select_event(row))
 
+    # P2 Why/Rationale error-wording fix: evidence_status ERROR here means
+    # the rationale summary itself is the short _WHY_EVIDENCE_ERROR_TITLE,
+    # not the old "not yet recorded" wording -- _EVIDENCE_ERROR_MESSAGE
+    # still appears exactly once, as the first section error, not repeated.
     assert result == (
-        "Decision selected: AAPL. Rationale not captured. "
-        "The decision thesis has not yet been recorded. "
+        f"Decision selected: AAPL. {_WHY_EVIDENCE_ERROR_TITLE}. "
         f"{_EVIDENCE_ERROR_MESSAGE} {_GOVERNANCE_ERROR_MESSAGE} "
         f"{_APPROVAL_ERROR_MESSAGE} {_AUDIT_ERROR_MESSAGE}"
     )
