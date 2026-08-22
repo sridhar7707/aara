@@ -1440,18 +1440,30 @@ class DecisionCenterUI:
     def _format_approval_html(detail_area: DecisionDetailArea) -> str:
         if detail_area.approvals_status is ReadStatus.ERROR:
             return DecisionCenterUI._error_message_html(_APPROVAL_ERROR_MESSAGE)
-        cards = [
-            DecisionCenterUI._record_card_html(
-                "",  # no fabricated label -- the verdict below is the card's identity
-                entry.status.value.replace("_", " ").title(),
-                [
-                    ("Approved By", entry.approved_by, False),
-                    ("Approved At", format_display_timestamp(entry.approved_at), True),
-                ],
-                "positive" if entry.status is ApprovalStatus.APPROVED else "negative",
+        cards = []
+        for entry in detail_area.approvals:
+            is_approved = entry.status is ApprovalStatus.APPROVED
+            # P3 visual-polish fix (Finding 2): a REJECTED entry previously
+            # still read "Approved By"/"Approved At" right next to its own
+            # REJECTED pill -- self-contradictory wording, live-verified on
+            # dec-seed-005/TSLA. ApprovalEntry.approved_by/approved_at
+            # themselves are untouched (still the one real field pair on
+            # the record regardless of verdict) -- only the display label
+            # text is conditional on the same entry.status already used two
+            # lines below to pick the pill's positive/negative color.
+            by_label = "Approved By" if is_approved else "Recorded By"
+            at_label = "Approved At" if is_approved else "Recorded At"
+            cards.append(
+                DecisionCenterUI._record_card_html(
+                    "",  # no fabricated label -- the verdict below is the card's identity
+                    entry.status.value.replace("_", " ").title(),
+                    [
+                        (by_label, entry.approved_by, False),
+                        (at_label, format_display_timestamp(entry.approved_at), True),
+                    ],
+                    "positive" if is_approved else "negative",
+                )
             )
-            for entry in detail_area.approvals
-        ]
         return DecisionCenterUI._record_list_html(cards, _APPROVAL_EMPTY_MESSAGE, "approval")
 
     @staticmethod
