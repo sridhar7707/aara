@@ -32,6 +32,7 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _ILLUSTRATIVE_DATA_BODY,
     _ILLUSTRATIVE_DATA_HTML,
     _ILLUSTRATIVE_DATA_TITLE,
+    _JOURNEY_TARGET_FOCUS_SETUP_JS,
     _LIVE_ANNOUNCER_ELEM_ID,
     _RISK_CONTEXT_BODY,
     _RISK_CONTEXT_HTML,
@@ -2114,6 +2115,31 @@ def test_accessible_name_setup_script_targets_the_documented_dom_contract():
     test instead of only failing in the browser."""
     assert '.aara-decisions-table [role="grid"]' in _ACCESSIBLE_NAME_SETUP_JS
     assert 'setAttribute("aria-label", "Decisions")' in _ACCESSIBLE_NAME_SETUP_JS
+
+
+def test_journey_target_focus_setup_script_is_present_in_built_layout():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    assert _JOURNEY_TARGET_FOCUS_SETUP_JS in demo.head
+
+
+def test_journey_target_focus_setup_script_targets_the_documented_dom_contract():
+    """P2 #6 fix: the Decision Journey's four anchor links jump to plain,
+    non-focusable gr.HTML(elem_id=...) divs, so a keyboard/screen-reader
+    user activating one gets no focus change and no announcement -- only
+    the (imperceptible to them) visual scroll (see gradio_view.py's own
+    docstring on _JOURNEY_TARGET_FOCUS_SETUP_JS for the full contract).
+    Asserted here as a contract check so a future edit can't silently drop
+    one of the four target ids or the tabindex="-1" attribute without
+    failing a test instead of only failing in the browser."""
+    assert "decision-created-section" in _JOURNEY_TARGET_FOCUS_SETUP_JS
+    assert "evidence-section" in _JOURNEY_TARGET_FOCUS_SETUP_JS
+    assert "governance-section" in _JOURNEY_TARGET_FOCUS_SETUP_JS
+    assert "approval-section" in _JOURNEY_TARGET_FOCUS_SETUP_JS
+    assert 'setAttribute("tabindex", "-1")' in _JOURNEY_TARGET_FOCUS_SETUP_JS
 
 
 def test_theme_focus_ring_covers_decision_journey_anchor_links():

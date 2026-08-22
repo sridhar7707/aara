@@ -569,6 +569,66 @@ _ACCESSIBLE_NAME_SETUP_JS = """
 </script>
 """
 
+# P2 #6 (Loading States/Usability audit): Decision Journey anchor targets
+# accessible-focus fix. _lifecycle_track_html's four stage links are real
+# <a href="#..."> anchors to decision-created-section/evidence-section/
+# governance-section/approval-section (see build() below and that
+# function's own docstring) -- deliberately implemented as native in-page
+# anchor jumps, no JS, when added. That's sufficient for a mouse user (the
+# browser scrolls the target into view), but per the HTML fragment-
+# navigation algorithm a plain, non-focusable element (each target is a
+# bare gr.HTML(elem_id=...) <div>, confirmed by grep: no tabindex is set
+# on any of the four anywhere in this file) never actually receives DOM
+# focus on jump -- only a focusable target does. A keyboard or
+# screen-reader user activating one of these links therefore gets no
+# focus change and no announcement of having arrived at the section; only
+# the visual scroll (imperceptible to them) occurs. Fifth, independent JS
+# bridge (distinct concern from keyboard activation, live-region
+# announcement, selection ARIA sync, and grid accessible name above): sets
+# tabindex="-1" once on each of the four targets so the browser's own
+# native fragment-focus behavior actually focuses them (no click/keydown
+# handler needed -- the browser does this automatically once the target is
+# focusable), and so each also picks up the existing generic
+# `[tabindex]:focus-visible` outline rule in theme.py (added for this same
+# Decision Journey feature's link-focus styling) with no new CSS.
+#
+# One-shot bounded poll, not a MutationObserver -- same reasoning as
+# _ACCESSIBLE_NAME_SETUP_JS above: each of these four elements is Gradio's
+# own stable per-component root div (Block.svelte -- never destroyed and
+# recreated when the component's value later changes, only its inner
+# content), created once and never replaced by Refresh or row selection,
+# so setting the attribute once persists for the life of the page.
+_JOURNEY_TARGET_FOCUS_SETUP_JS = """
+<script>
+(function () {
+  var TARGET_IDS = [
+    "decision-created-section", "evidence-section",
+    "governance-section", "approval-section",
+  ];
+  var attempts = 0;
+  var maxAttempts = 100;
+  var intervalId = setInterval(function () {
+    attempts += 1;
+    var found = 0;
+    TARGET_IDS.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) {
+        el.setAttribute("tabindex", "-1");
+        found += 1;
+      }
+    });
+    if (found === TARGET_IDS.length) {
+      clearInterval(intervalId);
+      return;
+    }
+    if (attempts >= maxAttempts) {
+      clearInterval(intervalId);
+    }
+  }, 50);
+})();
+</script>
+"""
+
 _SHELL_IDENTITY_HTML = (
     f'<img class="aara-shell-logo" src="{_load_shell_logo_data_uri()}" alt="AARA" />'
     '<div class="aara-shell-wordmark-group">'
@@ -792,6 +852,7 @@ class DecisionCenterUI:
             head=(
                 _KEYBOARD_SELECTION_BRIDGE_JS + _LIVE_REGION_SETUP_JS
                 + _SELECTION_ARIA_SYNC_JS + _ACCESSIBLE_NAME_SETUP_JS
+                + _JOURNEY_TARGET_FOCUS_SETUP_JS
             ),
         ) as demo:
             gr.HTML(_SHELL_IDENTITY_HTML, elem_classes=["aara-shell-header"])
