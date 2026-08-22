@@ -2264,11 +2264,17 @@ def test_theme_focus_ring_covers_decision_journey_anchor_links():
     ring, unlike every other focusable element in this app. Asserted as a
     single contiguous rule (not just a same-file substring) so a future
     edit can't silently split `a:focus-visible` into a different
-    declaration, or drop it, without failing a test."""
+    declaration, or drop it, without failing a test.
+
+    P3 fix: the same rule also now covers `summary:focus-visible`, closing
+    the identical gap for the Evidence/Audit Trail payload disclosures'
+    native <summary> elements (also natively focusable without tabindex,
+    also previously falling through to the browser's raw default outline)."""
     assert (
         ".gradio-container button:focus-visible,\n"
         ".gradio-container [tabindex]:focus-visible,\n"
-        ".gradio-container a:focus-visible {\n"
+        ".gradio-container a:focus-visible,\n"
+        ".gradio-container summary:focus-visible {\n"
         "  outline: 2px solid var(--color-gold-accent-boundary) !important;\n"
         "  outline-offset: 2px;\n"
         "}"
@@ -2277,13 +2283,82 @@ def test_theme_focus_ring_covers_decision_journey_anchor_links():
 
 def test_theme_restyles_gradios_own_pending_state_classes():
     """MVP Loading States slice: theme.py must restyle Gradio's own
-    pending/processing classes (.eta-bar sweep, .generating pulse border,
-    .meta-text/.progress-text badge -- confirmed real, if svelte-scoped,
-    class names against the installed gradio==4.44.1 package's compiled
-    CSS) to the AARA palette, rather than leaving Gradio's stock
-    gray/accent-orange defaults unstyled."""
-    for selector in (".eta-bar", ".generating", ".meta-text", ".progress-text"):
+    pending/processing classes (.eta-bar sweep, .meta-text/.progress-text
+    badge -- confirmed real, if svelte-scoped, class names against the
+    installed gradio==4.44.1 package's compiled CSS) to the AARA palette,
+    rather than leaving Gradio's stock gray/accent-orange defaults
+    unstyled.
+
+    P3 dead-CSS cleanup: .generating (the pulsing pending-state border) was
+    dropped from this assertion -- live-verified (P2 Loading States pass)
+    that it never actually renders in this app, so theme.py's own rule for
+    it was removed as dead code; .eta-bar/.meta-text/.progress-text already
+    carry the real, working pending signal on their own."""
+    for selector in (".eta-bar", ".meta-text", ".progress-text"):
         assert selector in CSS
+    assert ".generating {" not in CSS
+
+
+def test_theme_nav_item_muted_and_badge_rules_are_removed_as_dead_css():
+    """P3 dead-CSS cleanup: .nav-item.muted and .aara-nav-badge styled a
+    "Coming Soon" treatment for Portfolio/Risk Intelligence nav items that
+    no longer exists -- both screens shipped as real tabs, and
+    _SHELL_NAV_HTML/build_shell_nav_html() have not emitted either class in
+    any live markup for some time (see
+    test_shell_nav_has_exactly_one_active_item_and_no_muted_items, which
+    already asserts their absence from the rendered nav). This asserts the
+    now-unused CSS itself is gone too, not just the markup."""
+    assert ".nav-item.muted {" not in CSS
+    assert ".aara-nav-badge {" not in CSS
+
+
+def test_theme_refresh_button_selector_targets_the_button_itself():
+    """P3 dead-selector fix: elem_classes=["aara-refresh-button"] lands
+    directly on the rendered <button> (gr.Button puts elem_classes on the
+    button element itself, not a wrapper) -- confirmed live via
+    getComputedStyle. The old ".aara-refresh-button button" descendant
+    selector could therefore never match anything and silently left the
+    button on Gradio's own default chrome the whole time. This locks in
+    both halves of the fix: the corrected selector carries the intended
+    styling, and the dead descendant-selector text never reappears."""
+    assert (
+        ".aara-refresh-button {\n"
+        "  flex: none !important;\n"
+        "  min-width: 0 !important;\n"
+        "  background: transparent !important;\n"
+        "  border: 1px solid var(--color-border-subtle) !important;\n"
+        "  color: var(--color-text-secondary) !important;\n"
+        "  font-size: 12px !important;\n"
+        "  font-weight: 600 !important;\n"
+        "  box-shadow: none !important;\n"
+        "  padding: 4px var(--space-sm) !important;\n"
+        "}\n"
+        ".aara-refresh-button:hover {\n"
+        "  border-color: var(--color-gold-accent-boundary) !important;\n"
+        "  color: var(--color-navy-primary) !important;\n"
+        "}"
+    ) in CSS
+    assert ".aara-refresh-button button {" not in CSS
+    assert ".aara-refresh-button button:hover {" not in CSS
+
+
+def test_theme_payload_disclosure_summary_is_styled():
+    """P3 fix: the native <summary> in the Evidence/Audit Trail "Details"
+    payload disclosure (.aara-payload-disclosure, see
+    _format_evidence_detail_html/_format_audit_detail_html) had no CSS rule
+    at all -- live-verified (getComputedStyle) it rendered in Gradio's own
+    default body color/size (#1F2937/14px, matching none of this app's own
+    tokens) with cursor: auto (no click affordance, unlike every other
+    interactive element in this file). Reuses existing tokens only --
+    --color-text-secondary, matching the surrounding record-field text
+    size -- not a new component or a redesign."""
+    assert (
+        ".aara-payload-disclosure summary {\n"
+        "  font-size: 13px;\n"
+        "  color: var(--color-text-secondary);\n"
+        "  cursor: pointer;\n"
+        "}"
+    ) in CSS
 
 
 def test_theme_does_not_introduce_a_custom_spinner_or_skeleton_system():

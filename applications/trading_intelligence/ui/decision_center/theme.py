@@ -221,23 +221,14 @@ footer { display: none !important; }
   color: var(--color-navy-primary);
   border-bottom-color: var(--color-gold-accent-boundary);
 }
-.aara-shell-nav-list .nav-item.muted {
-  color: var(--color-text-secondary);
-  cursor: default;
-}
-/* Coming Soon badge: no separate typographic treatment (uppercase/
-   letter-spacing/opacity all inherit from .nav-item.muted above) so it
-   reads as part of the same muted label, not a competing element. Only
-   already-defined tokens are used -- no new custom property. */
-.aara-shell-nav-list .nav-item.muted .aara-nav-badge {
-  display: inline-block;
-  margin-left: var(--space-xs);
-  padding: 1px 6px;
-  border-radius: var(--radius-badge);
-  background: var(--color-border-subtle);
-  color: var(--color-text-secondary);
-  vertical-align: middle;
-}
+/* P3 dead-CSS cleanup: .nav-item.muted and its .aara-nav-badge ("Coming
+   Soon" pill) rules used to live here, from when Portfolio/Risk
+   Intelligence were unshipped placeholders in this nav. Both screens have
+   since shipped as real tabs (see gradio_view.py's _SHELL_NAV_HTML
+   docstring) -- _SHELL_NAV_HTML/ui/shell.py's build_shell_nav_html() no
+   longer emit "muted" or "aara-nav-badge" anywhere, confirmed by the
+   existing test_shell_nav_has_exactly_one_active_item_and_no_muted_items,
+   which already asserts their absence. Removed as unused, not replaced. */
 
 /* ==========================================================================
    Page header -- eyebrow-styled H1 title + subtitle (P2 #1, Decision
@@ -315,11 +306,18 @@ footer { display: none !important; }
   color: var(--color-text-secondary) !important;
   margin: 0 !important;
 }
+/* P3 dead-selector fix: elem_classes=["aara-refresh-button"] on
+   gr.Button(...) (gradio_view.py) lands directly on the rendered <button>
+   itself, not on a wrapping element -- confirmed live (getComputedStyle):
+   the two rules below, written as ".aara-refresh-button button" (a
+   descendant selector requiring a nested <button> that never exists),
+   never matched anything, so this control silently fell back to Gradio's
+   own default secondary-button chrome the whole time. Same declarations,
+   corrected selectors -- no visual change beyond finally applying what was
+   already intended. */
 .aara-refresh-button {
   flex: none !important;
   min-width: 0 !important;
-}
-.aara-refresh-button button {
   background: transparent !important;
   border: 1px solid var(--color-border-subtle) !important;
   color: var(--color-text-secondary) !important;
@@ -328,7 +326,7 @@ footer { display: none !important; }
   box-shadow: none !important;
   padding: 4px var(--space-sm) !important;
 }
-.aara-refresh-button button:hover {
+.aara-refresh-button:hover {
   border-color: var(--color-gold-accent-boundary) !important;
   color: var(--color-navy-primary) !important;
 }
@@ -858,10 +856,18 @@ footer { display: none !important; }
    applications/trading_intelligence/ finds only these four), so adding a
    generic `a:focus-visible` selector, scoped to .gradio-container like the
    rules above, has no blast radius beyond them -- same declaration reused
-   verbatim, no new color or visual style introduced. */
+   verbatim, no new color or visual style introduced.
+   P3 fix: the same gap exists for the native <summary> elements in the
+   Evidence/Audit Trail payload disclosures (see the
+   .aara-payload-disclosure summary rule below) -- natively focusable, no
+   tabindex, so they also matched none of the three selectors above and
+   fell through to the browser's raw default outline instead of this app's
+   own gold ring. Same fix, same reasoning as the <a> case: one more
+   selector added to this already-shared rule, no new declaration. */
 .gradio-container button:focus-visible,
 .gradio-container [tabindex]:focus-visible,
-.gradio-container a:focus-visible {
+.gradio-container a:focus-visible,
+.gradio-container summary:focus-visible {
   outline: 2px solid var(--color-gold-accent-boundary) !important;
   outline-offset: 2px;
 }
@@ -871,40 +877,35 @@ footer { display: none !important; }
    processing treatment -- not a custom spinner or skeleton system -- is
    kept as the mechanism; only its stock colors/typography are restyled to
    the AARA palette instead of Gradio's default gray/accent-orange. Class
-   names (.eta-bar, .generating, .meta-text, .progress-text) are Gradio's
-   own, confirmed against the installed gradio==4.44.1 package's compiled
-   CSS (site-packages/gradio/templates/frontend/assets/Index-*.css) -- not
+   names (.eta-bar, .meta-text, .progress-text) are Gradio's own, confirmed
+   against the installed gradio==4.44.1 package's compiled CSS
+   (site-packages/gradio/templates/frontend/assets/Index-*.css) -- not
    invented here. Gradio scopes its own rules with two chained
-   svelte-hash classes (e.g. .generating.svelte-au1olv.svelte-au1olv),
-   giving them higher specificity than a plain single-class selector here
-   would have without !important -- the same override technique already
-   used throughout this file (framework chrome removal, table overflow,
+   svelte-hash classes (e.g. .eta-bar.svelte-au1olv.svelte-au1olv), giving
+   them higher specificity than a plain single-class selector here would
+   have without !important -- the same override technique already used
+   throughout this file (framework chrome removal, table overflow,
    selection ring), not a new pattern.
    .eta-bar: the translucent sweep that fills a pending component left to
    right; recolored from Gradio's default --background-fill-secondary gray
    to the same low-alpha navy tint already used for the Approval record
    card surface (rgba(11, 31, 58, 0.05), reused verbatim -- no new color).
-   .generating: the pulsing border Gradio draws around a component while
-   its callback is in flight; recolored from Gradio's default orange
-   accent to --color-gold-accent-boundary, the same WCAG-safe gold already
-   used for focus rings and the active lifecycle-track dot -- consistent
-   with, not a new addition to, this file's boundary-role gold. The pulse
-   animation itself is Gradio's own and is left running (not a red/green
-   blinking ticker -- FORBIDDEN_UI_PATTERNS.md's actual prohibition -- so
-   nothing here conflicts with it).
    .meta-text / .progress-text: the small "processing | X.Xs" badge Gradio
    overlays on a pending component; restyled to the same card surface,
    border, and monospace data font already used elsewhere in this sheet
    (--color-surface-white, --color-border-subtle, --font-data) instead of
    Gradio's plain default text-on-transparent, so it reads as part of this
-   theme rather than as leftover framework chrome. */
+   theme rather than as leftover framework chrome.
+   P3 dead-CSS cleanup: a .generating rule (Gradio's pulsing pending-state
+   border) previously lived here too -- live-verified (P2 Loading States
+   pass) that it never actually renders in this app across any of the three
+   trigger types tested (initial load, Refresh, row select), even under an
+   artificially slow request; .eta-bar/.meta-text/.progress-text already
+   carry the real, working pending signal on their own. Removed as unused,
+   not replaced. */
 .eta-bar {
   background: rgba(11, 31, 58, 0.05) !important;
   opacity: 1 !important;
-}
-.generating {
-  border-color: var(--color-gold-accent-boundary) !important;
-  background: transparent !important;
 }
 .meta-text,
 .progress-text {
@@ -934,5 +935,21 @@ footer { display: none !important; }
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+/* P3 visual/accessibility cleanup: the native <details>/<summary> payload
+   disclosure (Evidence/Audit Trail "Details" expander, see gradio_view.py's
+   _format_evidence_detail_html/_format_audit_detail_html) had no CSS rule
+   anywhere in this file -- live-verified (getComputedStyle): it rendered in
+   Gradio's own default body color/size (#1F2937/14px), matching none of
+   this file's own tokens or the 13px record-value text it sits beside, with
+   cursor: auto (no click affordance, unlike every other interactive element
+   in this file, which all get an explicit pointer cursor). Minimal restyle
+   only, reusing existing tokens already used for adjacent record-field
+   text -- no layout/structure change, not a redesign. */
+.aara-payload-disclosure summary {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
 }
 """
