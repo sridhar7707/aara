@@ -973,6 +973,8 @@ def test_render_detail_renders_a_single_approval_card():
     assert "Approved" in approval_html
     assert "risk_officer" in approval_html
     assert "2026-08-08 04:07 CDT" in approval_html
+    assert "Approved By" in approval_html
+    assert "Approved At" in approval_html
 
 
 def test_render_detail_renders_a_rejected_approval():
@@ -986,6 +988,29 @@ def test_render_detail_renders_a_rejected_approval():
     *_, _evidence_html, _governance_html, approval_html, _audit_html = ui._render_detail("dec-001")
 
     assert "Rejected" in approval_html
+
+
+def test_rejected_approval_card_uses_recorded_wording_not_approved_wording():
+    """P3 visual-polish fix (Finding 2): a REJECTED entry previously still
+    showed the field labels 'Approved By'/'Approved At' right next to its
+    own REJECTED pill -- self-contradictory wording, live-verified on
+    dec-seed-005/TSLA. ApprovalEntry.approved_by/approved_at themselves are
+    unchanged (still the same two real fields, regardless of verdict) --
+    only the REJECTED card's display labels become 'Recorded By'/
+    'Recorded At'; the APPROVED case (see the two tests above) keeps the
+    original 'Approved By'/'Approved At' wording unchanged."""
+    view = _make_view()
+    entry = _make_approval_entry(status=ApprovalStatus.REJECTED, approved_by="risk_officer")
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, approvals=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, _evidence_html, _governance_html, approval_html, _audit_html = ui._render_detail("dec-001")
+
+    assert "Recorded By" in approval_html
+    assert "Recorded At" in approval_html
+    assert "risk_officer" in approval_html
+    assert "Approved By" not in approval_html
+    assert "Approved At" not in approval_html
 
 
 def test_approval_card_does_not_render_the_fabricated_authorization_recorded_label():
@@ -2184,3 +2209,47 @@ def test_theme_does_not_introduce_a_custom_spinner_or_skeleton_system():
     assert "aara-spinner" not in CSS
     assert "aara-skeleton" not in CSS
     assert "@keyframes" not in CSS
+
+
+def test_theme_decisions_table_uses_fixed_layout_with_all_six_columns_sized():
+    """P3 visual-polish fix (Finding 1): live audit found Gradio's own
+    content-measured column widths (~747px across 6 visible columns) far
+    exceeding the table's actual container (~480-590px at realistic desktop
+    widths, narrower on mobile), with the pre-existing overflow-x: hidden
+    silently clipping Last Updated/Verdict off-screen entirely -- Verdict
+    was completely unreachable, not merely cramped. table-layout: fixed
+    plus fixed --cell-width-N percentages (summing to exactly 100%,
+    live-verified at both 1440px and 900px) is what makes the table's own
+    width, and each column's share of it, authoritative instead of
+    content-measured. Asserted here as contract checks so a future edit
+    can't silently drop table-layout: fixed, reintroduce a percentage sum
+    that doesn't total 100%, or lose the six-column CSS mapping this fix
+    depends on (nth-child(1) is Decision ID, hidden -- excluded from this
+    count on purpose)."""
+    assert "table-layout: fixed !important;" in CSS
+    cell_width_percentages = [0, 12, 12, 19, 17, 22, 18]
+    for index, percentage in enumerate(cell_width_percentages):
+        assert f"--cell-width-{index}: {percentage}% !important;" in CSS
+    assert sum(cell_width_percentages) == 100
+
+
+def test_theme_decisions_table_wraps_only_status_and_last_updated_columns():
+    """Companion to the fixed-layout fix above: Symbol/Action/Confidence/
+    Verdict hold genuinely short, fixed-vocabulary content (ticker symbols,
+    BUY/SELL/HOLD and APPROVED/REJECTED badges, percentages) that must stay
+    on one line -- an earlier iteration of this fix instead force-wrapped
+    every column, which broke ticker symbols and badges mid-word (e.g.
+    "GOOGL" as "GO"/"OGL"). Only Status (nth-child(4)) and Last Updated
+    (nth-child(6)) -- the two genuinely long-text columns this fix's
+    percentages deliberately don't try to fit on one line -- opt back into
+    wrapping. Asserted as a contract check so a future edit can't silently
+    re-apply wrapping to the other four columns."""
+    assert (
+        ".aara-decisions-table table thead th:nth-child(4),\n"
+        ".aara-decisions-table table tbody td:nth-child(4),\n"
+        ".aara-decisions-table table thead th:nth-child(6),\n"
+        ".aara-decisions-table table tbody td:nth-child(6) {\n"
+        "  white-space: normal !important;\n"
+        "  text-overflow: clip;\n"
+        "}"
+    ) in CSS

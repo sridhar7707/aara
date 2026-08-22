@@ -373,12 +373,62 @@ footer { display: none !important; }
 .aara-decisions-table table {
   overflow-x: hidden !important;
   overflow-y: auto !important;
+  /* P3 visual-polish fix (Finding 1): VirtualTable.svelte sizes each column
+     to its own measured, unwrapped content width (each th/td carries an
+     inline `width: var(--cell-width-N)`, computed by Gradio's own JS and
+     set on the ancestor `.table-wrap`), then sums those to however wide
+     the <table> itself becomes -- confirmed live: 6 visible columns (a 7th,
+     Decision ID, is display:none above and so excluded from the browser's
+     table layout algorithm entirely) measured ~747px, while this table's
+     actual container is ~480-590px at realistic desktop widths (bounded by
+     .gradio-container's own max-width: 1280px, confirmed unaffected by
+     viewport width beyond that) and narrower still once stacked on mobile.
+     overflow-x: hidden above was written on the (once-true, now false --
+     see the scrolling-element comment below) assumption that columns
+     always fit; instead the two rightmost columns (Last Updated, Verdict)
+     were silently clipped off-screen entirely, with no scrollbar to reach
+     them -- Verdict was unreachable in every configuration tested.
+     table-layout: fixed makes the table's own width (100%, i.e. exactly
+     its container's width) and each column's share of it authoritative,
+     overriding Gradio's content-measured var()s below instead of merely
+     fighting them by specificity. */
+  table-layout: fixed !important;
+  width: 100% !important;
+}
+/* Overrides Gradio's own JS-computed --cell-width-N custom properties
+   (set inline, non-!important, on this same .table-wrap by
+   VirtualTable.svelte) with fixed percentages summing to 100% -- an
+   !important custom-property declaration in this stylesheet still wins
+   over a plain inline one, and keeps winning across Gradio's own re-renders
+   (row selection, Refresh), since the cascade is recomputed each time, not
+   snapshotted once. --cell-width-0 (Decision ID, hidden) is included only
+   for completeness -- display:none already excludes it from layout.
+   Percentages are sized from canvas-measured text widths (actual font/
+   weight/letter-spacing this table renders, not guessed) of the widest
+   real content per column, live-verified against actual rendered content
+   at both the 1440px and 900px (mobile-stacked) widths this fix targets:
+   Symbol/Action/Confidence/Verdict each need just enough for their
+   genuinely short, header-driven-or-badge-driven content (e.g. Confidence's
+   own header text is wider than any "NN%" value it holds; Verdict's widest
+   content is the "APPROVED" badge, not its header) to stay on one line;
+   Status and Last Updated -- by far the longest strings ("Governance
+   Evaluated", full date+time) -- get the two largest shares and wrap onto
+   two lines instead, below, rather than trying to fit either on one line. */
+.aara-decisions-table .table-wrap {
+  --cell-width-0: 0% !important;
+  --cell-width-1: 12% !important;
+  --cell-width-2: 12% !important;
+  --cell-width-3: 19% !important;
+  --cell-width-4: 17% !important;
+  --cell-width-5: 22% !important;
+  --cell-width-6: 18% !important;
 }
 .aara-decisions-table table thead th {
-  padding: 6px var(--space-sm) !important;
+  padding: 6px 4px !important;
   border: none !important;
   border-bottom: 1px solid var(--color-border-subtle) !important;
   background: transparent !important;
+  font-size: 12px !important;
 }
 /* Sort remains functional (native Dataframe behavior, not removed) -- only
    the always-visible sort-icon clutter is suppressed. */
@@ -386,9 +436,34 @@ footer { display: none !important; }
   display: none !important;
 }
 .aara-decisions-table table tbody td {
-  padding: 7px var(--space-sm) !important;
+  padding: 7px 4px !important;
   border: none !important;
   border-bottom: 1px solid var(--color-border-subtle) !important;
+  font-size: 12px !important;
+}
+/* Gradio's own VirtualTable.svelte adds a "no-wrap" class to .table-wrap
+   (white-space: nowrap on every cell), which is exactly right for
+   Symbol/Action/Confidence/Verdict -- short, fixed-vocabulary content
+   (ticker symbols, BUY/SELL/HOLD and APPROVED/REJECTED badges, percentages)
+   that should never break mid-word. overflow/text-overflow is a defensive
+   fallback (ellipsis, not an overlapping/clipped badge) for the rare case
+   content still doesn't fit its fixed share above. Status and Last Updated
+   are the opposite case -- genuinely long text ("Governance Evaluated",
+   full date+time strings) that the fixed percentages above deliberately
+   don't try to fit on one line -- so only these two columns opt back into
+   wrapping, onto two lines, instead of either overflowing or truncating
+   real information. */
+.aara-decisions-table table thead th,
+.aara-decisions-table table tbody td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.aara-decisions-table table thead th:nth-child(4),
+.aara-decisions-table table tbody td:nth-child(4),
+.aara-decisions-table table thead th:nth-child(6),
+.aara-decisions-table table tbody td:nth-child(6) {
+  white-space: normal !important;
+  text-overflow: clip;
 }
 .aara-decisions-table table tbody tr[slot="tbody"] {
   cursor: pointer;
