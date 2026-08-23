@@ -294,10 +294,13 @@ def test_render_screen_maps_list_rows_and_detail_fields():
         evidence_html, governance_html, approval_html, audit_html,
     ) = ui._render_screen()
 
+    # Verdict is the backslash-escaped dash, not a bare "-" -- see
+    # test_list_rows_render_the_missing_value_dash_when_no_verdict_recorded's
+    # own docstring for why (P3 manual-QA fix, CF-04).
     assert list_rows == [[
         "dec-001", "AAPL",
         '<span class="aara-list-action-badge action-buy">BUY</span>',
-        "Approval Recorded", "91%", "2026-08-08 04:00 CDT", "-",
+        "Approval Recorded", "91%", "2026-08-08 04:00 CDT", "\\-",
     ]]
     assert list_empty_html == ""
     assert "AAPL" in header
@@ -1312,7 +1315,18 @@ def test_list_rows_render_a_rejected_verdict_badge():
 def test_list_rows_render_the_missing_value_dash_when_no_verdict_recorded():
     """approval_status defaults to None (_make_view does not set it) --
     the Verdict column must show the plain missing-value dash, never a
-    fabricated "Pending" badge (ApprovalStatus has no PENDING member)."""
+    fabricated "Pending" badge (ApprovalStatus has no PENDING member).
+
+    P3 manual-QA fix (CF-04): asserts the backslash-escaped form, not a
+    bare "-". This exact assertion previously passed against a bare "-"
+    while the live-rendered cell was actually an invisible empty markdown
+    bullet (<ul><li></li></ul>) -- the Verdict column renders via
+    datatype="markdown" (_LIST_DATATYPES), and CommonMark treats a
+    line-leading "-" as an empty unordered-list item, not literal text.
+    Checking the raw Python string alone missed this; a live browser check
+    (P3 manual-QA pass) is what actually caught it. This test now locks in
+    the escaped value specifically so a future edit can't silently drop
+    the backslash and reintroduce the same invisible-dash regression."""
     view = _make_view()
     screen = DecisionCenterScreen(
         list_area=DecisionListArea(decisions=[view]),
@@ -1323,7 +1337,7 @@ def test_list_rows_render_the_missing_value_dash_when_no_verdict_recorded():
 
     list_rows = ui._render_screen()[0]
 
-    assert list_rows[0][6] == "-"
+    assert list_rows[0][6] == "\\-"
 
 
 def test_list_rows_render_newest_decision_first():

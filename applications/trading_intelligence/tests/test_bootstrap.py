@@ -259,9 +259,13 @@ def test_build_application_seeds_both_approval_verdicts_in_the_decision_list():
     assert verdicts["dec-seed-005"] == (
         '<span class="aara-list-verdict-badge verdict-rejected">Rejected</span>'
     )
-    assert verdicts["dec-seed-001"] == "-"
-    assert verdicts["dec-seed-002"] == "-"
-    assert verdicts["dec-seed-004"] == "-"
+    # Backslash-escaped dash, not a bare "-" -- see gradio_view.py's
+    # _verdict_badge_html docstring (P3 manual-QA fix, CF-04): this column
+    # renders via datatype="markdown", and a bare "-" is CommonMark syntax
+    # for an empty list item, not literal text.
+    assert verdicts["dec-seed-001"] == "\\-"
+    assert verdicts["dec-seed-002"] == "\\-"
+    assert verdicts["dec-seed-004"] == "\\-"
 
 
 def test_build_application_seeded_decisions_are_reachable_by_id():

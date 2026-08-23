@@ -1299,9 +1299,21 @@ class DecisionCenterUI:
         positive/negative approval-verdict color vocabulary already
         established for the Decision Detail approval card
         (_format_approval_html) -- never a bare red/green pair alone, per
-        this file's existing accessibility discipline."""
+        this file's existing accessibility discipline.
+
+        P3 manual-QA fix (CF-04): a bare "-" is CommonMark syntax for an
+        empty unordered-list item, not literal text -- this column renders
+        via the Dataframe's own datatype="markdown" support (see
+        _LIST_DATATYPES), so the dash was silently disappearing into an
+        empty <ul><li></li></ul> instead of ever being drawn, confirmed live
+        by inspecting the rendered cell markup. The leading backslash is the
+        standard CommonMark escape for a literal hyphen -- it renders as
+        "-" and nothing else, not a visible backslash -- and is scoped to
+        this one markdown-rendered return path only; every other
+        _MISSING_VALUE use in this file (Confidence/Last Updated/Status)
+        feeds a plain-text Textbox, never markdown, and is untouched."""
         if status is None:
-            return _MISSING_VALUE
+            return f"\\{_MISSING_VALUE}"
         is_approved = status is ApprovalStatus.APPROVED
         css_class = "verdict-approved" if is_approved else "verdict-rejected"
         label = "Approved" if is_approved else "Rejected"
