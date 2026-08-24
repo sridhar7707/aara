@@ -10,7 +10,7 @@ When documents disagree, the higher tier wins:
 
 1. **Code** — the real, tested implementation always wins over any doc.
 2. **ADRs** (`docs/decisions/`) — binding once status is **Accepted**. A "Proposed" ADR is not yet authoritative.
-3. **Frozen Architecture Documents** — anything in `docs/architecture/ARCHITECTURE_FREEZE_STATUS.md`'s registry, plus `docs/platform/PHASE_0_ARCHITECTURE_VALIDATION_REPORT.md`. Changeable only via a dated addendum or a narrowly-scoped ADR exception.
+3. **Tracked Platform/Implementation Governance Documents** — `docs/platform/`, `docs/implementation/`, and equivalent tracked migration-governance documents (see `docs/platform/AARA_ARCHITECTURE_AUTHORITY.md` for the controlling hierarchy), plus `docs/platform/PHASE_0_ARCHITECTURE_VALIDATION_REPORT.md`. Binding in the absence of a conflicting ADR. Amended, never silently edited — via a dated addendum or a narrowly-scoped ADR exception. (Per ADR-044: `docs/architecture/*` is untracked/gitignored and is non-binding — see Key Folders below.)
 4. **Product Requirements Documents (PRDs)** — one per product/platform. Persona/screen-level docs are layers under a PRD, not competing PRDs.
 5. **Architecture Specifications** — non-frozen architecture docs describing a subsystem.
 6. **Implementation Plans** — sequencing only; never authoritative for a decision.
@@ -24,12 +24,12 @@ When documents disagree, the higher tier wins:
 
 | Area | Canonical Document(s) |
 |---|---|
-| Doc governance / freeze registry | `architecture/ARCHITECTURE_FREEZE_STATUS.md` |
+| Doc governance / freeze registry | `platform/AARA_ARCHITECTURE_AUTHORITY.md` |
 | Platform & product doc authority | `platform/AARA_ARCHITECTURE_AUTHORITY.md` |
-| Core domain/behavior architecture | `architecture/DECISION_INTELLIGENCE_ARCHITECTURE.md` |
-| Data & event model | `architecture/SYSTEM_EVENT_MODEL_v1.2.md` |
-| API / UI interface contracts | `architecture/API_REQUIREMENTS_v1.0.md`, `architecture/PHASE_2_UI_UX_REQUIREMENTS_FORMAL.md` |
-| Implementation guidance | `architecture/IMPLEMENTATION_HANDOFF.md` |
+| Core domain/behavior architecture | `architecture/DECISION_INTELLIGENCE_ARCHITECTURE.md` *(informational/non-binding — untracked `docs/architecture/*`, per ADR-044)* |
+| Data & event model | `architecture/SYSTEM_EVENT_MODEL_v1.2.md` *(informational/non-binding — untracked `docs/architecture/*`, per ADR-044)* |
+| API / UI interface contracts | `architecture/API_REQUIREMENTS_v1.0.md`, `architecture/PHASE_2_UI_UX_REQUIREMENTS_FORMAL.md` *(informational/non-binding — untracked `docs/architecture/*`, per ADR-044)* |
+| Implementation guidance | `architecture/IMPLEMENTATION_HANDOFF.md` *(informational/non-binding — untracked `docs/architecture/*`, per ADR-044)* |
 | Sentinel Engine (vision/entry point) | `platform/SENTINEL_INTELLIGENCE_ENGINE_ARCHITECTURE.md` |
 | Sentinel Engine (live status log) | `implementation/SENTINEL_EXTRACTION_PLAN.md` |
 | AARA Platform shell | `platform/AARA_PLATFORM_SHELL_ARCHITECTURE.md` |
@@ -53,7 +53,7 @@ If a document not listed here claims to be authoritative for one of these areas,
 | Folder | Contents |
 |---|---|
 | `docs/decisions/` | ADRs — binding structural decisions |
-| `docs/architecture/` | Frozen platform architecture, requirements, design system, confidence-integrity design chain |
+| `docs/architecture/` | Local, untracked, non-binding architecture working material (gitignored; per ADR-044) — draft requirements, design system, and confidence-integrity content, informational only |
 | `docs/platform/` | AARA platform shell/identity/registration docs, Sentinel Engine architecture, Trading Intelligence platform-level docs |
 | `docs/products/` | Product-level PRDs and design docs (Trading Intelligence, Wealth Intelligence) |
 | `docs/design/` | Cross-platform UI/UX design principles |
@@ -70,13 +70,12 @@ When asked to make a decision, design a feature, or answer "what's authoritative
 
 1. **This file** (`docs/DOCUMENT_INDEX.md`) — check the Canonical Documents table first.
 2. **Relevant ADR(s)** in `docs/decisions/` — check status is Accepted before treating as binding.
-3. `docs/architecture/ARCHITECTURE_FREEZE_STATUS.md` — is the topic covered by a frozen document?
-4. `docs/platform/AARA_ARCHITECTURE_AUTHORITY.md` — is the topic covered by a platform/product doc-role ruling?
-5. The area-specific canonical document from section 2 above.
-6. `docs/DOCUMENT_GOVERNANCE_MATRIX.md` — only if you need full detail on a specific document (authority level, supersession, duplicate risk) not covered by this index.
-7. `docs/DOCUMENT_CONSOLIDATION_PLAN.md` — only if doing documentation cleanup work, not for ordinary feature/decision questions.
+3. `docs/platform/AARA_ARCHITECTURE_AUTHORITY.md` — is the topic covered by a platform/product doc-role ruling?
+4. The area-specific canonical document from section 2 above.
+5. `docs/DOCUMENT_GOVERNANCE_MATRIX.md` — only if you need full detail on a specific document (authority level, supersession, duplicate risk) not covered by this index.
+6. `docs/DOCUMENT_CONSOLIDATION_PLAN.md` — only if doing documentation cleanup work, not for ordinary feature/decision questions.
 
-Never treat a document's filename (`_FINAL`, `_FORMAL`, `_COMPREHENSIVE`) as a signal of authority — check this index and the freeze registry instead.
+Never treat a document's filename (`_FINAL`, `_FORMAL`, `_COMPREHENSIVE`) as a signal of authority — check this index and `docs/platform/AARA_ARCHITECTURE_AUTHORITY.md` instead.
 
 ---
 
@@ -87,5 +86,5 @@ Never treat a document's filename (`_FINAL`, `_FORMAL`, `_COMPREHENSIVE`) as a s
 - **Frozen documents are amended, never silently edited** — via a dated addendum (see `PHASE_2A_ARCHITECTURE_FREEZE_ADDENDUM.md`) or a narrowly-scoped ADR exception (see `ADR-006`).
 - **One PRD per product.** Persona, screen, and capability detail live in separate documents that explicitly state which PRD they extend — they do not become alternate PRDs.
 - **New documents must be registered**: add the file to `platform/AARA_ARCHITECTURE_AUTHORITY.md`'s document-roles table (or its successor) and, if it becomes canonical for an area, add it to section 2 of this index.
-- **Place files by folder meaning, not convenience**: `docs/decisions/` for ADRs, `docs/architecture/` for frozen/platform-wide architecture, `docs/products/` for product-specific docs, `docs/implementation/` for sequencing plans, `docs/analysis/` for findings. A product doc has no business in `docs/architecture/`, and a decision doc has no business in `docs/products/`.
+- **Place files by folder meaning, not convenience**: `docs/decisions/` for ADRs, `docs/architecture/` for local/untracked/non-binding architecture working material, `docs/products/` for product-specific docs, `docs/implementation/` for sequencing plans, `docs/analysis/` for findings. A product doc has no business in `docs/architecture/`, and a decision doc has no business in `docs/products/`.
 - **Historical or superseded documents move to an archive location** with a `> Superseded by: <path>` banner — they are not deleted and not left in the active tree unmarked.
