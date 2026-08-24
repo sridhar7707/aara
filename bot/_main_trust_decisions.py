@@ -26,7 +26,9 @@ from bot.strategy.ensemble import ensemble_confidence
 from bot.strategy.model_output_adapter import build_model_outputs
 from bot.strategy.sentiment import get_cached_headlines
 from sentinel_engine.adapters.evidence_adapter import to_evidence_records
+from sentinel_engine.adapters.governance_adapter import to_policy_id
 from sentinel_engine.composition.evidence import get_evidence_service
+from sentinel_engine.composition.governance import get_governance_service
 
 
 @dataclass
@@ -88,6 +90,11 @@ def record_decision_safe(
                 get_evidence_service().associate_evidence(decision_row["decision_id"], evidence)
         except Exception as e:
             logger.warning(f"trust ledger evidence integration failed for {asset}: {e}")
+        try:
+            policy_id = to_policy_id(decision_row)
+            get_governance_service().evaluate_policy(decision_row["decision_id"], policy_id)
+        except Exception as e:
+            logger.warning(f"trust ledger governance evaluation failed for {asset}: {e}")
     except decisions.DuplicateDecisionError as e:
         logger.warning(f"trust ledger duplicate decision blocked for {asset}: {e}")
     except Exception as e:
