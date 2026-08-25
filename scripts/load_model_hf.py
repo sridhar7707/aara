@@ -20,6 +20,7 @@ def pull():
         ("validation_report.json", "models/validation_report.json"),
         ("feature_importance.json", "models/feature_importance.json"),
         ("runtime_versions.json", "models/runtime_versions.json"),
+        ("xgb_predictor.meta.json", "models/saved/xgb_predictor.meta.json"),
     ]:
         try:
             cached = hf_hub_download(repo_id=HF_REPO_ID, filename=filename, token=HF_TOKEN)

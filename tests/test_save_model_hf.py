@@ -160,6 +160,33 @@ def test_push_raises_when_no_repo_id(monkeypatch):
         mod.push()
 
 
+def test_push_includes_xgb_predictor_meta_json(monkeypatch):
+    import scripts.save_model_hf as mod
+
+    file_map = {
+        "valid_regime.pkl": 2048,
+        "models/saved/xgb_predictor.meta.json": 64,
+    }
+    monkeypatch.setattr(mod, "MODEL_SAVE_PATH", "ghost_model")
+    monkeypatch.setattr(mod, "REGIME_MODEL_PATH", "valid_regime.pkl")
+
+    exists_fn, getsize_fn = _fs_stubs(file_map)
+    mock_api = MagicMock()
+    repo_paths = []
+
+    def _fake_add(**kwargs):
+        repo_paths.append(kwargs.get("path_in_repo"))
+        return MagicMock()
+
+    with patch("scripts.save_model_hf.os.path.exists", side_effect=exists_fn), \
+         patch("scripts.save_model_hf.os.path.getsize", side_effect=getsize_fn), \
+         patch("scripts.save_model_hf.HfApi", return_value=mock_api), \
+         patch("scripts.save_model_hf.CommitOperationAdd", side_effect=_fake_add):
+        mod.push()
+
+    assert "xgb_predictor.meta.json" in repo_paths, "Commit must include xgb_predictor.meta.json when present"
+
+
 def test_push_commit_includes_model_info_json(monkeypatch):
     import scripts.save_model_hf as mod
 

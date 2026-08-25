@@ -51,7 +51,8 @@ def push():
         return
 
     # JSON artefacts (validation report + feature importance) — no size gate needed
-    for path in ["models/validation_report.json", "models/feature_importance.json"]:
+    for path in ["models/validation_report.json", "models/feature_importance.json",
+                 "models/saved/xgb_predictor.meta.json"]:
         if not os.path.exists(path):
             logger.warning(f"JSON artefact not found (skipping): {path}")
             continue
