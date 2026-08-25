@@ -19,6 +19,21 @@ _MODULES = [
     "applications.trading_intelligence.ui.decision_center.mock_data",
     "applications.trading_intelligence.ui.decision_center.controller",
     "applications.trading_intelligence.ui.decision_center.theme",
+    "applications.trading_intelligence.ui.morning_brief",
+    "applications.trading_intelligence.ui.morning_brief.screen",
+    "applications.trading_intelligence.ui.morning_brief.mock_data",
+    "applications.trading_intelligence.ui.morning_brief.gradio_view",
+    "applications.trading_intelligence.ui.morning_brief.theme",
+    "applications.trading_intelligence.ui.settings",
+    "applications.trading_intelligence.ui.settings.screen",
+    "applications.trading_intelligence.ui.settings.mock_data",
+    "applications.trading_intelligence.ui.settings.gradio_view",
+    "applications.trading_intelligence.ui.settings.theme",
+    "applications.trading_intelligence.ui.performance_learning",
+    "applications.trading_intelligence.ui.performance_learning.screen",
+    "applications.trading_intelligence.ui.performance_learning.mock_data",
+    "applications.trading_intelligence.ui.performance_learning.gradio_view",
+    "applications.trading_intelligence.ui.performance_learning.theme",
 ]
 
 

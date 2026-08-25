@@ -1,0 +1,116 @@
+"""Structural tests for Morning Brief's self-containment.
+
+test_ui_structure.py already scans every file under ui/ (including this
+package) for bot/dashboard/scheduler/sentinel_engine imports -- not
+repeated here. This file covers the requirements unique to this package:
+no coupling to any sibling screen package, and no MorningBriefQuery
+wiring of any kind (the frozen IA's semantic rule this backlog slice must
+not violate).
+"""
+import ast
+import importlib
+import pathlib
+
+import pytest
+
+_PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent / "morning_brief"
+
+_MODULES = [
+    "applications.trading_intelligence.ui.morning_brief",
+    "applications.trading_intelligence.ui.morning_brief.screen",
+    "applications.trading_intelligence.ui.morning_brief.mock_data",
+    "applications.trading_intelligence.ui.morning_brief.gradio_view",
+    "applications.trading_intelligence.ui.morning_brief.theme",
+]
+
+_FORBIDDEN_SIBLING_PACKAGES = (
+    "applications.trading_intelligence.ui.decision_center",
+    "applications.trading_intelligence.ui.portfolio_intelligence",
+    "applications.trading_intelligence.ui.risk_intelligence",
+)
+
+
+@pytest.mark.parametrize("module_name", _MODULES)
+def test_morning_brief_package_imports_cleanly(module_name):
+    importlib.import_module(module_name)
+
+
+def test_morning_brief_does_not_import_any_sibling_screen_package():
+    py_files = list(_PACKAGE_ROOT.rglob("*.py"))
+    assert py_files, "expected at least one .py file under ui/morning_brief/"
+
+    for path in py_files:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert not alias.name.startswith(_FORBIDDEN_SIBLING_PACKAGES), (
+                        f"{path}: forbidden import {alias.name!r}"
+                    )
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                assert not module.startswith(_FORBIDDEN_SIBLING_PACKAGES), (
+                    f"{path}: forbidden import from {module!r}"
+                )
+
+
+def test_morning_brief_does_not_import_or_instantiate_morning_brief_query():
+    """MorningBriefQuery (sentinel_engine.queries.morning_brief_query) is
+    SHARED/Core-directed (Q11) and already used by Wealth Intelligence, but
+    this backlog slice explicitly does not wire it in. Checked via AST
+    (no `import`/`from ... import` naming morning_brief_query or
+    MorningBriefQuery, and no `MorningBriefQuery(...)` call anywhere) --
+    deliberately NOT a raw substring scan, since this package's own
+    docstrings legitimately name "MorningBriefQuery" in prose to document
+    that it is *not* wired (see screen.py/mock_data.py/gradio_view.py
+    module docstrings); a substring check would false-positive on that
+    honest self-documentation."""
+    py_files = list(_PACKAGE_ROOT.rglob("*.py"))
+    assert py_files, "expected at least one .py file under ui/morning_brief/"
+
+    for path in py_files:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert "morning_brief_query" not in alias.name, (
+                        f"{path}: forbidden import {alias.name!r}"
+                    )
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                assert "morning_brief_query" not in module, (
+                    f"{path}: forbidden import from {module!r}"
+                )
+                assert not any(alias.name == "MorningBriefQuery" for alias in node.names), (
+                    f"{path}: forbidden import of MorningBriefQuery"
+                )
+            elif isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id == "MorningBriefQuery":
+                    raise AssertionError(f"{path}: forbidden instantiation of MorningBriefQuery")
+
+
+def test_morning_brief_does_not_import_sentinel_engine_bot_or_dashboard():
+    """Redundant with test_ui_structure.py's whole-tree scan, but kept
+    explicit per-package (matching
+    test_portfolio_intelligence_structure.py's/
+    test_risk_intelligence_structure.py's own convention of an explicit,
+    package-local self-containment check)."""
+    forbidden = ("sentinel_engine", "bot", "dashboard", "scheduler", "database", "ledger")
+    py_files = list(_PACKAGE_ROOT.rglob("*.py"))
+
+    for path in py_files:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    assert not alias.name.startswith(forbidden), (
+                        f"{path}: forbidden import {alias.name!r}"
+                    )
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                assert not module.startswith(forbidden), (
+                    f"{path}: forbidden import from {module!r}"
+                )

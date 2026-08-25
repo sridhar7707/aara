@@ -3,24 +3,43 @@ Intelligence screens that are not Decision Center.
 
 Why this exists: `ui/decision_center/gradio_view.py` already defines its own
 private `_load_shell_logo_data_uri()`/`_SHELL_IDENTITY_HTML`/`_SHELL_NAV_HTML`.
-Portfolio Intelligence and Risk Intelligence each
-document themselves as not importing `ui/decision_center/` (see their own
-module docstrings and `tests/test_portfolio_intelligence_structure.py` /
-`test_risk_intelligence_structure.py`), so this module -- a sibling of all
-three screen packages, not owned by any one of them -- is the shared source
-those two screens reuse instead of each defining their own copy. This keeps
-the shell to two implementations (Decision Center's own, and this one shared
-by Portfolio/Risk) rather than three independently-drifting copies of the
-same logo-loading/cropping logic and nav markup.
+Portfolio Intelligence, Risk Intelligence, Morning Brief, Performance &
+Learning, and Settings each document themselves as not importing
+`ui/decision_center/` (see their own module docstrings and
+`tests/test_portfolio_intelligence_structure.py` /
+`test_risk_intelligence_structure.py` / `test_morning_brief_structure.py` /
+`test_performance_learning_structure.py` / `test_settings_structure.py`),
+so this module -- a sibling of all six screen packages, not owned by any
+one of them -- is the shared source those five screens reuse instead of
+each defining their own copy. This keeps the shell to two implementations
+(Decision Center's own, and this one shared by Portfolio/Risk/Morning
+Brief/Performance & Learning/Settings) rather than six independently-
+drifting copies of the same logo-loading/cropping logic and nav markup.
+This is the complete, frozen six-screen set per
+`docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md` Section 1.
+
+Known, accepted divergence: `ui/decision_center/gradio_view.py`'s own
+`_SHELL_NAV_HTML` is a private literal that predates Morning Brief,
+Performance & Learning, and Settings, and is out of scope for the backlog
+slices that added them to `SHELL_NAV_LABELS` below -- it still lists only
+Decision Center/Portfolio Intelligence/Risk Intelligence, so
+`build_shell_nav_html("Decision Center")` (this module's version) and
+`_SHELL_NAV_HTML` (Decision Center's own) are no longer byte-for-byte
+identical -- Decision Center's own inner nav omits the Morning Brief,
+Performance & Learning, and Settings tabs. Reconciling them requires
+editing `ui/decision_center/gradio_view.py`, which is a separate, future
+change.
 
 CSS is deliberately NOT duplicated here. `.aara-shell-header`/`.aara-shell-nav`/
 `.nav-item` and the `--color-*`/`--space-*` tokens they use are already
 defined in `ui/decision_center/theme.py`'s CSS, and `bootstrap.py`'s
-`build_trading_intelligence_app()` already merges all three screens' CSS
-(`decision_blocks.css`, `portfolio_blocks.css`, `risk_blocks.css`) into one
-`<style>` block for the composed app -- so Decision Center's shell CSS is
-already globally available on every tab once composed. This module only
-needs to reuse those existing class names, not restate their rules.
+`build_trading_intelligence_app()` already merges all six screens' CSS
+(`morning_brief_blocks.css`, `decision_blocks.css`, `portfolio_blocks.css`,
+`risk_blocks.css`, `performance_learning_blocks.css`, `settings_blocks.css`)
+into one `<style>` block for the composed app -- so Decision Center's
+shell CSS is already globally available on every tab once composed. This
+module only needs to reuse those existing class names, not restate their
+rules.
 """
 import base64
 import io
@@ -30,7 +49,10 @@ from PIL import Image as PILImage
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
-SHELL_NAV_LABELS = ("Decision Center", "Portfolio Intelligence", "Risk Intelligence")
+SHELL_NAV_LABELS = (
+    "Morning Brief", "Decision Center", "Portfolio Intelligence", "Risk Intelligence",
+    "Performance & Learning", "Settings",
+)
 
 
 def load_shell_logo_data_uri() -> str:

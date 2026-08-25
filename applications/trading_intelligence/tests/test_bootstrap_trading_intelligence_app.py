@@ -26,7 +26,10 @@ def test_has_exactly_three_tabs_in_order():
         if isinstance(block, gr.Tab)
     ]
 
-    assert tab_labels == ["Decision Center", "Portfolio Intelligence", "Risk Intelligence"]
+    assert tab_labels == [
+        "Morning Brief", "Decision Center", "Portfolio Intelligence", "Risk Intelligence",
+        "Performance & Learning", "Settings",
+    ]
 
 
 def test_title_is_neutral_and_not_scoped_to_any_one_screen():

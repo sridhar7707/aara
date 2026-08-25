@@ -77,10 +77,15 @@ from applications.trading_intelligence.services.decision_governance_query_servic
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
 from applications.trading_intelligence.ui.decision_center.gradio_view import DecisionCenterUI
+from applications.trading_intelligence.ui.morning_brief.gradio_view import MorningBriefUI
+from applications.trading_intelligence.ui.performance_learning.gradio_view import (
+    PerformanceLearningUI,
+)
 from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
     PortfolioIntelligenceUI,
 )
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import RiskIntelligenceUI
+from applications.trading_intelligence.ui.settings.gradio_view import SettingsUI
 
 
 class _InMemoryLedgerStore(LedgerStore):
@@ -622,30 +627,44 @@ def build_trading_intelligence_app() -> gr.Blocks:
     uses its own neutral, screen-agnostic title instead of any one
     screen's.
 
-    All three shipped screens are composed here -- Decision Center,
-    Portfolio Intelligence, and Risk Intelligence -- each Blocks object
-    unmodified from its own build()."""
+    All six shipped screens are composed here -- Morning Brief, Decision
+    Center, Portfolio Intelligence, Risk Intelligence, Performance &
+    Learning, and Settings -- each Blocks object unmodified from its own
+    build(). This is the complete, frozen six-screen set per
+    docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md Section 1."""
+    morning_brief_blocks = MorningBriefUI().build()
     decision_blocks = build_application().build()
     portfolio_blocks = PortfolioIntelligenceUI().build()
     risk_blocks = RiskIntelligenceUI().build()
+    performance_learning_blocks = PerformanceLearningUI().build()
+    settings_blocks = SettingsUI().build()
 
     merged_css = "\n".join(
         css for css in (
-            decision_blocks.css, portfolio_blocks.css, risk_blocks.css, _TABBED_LAYOUT_CSS,
+            morning_brief_blocks.css, decision_blocks.css, portfolio_blocks.css,
+            risk_blocks.css, performance_learning_blocks.css, settings_blocks.css,
+            _TABBED_LAYOUT_CSS,
         )
         if css
     )
     merged_head = "\n".join(
         head for head in (
-            decision_blocks.head, portfolio_blocks.head, risk_blocks.head,
+            morning_brief_blocks.head, decision_blocks.head, portfolio_blocks.head,
+            risk_blocks.head, performance_learning_blocks.head, settings_blocks.head,
             _TAB_WARNING_SUPPRESSION_JS, _INNER_NAV_LINK_JS,
         )
         if head
     )
 
     return gr.TabbedInterface(
-        [decision_blocks, portfolio_blocks, risk_blocks],
-        ["Decision Center", "Portfolio Intelligence", "Risk Intelligence"],
+        [
+            morning_brief_blocks, decision_blocks, portfolio_blocks, risk_blocks,
+            performance_learning_blocks, settings_blocks,
+        ],
+        [
+            "Morning Brief", "Decision Center", "Portfolio Intelligence", "Risk Intelligence",
+            "Performance & Learning", "Settings",
+        ],
         title="AARA Trading Intelligence",
         css=merged_css,
         head=merged_head,
