@@ -549,11 +549,29 @@ _TAB_WARNING_SUPPRESSION_JS = """
 # is never touched here since each screen's nav is pre-built server-side
 # with exactly one item already marked selected. This bridge's own click/
 # Enter/Space forwarding logic is otherwise unchanged from before this pass.
+#
+# Six-screen audit (live Playwright verification, this pass): LABELS and
+# EXPECTED_NAV_LISTS were never updated when Morning Brief, Performance &
+# Learning, and Settings were added -- they stayed at the original 3-label/
+# 3-list values. Concrete, live-verified consequence: any .nav-item span
+# reading "Morning Brief", "Performance & Learning", or "Settings" was never
+# passed to wireNavItem() (LABELS.indexOf(text) === -1), so it stayed a
+# static <span> with no click handler -- indistinguishable by sight from a
+# working nav item, but a completely dead link. Reproduced live: after
+# navigating away from Morning Brief (the only tab reachable without a nav
+# click, since it's index 0), no click path anywhere in the app could ever
+# reach Morning Brief, Performance & Learning, or Settings again. All six
+# labels are wired now; EXPECTED_NAV_LISTS raised to 6 to match the six
+# .aara-shell-nav-list blocks actually mounted (confirmed live via
+# document.querySelectorAll('.aara-shell-nav-list').length === 6).
 _INNER_NAV_LINK_JS = """
 <script>
 (function () {
-  var LABELS = ["Decision Center", "Portfolio Intelligence", "Risk Intelligence"];
-  var EXPECTED_NAV_LISTS = 3;
+  var LABELS = [
+    "Morning Brief", "Decision Center", "Portfolio Intelligence", "Risk Intelligence",
+    "Performance & Learning", "Settings"
+  ];
+  var EXPECTED_NAV_LISTS = 6;
 
   function findRealTab(label) {
     return Array.from(document.querySelectorAll('button[role="tab"]')).find(

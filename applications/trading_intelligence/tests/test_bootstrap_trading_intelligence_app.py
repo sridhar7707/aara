@@ -61,7 +61,7 @@ def test_head_includes_decision_centers_accessibility_bridges():
     assert "aara-decisions-table" in app.head
 
 
-def test_head_includes_the_inner_nav_link_bridge_for_all_three_screens():
+def test_head_includes_the_inner_nav_link_bridge_for_all_six_screens():
     """Generalized from a Portfolio-only bridge (see bootstrap.py's
     _INNER_NAV_LINK_JS docstring) once the AARA shell consistency pass gave
     Portfolio and Risk Intelligence their own inner nav -- including their
@@ -70,21 +70,41 @@ def test_head_includes_the_inner_nav_link_bridge_for_all_three_screens():
     Intelligence). Duplicate-navigation audit: the bridge now sets
     role="tab" (was role="link"), matching the inner nav's own static
     role="tab"/aria-selected markup now that it's the app's sole visible
-    navigation."""
+    navigation.
+
+    Regression guard (live Playwright audit, this pass): LABELS/
+    EXPECTED_NAV_LISTS stayed at their original 3-screen values after
+    Morning Brief, Performance & Learning, and Settings were added -- live
+    verification found all three completely unreachable via any nav click
+    from any other screen (silent no-op, no console error). All six labels
+    must now appear in the bridge's own wireable list."""
     app = build_trading_intelligence_app()
 
     assert "aara-shell-nav-list" in app.head
+    assert "Morning Brief" in app.head
     assert "Decision Center" in app.head
     assert "Portfolio Intelligence" in app.head
     assert "Risk Intelligence" in app.head
+    assert "Performance & Learning" in app.head
+    assert "Settings" in app.head
     assert 'role", "tab"' in app.head
+    assert "EXPECTED_NAV_LISTS = 6" in app.head
 
 
-def test_shell_header_and_nav_are_present_on_all_three_tabs():
+def test_shell_header_and_nav_are_present_on_all_six_tabs():
     """AARA shell consistency pass: Decision Center's own private shell
     identity constant is unchanged; its nav constant gained the ARIA tab
-    markup described below, alongside Portfolio/Risk Intelligence's shared
-    ui/shell.py equivalent, each marking itself active/selected."""
+    markup described below, alongside Portfolio/Risk/Morning Brief/
+    Performance & Learning/Settings' shared ui/shell.py equivalent, each
+    marking itself active/selected.
+
+    Six-screen regression guard: _SHELL_NAV_HTML (Decision Center's own
+    literal) must stay in byte-for-byte parity with
+    build_shell_nav_html("Decision Center") -- a live Playwright audit
+    found it had drifted stale (still showing only three screens) after
+    Morning Brief/Performance & Learning/Settings were added; see
+    ui/tests/test_shell.py's own dedicated parity test for the isolated
+    check."""
     app = build_trading_intelligence_app()
 
     html_values = [
@@ -94,9 +114,13 @@ def test_shell_header_and_nav_are_present_on_all_three_tabs():
 
     assert _SHELL_IDENTITY_HTML in html_values
     assert _SHELL_NAV_HTML in html_values
+    assert _SHELL_NAV_HTML == build_shell_nav_html("Decision Center")
     assert SHELL_IDENTITY_HTML in html_values
+    assert build_shell_nav_html("Morning Brief") in html_values
     assert build_shell_nav_html("Portfolio Intelligence") in html_values
     assert build_shell_nav_html("Risk Intelligence") in html_values
+    assert build_shell_nav_html("Performance & Learning") in html_values
+    assert build_shell_nav_html("Settings") in html_values
 
 
 def test_css_hides_only_the_outer_tabs_not_the_inner_nav():

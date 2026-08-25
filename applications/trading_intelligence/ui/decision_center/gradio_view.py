@@ -638,25 +638,29 @@ _SHELL_IDENTITY_HTML = (
 )
 _SHELL_NAV_HTML = (
     '<nav class="aara-shell-nav-list" role="tablist">'
-    '<span class="nav-item active" role="tab" aria-selected="true">Decision Center</span>'
-    # Portfolio Intelligence and Risk Intelligence both shipped as real
-    # screens (reachable via the gr.TabbedInterface composition in
-    # bootstrap.py's build_trading_intelligence_app(), one level above this
-    # module) -- "Coming Soon" is no longer true for either, so the badge
-    # and muted styling are dropped from both. This module still never
-    # imports or references the outer Tabs/TabbedInterface (self-contained
-    # screens, unchanged); this is a copy fix only, not a real link to the
-    # other tabs.
+    # Duplicate-navigation audit (original pass): the outer gr.TabbedInterface
+    # tabs are hidden in the composed app (bootstrap.py's _TABBED_LAYOUT_CSS),
+    # leaving this nav as the one visible row -- it carries the same
+    # role="tablist"/"tab"/aria-selected pattern the outer tabs already had,
+    # via ui/shell.py's build_shell_nav_html("Decision Center") equivalent
+    # (kept as this module's own literal, matching ui/shell.py's byte-for-byte
+    # parity test in ui/tests/test_shell.py).
     #
-    # Duplicate-navigation audit (this pass): the outer gr.TabbedInterface
-    # tabs are now hidden in the composed app (bootstrap.py's
-    # _TABBED_LAYOUT_CSS), leaving this nav as the one visible row -- it now
-    # carries the same role="tablist"/"tab"/aria-selected pattern the outer
-    # tabs already had, via ui/shell.py's build_shell_nav_html("Decision
-    # Center") equivalent (kept as this module's own literal, matching
-    # ui/shell.py's byte-for-byte parity test in ui/tests/test_shell.py).
+    # Six-screen audit (live Playwright verification, this pass): this
+    # literal predated Morning Brief/Performance & Learning/Settings and was
+    # never extended when they were added -- live verification found this
+    # nav visibly listing only the original three screens on the deployed
+    # app, while every other screen's nav (built from the shared,
+    # already-updated ui/shell.py) correctly showed all six. Restored to
+    # byte-for-byte parity with build_shell_nav_html("Decision Center")'s
+    # current six-label output; the frozen screen order matches
+    # docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md Section 1.
+    '<span class="nav-item" role="tab" aria-selected="false">Morning Brief</span>'
+    '<span class="nav-item active" role="tab" aria-selected="true">Decision Center</span>'
     '<span class="nav-item" role="tab" aria-selected="false">Portfolio Intelligence</span>'
     '<span class="nav-item" role="tab" aria-selected="false">Risk Intelligence</span>'
+    '<span class="nav-item" role="tab" aria-selected="false">Performance & Learning</span>'
+    '<span class="nav-item" role="tab" aria-selected="false">Settings</span>'
     "</nav>"
 )
 _PAGE_HEADER_HTML = (

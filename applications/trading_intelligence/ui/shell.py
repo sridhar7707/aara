@@ -18,17 +18,15 @@ drifting copies of the same logo-loading/cropping logic and nav markup.
 This is the complete, frozen six-screen set per
 `docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md` Section 1.
 
-Known, accepted divergence: `ui/decision_center/gradio_view.py`'s own
-`_SHELL_NAV_HTML` is a private literal that predates Morning Brief,
-Performance & Learning, and Settings, and is out of scope for the backlog
-slices that added them to `SHELL_NAV_LABELS` below -- it still lists only
-Decision Center/Portfolio Intelligence/Risk Intelligence, so
-`build_shell_nav_html("Decision Center")` (this module's version) and
-`_SHELL_NAV_HTML` (Decision Center's own) are no longer byte-for-byte
-identical -- Decision Center's own inner nav omits the Morning Brief,
-Performance & Learning, and Settings tabs. Reconciling them requires
-editing `ui/decision_center/gradio_view.py`, which is a separate, future
-change.
+`ui/decision_center/gradio_view.py`'s own `_SHELL_NAV_HTML` is a private
+literal, not built from this module -- it is kept in byte-for-byte parity
+with `build_shell_nav_html("Decision Center")` by convention and by
+`ui/tests/test_shell.py`'s dedicated parity test, not by import. A live
+Playwright audit found this literal had drifted stale after Morning Brief,
+Performance & Learning, and Settings were added (still listing only the
+original three screens on the deployed app) -- fixed by hand to match this
+module's current six-label output; watch for the same drift if
+`SHELL_NAV_LABELS` changes again without updating that literal too.
 
 CSS is deliberately NOT duplicated here. `.aara-shell-header`/`.aara-shell-nav`/
 `.nav-item` and the `--color-*`/`--space-*` tokens they use are already

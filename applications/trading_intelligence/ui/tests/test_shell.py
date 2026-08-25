@@ -64,40 +64,23 @@ def test_build_shell_nav_html_marks_exactly_the_requested_label_active():
     assert 'role="tablist"' in nav_html
 
 
-def test_build_shell_nav_html_diverges_from_decision_centers_own_markup_by_exactly_morning_brief_performance_learning_and_settings():
-    """Known, accepted divergence (see shell.py's own module docstring):
-    ui/decision_center/gradio_view.py's own _SHELL_NAV_HTML is a private
-    literal that predates Morning Brief, Performance & Learning, and
-    Settings, and is out of scope for the backlog slices that added them
-    to SHELL_NAV_LABELS -- it was NOT modified. This replaces the previous
-    byte-for-byte parity assertion (no longer true) with an explicit check
-    of exactly what changed: this module's version now includes Morning
-    Brief, Performance & Learning, and Settings entries Decision Center's
-    own copy lacks, and is otherwise identical."""
+def test_build_shell_nav_html_matches_decision_centers_own_markup_byte_for_byte():
+    """Parity check against ui/decision_center/gradio_view.py's own
+    _SHELL_NAV_HTML (Decision Center active, others plain) -- this test file
+    (not shell.py itself, which never imports decision_center -- see its own
+    docstring) is where that parity gets verified, so a future drift in
+    either format is caught here.
+
+    Restored after a live Playwright audit found the two had actually
+    drifted: Decision Center's own literal was never updated when Morning
+    Brief, Performance & Learning, and Settings were added to
+    SHELL_NAV_LABELS, so its inner nav visibly listed only the original
+    three screens on the deployed app. Fixed by hand in
+    decision_center/gradio_view.py; this test guards against it drifting
+    stale again."""
     from applications.trading_intelligence.ui.decision_center.gradio_view import _SHELL_NAV_HTML
 
-    this_modules_version = build_shell_nav_html("Decision Center")
-    morning_brief_entry = '<span class="nav-item" role="tab" aria-selected="false">Morning Brief</span>'
-    performance_learning_entry = (
-        '<span class="nav-item" role="tab" aria-selected="false">Performance & Learning</span>'
-    )
-    settings_entry = '<span class="nav-item" role="tab" aria-selected="false">Settings</span>'
-
-    assert this_modules_version != _SHELL_NAV_HTML
-    assert morning_brief_entry in this_modules_version
-    assert performance_learning_entry in this_modules_version
-    assert settings_entry in this_modules_version
-    assert morning_brief_entry not in _SHELL_NAV_HTML
-    assert performance_learning_entry not in _SHELL_NAV_HTML
-    assert settings_entry not in _SHELL_NAV_HTML
-    without_added_entries = this_modules_version.replace(
-        morning_brief_entry, "",
-    ).replace(
-        performance_learning_entry, "",
-    ).replace(
-        settings_entry, "",
-    )
-    assert without_added_entries == _SHELL_NAV_HTML
+    assert build_shell_nav_html("Decision Center") == _SHELL_NAV_HTML
 
 
 def test_build_shell_nav_html_rejects_an_unknown_label():

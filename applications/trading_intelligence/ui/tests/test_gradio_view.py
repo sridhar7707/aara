@@ -1683,11 +1683,17 @@ def test_shell_nav_is_an_aria_tablist_with_correct_selected_state():
     """Duplicate-navigation audit: this nav becomes the app's single
     accessible tablist once the outer gr.TabbedInterface tabs are hidden
     (bootstrap.py's _TABBED_LAYOUT_CSS) -- it must carry the same
-    role="tablist"/"tab"/aria-selected pattern the outer tabs already had."""
+    role="tablist"/"tab"/aria-selected pattern the outer tabs already had.
+
+    Counts raised from 3/2 to 6/5 after a live Playwright audit found this
+    literal had drifted stale (still 3 items) once Morning Brief,
+    Performance & Learning, and Settings were added to the six-screen app;
+    fixed to match build_shell_nav_html("Decision Center")'s current
+    six-label output (see ui/tests/test_shell.py's parity test)."""
     assert 'role="tablist"' in _SHELL_NAV_HTML
-    assert _SHELL_NAV_HTML.count('role="tab"') == 3
+    assert _SHELL_NAV_HTML.count('role="tab"') == 6
     assert _SHELL_NAV_HTML.count('aria-selected="true"') == 1
-    assert _SHELL_NAV_HTML.count('aria-selected="false"') == 2
+    assert _SHELL_NAV_HTML.count('aria-selected="false"') == 5
     assert (
         '<span class="nav-item active" role="tab" aria-selected="true">'
         "Decision Center</span>"
