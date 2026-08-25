@@ -156,6 +156,44 @@ def test_rule_1_does_not_mutate_risk_manager_state(conn, reference_chain):
     assert risk.halted is False
 
 
+# ── Rule 2: Position Sizing Discipline ──────────────────────────────────────
+
+def test_rule_2_not_applicable_to_non_buy(conn, reference_chain):
+    decision_row = _write_decision(conn, reference_chain, action="SELL")
+    rows = constitution.check_and_log(conn, decision_row, risk=None)
+    rule2 = next(r for r in rows if r["rule_id"] == "rule_2")
+    assert rule2["check_result"] == "PASS"
+    assert rule2["action_taken"] == "execution_proceeded"
+
+
+def test_rule_2_passes_when_no_prior_closed_loss(conn, reference_chain):
+    decision_row = _write_decision(conn, reference_chain, action="BUY")
+    rows = constitution.check_and_log(conn, decision_row, risk=None)
+    rule2 = next(r for r in rows if r["rule_id"] == "rule_2")
+    assert rule2["check_result"] == "PASS"
+    assert rule2["action_taken"] == "execution_proceeded"
+
+
+def test_rule_2_passes_with_prior_closed_loss(conn, reference_chain):
+    import bot.trust_ledger.outcomes as outcomes
+
+    ledger_svc.append_ledger_row(conn, "cost_models", {
+        "cost_model_id": "cm1", "spread_assumption": 0.001, "slippage_assumption": 0.001,
+        "commission_rules": {}, "tax_assumptions": {}, "created_at": "2026-07-28T00:00:00Z",
+    })
+
+    first_decision = _write_decision(conn, reference_chain, action="BUY")
+    outcomes.write_decision_outcome_event(
+        conn, "AAPL", first_decision["decision_id"], "2026-07-28T15:00:00Z", -0.05, 5,
+    )
+
+    decision_row = _write_decision(conn, reference_chain, action="BUY")
+    rows = constitution.check_and_log(conn, decision_row, risk=None)
+    rule2 = next(r for r in rows if r["rule_id"] == "rule_2")
+    assert rule2["check_result"] == "PASS"
+    assert rule2["action_taken"] == "execution_proceeded"
+
+
 # ── Rule 3: Trade Structure Requirement ─────────────────────────────────────
 
 def test_rule_3_escalates_when_thesis_fields_missing(conn, reference_chain):
@@ -255,6 +293,20 @@ def test_rule_5_passes_after_autonomy_threshold_with_high_confidence(conn, refer
     rows = constitution.check_and_log(conn, decision_row, risk=None)
     rule5 = next(r for r in rows if r["rule_id"] == "rule_5")
     assert rule5["check_result"] == "PASS"
+
+
+def test_rule_5_escalates_between_thresholds_at_low_confidence(conn, reference_chain):
+    """Middle branch: count in [AUTONOMY_TRADE_COUNT, LOW_CONFIDENCE_REVIEW_TRADE_COUNT)
+    with confidence below LOW_CONFIDENCE_THRESHOLD must still escalate -- distinct from
+    the below-autonomy-threshold branch (count < AUTONOMY_TRADE_COUNT) and the
+    above-both-thresholds pass branch, neither of which exercises this condition."""
+    for _ in range(constitution.AUTONOMY_TRADE_COUNT):
+        _write_decision(conn, reference_chain, action="BUY", final_confidence=0.9)
+    decision_row = _write_decision(conn, reference_chain, action="BUY", final_confidence=0.5)
+    rows = constitution.check_and_log(conn, decision_row, risk=None)
+    rule5 = next(r for r in rows if r["rule_id"] == "rule_5")
+    assert rule5["check_result"] == "ESCALATED"
+    assert rule5["action_taken"] == "advisory_only"
 
 
 def test_rule_5_not_applicable_to_hold_or_reject(conn, reference_chain):
