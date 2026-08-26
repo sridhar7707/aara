@@ -4,6 +4,8 @@ from applications.trading_intelligence.ui.risk_intelligence.gradio_view import (
     _ILLUSTRATIVE_DATA_BODY,
     _ILLUSTRATIVE_DATA_HTML,
     _ILLUSTRATIVE_DATA_TITLE,
+    _LIVE_ANNOUNCER_ELEM_ID,
+    _LIVE_REGION_SETUP_JS,
     RiskIntelligenceUI,
 )
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
@@ -11,6 +13,7 @@ from applications.trading_intelligence.ui.risk_intelligence.screen import (
     RiskScreen,
     RiskSnapshot,
 )
+from applications.trading_intelligence.ui.risk_intelligence.theme import CSS
 from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
 
 
@@ -303,5 +306,135 @@ def test_illustrative_data_disclosure_is_unchanged_by_this_unit():
         '<div class="ri-disclosure">'
         f'<div class="ri-disclosure-title">{_ILLUSTRATIVE_DATA_TITLE}</div>'
         f'<div class="ri-disclosure-body">{_ILLUSTRATIVE_DATA_BODY}</div>'
+        "</div>"
+    )
+
+
+# --- Accessibility & Keyboard Interaction Parity pass -----------------
+
+
+def test_theme_defines_a_focus_visible_rule_for_both_summary_disclosures():
+    """Local, RI-scoped :focus-visible rule (not a page-wide
+    `.gradio-container summary:focus-visible` selector -- see theme.py's
+    own comment on why a page-wide rule would leak onto Decision
+    Center's own elements), using an existing RI token rather than a
+    new color.
+
+    Regression lock (defect found in manual verification): the outline
+    declaration must carry !important, or it is silently inert in the
+    composed app -- bootstrap.py merges every screen's CSS into one
+    stylesheet, and Decision Center's own `.gradio-container
+    summary:focus-visible` rule already ships with !important, which
+    always wins over a non-!important declaration regardless of
+    selector specificity or source order."""
+    assert ".ri-trigger-reason summary:focus-visible" in CSS
+    assert ".ri-history-detail-card summary:focus-visible" in CSS
+    assert "outline: 2px solid var(--ri-color-navy) !important;" in CSS
+
+
+def test_theme_defines_a_local_sr_only_utility_class():
+    """Local copy of the visually-hidden-but-accessible technique
+    (not decision_center's .aara-sr-only), backing the live-region
+    announcer element."""
+    assert ".ri-sr-only {" in CSS
+    assert "clip: rect(0, 0, 0, 0);" in CSS
+
+
+def test_live_announcer_elem_id_does_not_collide_with_decision_center():
+    """bootstrap.py composes every screen's Blocks into one document at
+    once -- a shared elem_id would mean document.getElementById only
+    ever finds one of the two elements."""
+    assert _LIVE_ANNOUNCER_ELEM_ID == "ri-live-announcer"
+    assert _LIVE_ANNOUNCER_ELEM_ID != "aara-live-announcer"
+
+
+def test_build_wires_the_live_region_setup_script_into_blocks_head():
+    ui = RiskIntelligenceUI()
+
+    demo = ui.build()
+
+    assert _LIVE_REGION_SETUP_JS in demo.head
+    assert _LIVE_ANNOUNCER_ELEM_ID in demo.head
+
+
+def test_build_renders_a_live_announcer_html_block_with_expected_hooks():
+    ui = RiskIntelligenceUI()
+
+    demo = ui.build()
+
+    live_blocks = [
+        block for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and getattr(block, "elem_id", None) == _LIVE_ANNOUNCER_ELEM_ID
+    ]
+    assert len(live_blocks) == 1
+    assert "ri-sr-only" in (live_blocks[0].elem_classes or [])
+    assert live_blocks[0].value == ""
+
+
+def test_announce_current_state_describes_the_screens_actual_state():
+    snapshot = _make_snapshot(state="WARNING")
+    ui = RiskIntelligenceUI(screen=RiskScreen(current=snapshot))
+
+    announcement = ui._announce_current_state()
+
+    assert announcement == "Risk Intelligence loaded. Current risk state: WARNING."
+
+
+def test_announce_current_state_reflects_every_state():
+    for state in ("NORMAL", "WARNING", "DEFENSIVE"):
+        ui = RiskIntelligenceUI(screen=RiskScreen(current=_make_snapshot(state=state)))
+
+        announcement = ui._announce_current_state()
+
+        assert state in announcement
+
+
+def test_announce_current_state_does_not_claim_the_data_is_live():
+    ui = RiskIntelligenceUI()
+
+    announcement = ui._announce_current_state()
+
+    for forbidden in ("live", "real-time", "real time"):
+        assert forbidden not in announcement.lower()
+
+
+def test_existing_current_state_and_history_rendering_is_unaffected():
+    """Regression lock: the accessibility pass must not change the
+    visible current-state or history-detail markup this unit did not
+    touch."""
+    snapshot = _make_snapshot(
+        state="WARNING",
+        trigger_reason="Portfolio drawdown -11.4% -- approaching daily loss limit.",
+        recommended_sizing_pct=75.0,
+        actual_sizing_pct=70.0,
+        as_of="2026-08-17 09:15 UTC",
+    )
+
+    current_html = RiskIntelligenceUI._format_current_state_html(snapshot)
+
+    assert current_html == (
+        '<div class="ri-current-state">'
+        '<span class="ri-state-badge state-warning">WARNING</span>'
+        '<span style="margin-left:8px;color:var(--ri-color-text-secondary);'
+        'font-size:12px;">as of 2026-08-17 09:15 UTC</span>'
+        '<details class="ri-trigger-reason">'
+        "<summary>Trigger Reason</summary>"
+        '<div class="ri-trigger-body">Portfolio drawdown -11.4% -- '
+        "approaching daily loss limit.</div>"
+        "</details>"
+        '<div class="ri-sizing-metrics">'
+        '<div class="ri-metric">'
+        '<span class="ri-metric-label">Recommended Sizing</span>'
+        '<span class="ri-metric-value">75%</span>'
+        "</div>"
+        '<div class="ri-metric">'
+        '<span class="ri-metric-label">Actual Sizing</span>'
+        '<span class="ri-metric-value">70%</span>'
+        "</div>"
+        '<div class="ri-metric">'
+        '<span class="ri-metric-label">Gap</span>'
+        '<span class="ri-metric-value ri-gap-nonzero">+5%</span>'
+        "</div>"
+        "</div>"
         "</div>"
     )

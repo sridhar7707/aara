@@ -215,4 +215,52 @@ CSS = """
 .ri-record-field .record-value.ri-gap-nonzero {
   color: #8a6a2f;
 }
+
+/* Accessibility parity pass: visible keyboard focus for this page's native
+   <details>/<summary> disclosures (trigger reason, evaluation-history
+   cards) -- previously unstyled, falling back to each browser's own
+   default (or absent) focus indicator. Scoped to these two existing,
+   RI-local selectors rather than a page-wide `.gradio-container
+   summary:focus-visible` rule (the pattern ui/decision_center/theme.py
+   uses), so this rule can never affect any <summary> outside this
+   screen. --ri-color-navy already passes the WCAG 3:1 UI-component-
+   boundary floor against every surface it's used against on this page
+   (see .ri-trigger-reason summary and .ri-metric-value's own use of
+   it), so no new color token is needed.
+
+   !important is required, not optional: bootstrap.py concatenates
+   every screen's CSS into one composed stylesheet, and Decision
+   Center's own `.gradio-container summary:focus-visible` rule already
+   ships with `!important` (theme.py's own P1 accessibility slice) --
+   a page-wide selector matching every <summary> in the composed
+   document, including this screen's. `!important` always wins over a
+   non-`!important` declaration regardless of selector specificity or
+   source order, so without it here this rule is silently inert in the
+   real composed app (live-verified: a Tab-focused RI summary rendered
+   Decision Center's gold-boundary outline, not this navy one, until
+   this was added) -- scoping alone only prevents this rule from ever
+   leaking onto Decision Center's own elements; it does not protect
+   this rule from being overridden itself. */
+.ri-trigger-reason summary:focus-visible,
+.ri-history-detail-card summary:focus-visible {
+  outline: 2px solid var(--ri-color-navy) !important;
+  outline-offset: 2px;
+}
+
+/* Screen-reader-only utility: local copy of the same visually-hidden-but-
+   present technique ui/decision_center/theme.py's own .aara-sr-only
+   already uses (WAI-ARIA Authoring Practices / Bootstrap's .sr-only) --
+   not imported, per this package's no-coupling scope. Backs the
+   live-region announcer element in gradio_view.py. */
+.ri-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
 """

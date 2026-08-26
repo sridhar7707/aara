@@ -6,12 +6,21 @@ mock_data.py's RiskScreen only -- no controller, no service, no
 sentinel_engine/bot import. Wired into main.py/bootstrap.py as the 3rd
 Trading Intelligence tab.
 
-Keyboard accessibility uses native HTML controls only, no custom JS
-bridge: the trigger-reason disclosure is a real <details>/<summary>
-element (natively Tab-focusable, Enter/Space-togglable), and the history
-table is a gr.Dataframe (Gradio's own native keyboard-navigable table,
-same mechanism ui/portfolio_intelligence/gradio_view.py's holdings table
-already relies on).
+Keyboard focus/activation uses native HTML controls only, no custom JS:
+the trigger-reason disclosure and each evaluation-history card are real
+<details>/<summary> elements (natively Tab-focusable, Enter/Space-
+togglable, now with a visible :focus-visible ring -- see theme.py's
+Accessibility parity pass), and the history table is a gr.Dataframe
+(Gradio's own native keyboard-navigable table, same mechanism
+ui/portfolio_intelligence/gradio_view.py's holdings table already relies
+on).
+
+Accessibility parity pass: one small, self-contained JS bridge
+(_LIVE_REGION_SETUP_JS below) sets aria-live/aria-atomic/role on a
+screen-reader-only live-region element, since gr.HTML exposes no aria_*
+constructor kwarg -- the same reasoning and bounded-polling technique
+already shipped and tested in ui/decision_center/gradio_view.py's own
+live-region setup, reused here as a pattern (not imported).
 
 AARA shell consistency pass: renders the same AARA logo header + inter-screen
 nav Decision Center shows, via `ui/shell.py` (a sibling of all three screen
@@ -75,6 +84,44 @@ _PAGE_HEADER_HTML = (
 
 _HISTORY_DETAIL_SECTION_LABEL_HTML = '<div class="ri-section-label">Evaluation Details</div>'
 
+# Accessibility parity pass: screen-reader-only live-region announcer,
+# following the same pattern already shipped and tested in
+# ui/decision_center/gradio_view.py (see that file's own "P1 accessibility
+# slice" comments for the full Svelte-source-verified reasoning: gr.HTML's
+# stable outer root element is the only place aria-live/aria-atomic/role
+# can be set, since Gradio 4.44.1 exposes no aria_* constructor kwarg).
+# Reused as a PATTERN here, not imported -- this package stays
+# self-contained (no import of ui/decision_center/).
+#
+# elem_id is package-prefixed ("ri-" not "aara-") because bootstrap.py's
+# TabbedInterface composes every screen's Blocks into one document at
+# once, not lazily per-tab -- reusing Decision Center's own
+# "aara-live-announcer" id here would collide (two elements sharing one
+# id; document.getElementById only ever finds the first).
+_LIVE_ANNOUNCER_ELEM_ID = "ri-live-announcer"
+_LIVE_REGION_SETUP_JS = f"""
+<script>
+(function () {{
+  var attempts = 0;
+  var maxAttempts = 100;
+  var intervalId = setInterval(function () {{
+    attempts += 1;
+    var el = document.getElementById("{_LIVE_ANNOUNCER_ELEM_ID}");
+    if (el) {{
+      el.setAttribute("aria-live", "polite");
+      el.setAttribute("aria-atomic", "true");
+      el.setAttribute("role", "status");
+      clearInterval(intervalId);
+      return;
+    }}
+    if (attempts >= maxAttempts) {{
+      clearInterval(intervalId);
+    }}
+  }}, 50);
+}})();
+</script>
+"""
+
 
 class RiskIntelligenceUI:
     def __init__(self, screen: RiskScreen = None):
@@ -83,12 +130,23 @@ class RiskIntelligenceUI:
     def build(self) -> gr.Blocks:
         with gr.Blocks(
             title="AARA Trading Intelligence — Risk Intelligence", css=CSS,
+            head=_LIVE_REGION_SETUP_JS,
         ) as demo:
             gr.HTML(SHELL_IDENTITY_HTML, elem_classes=["aara-shell-header"])
             gr.HTML(build_shell_nav_html("Risk Intelligence"), elem_classes=["aara-shell-nav"])
 
             gr.HTML(_PAGE_HEADER_HTML)
             gr.HTML(_ILLUSTRATIVE_DATA_HTML)
+
+            # Accessibility parity pass: visually hidden, screen-reader-only
+            # live region -- see _LIVE_REGION_SETUP_JS above for how
+            # aria-live/aria-atomic/role get attached to this element's
+            # stable host, and _announce_current_state below for what
+            # populates it. Empty initial value; never rendered with
+            # visible content of its own.
+            live_announcer = gr.HTML(
+                value="", elem_id=_LIVE_ANNOUNCER_ELEM_ID, elem_classes=["ri-sr-only"],
+            )
 
             gr.HTML('<div class="ri-section-label">Current State</div>')
             gr.HTML(self._format_current_state_html(self._screen.current))
@@ -110,7 +168,23 @@ class RiskIntelligenceUI:
                 gr.HTML(_HISTORY_DETAIL_SECTION_LABEL_HTML)
                 gr.HTML(self._format_history_detail_list_html(self._screen.history))
 
+            # Accessibility parity pass: this screen has no refresh button or
+            # selection interactivity (see this module's own docstring) --
+            # everything is already rendered synchronously above from
+            # self._screen -- so demo.load() is the only available trigger,
+            # matching ui/decision_center/gradio_view.py's own
+            # demo.load(fn=self._announce_screen, ...) pattern.
+            demo.load(fn=self._announce_current_state, inputs=None, outputs=[live_announcer])
+
         return demo
+
+    def _announce_current_state(self) -> str:
+        """Accessibility parity pass: populates live_announcer on page
+        load. Describes the current risk state exactly as already
+        rendered by _format_current_state_html, from the same RiskScreen
+        data -- never implies the state is live (the page's own
+        Illustrative Data disclosure already covers that)."""
+        return f"Risk Intelligence loaded. Current risk state: {self._screen.current.state}."
 
     @staticmethod
     def _format_state_badge_html(state: str) -> str:
