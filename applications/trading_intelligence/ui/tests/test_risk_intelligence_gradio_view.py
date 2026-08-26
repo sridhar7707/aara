@@ -194,3 +194,114 @@ def test_build_renders_a_dataframe_when_history_exists():
     dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
     assert len(dataframes) == 1
     assert "ri-history-table" in dataframes[0].elem_classes
+
+
+def test_history_detail_html_uses_native_details_disclosure_for_keyboard_access():
+    entry = RiskHistoryEntry(
+        timestamp="2026-08-18 14:00 UTC", state="NORMAL",
+        trigger_reason="Portfolio drawdown -3.1% -- within normal range.",
+        recommended_sizing_pct=100.0, actual_sizing_pct=100.0,
+    )
+
+    detail_html = RiskIntelligenceUI._format_history_detail_html(entry)
+
+    assert "<details" in detail_html
+    assert "<summary>" in detail_html
+
+
+def test_history_detail_html_includes_full_untruncated_trigger_reason():
+    long_reason = (
+        "Portfolio drawdown -16.8% -- CRO approval required for new positions."
+    )
+    entry = RiskHistoryEntry(
+        timestamp="2026-08-16 16:45 UTC", state="DEFENSIVE",
+        trigger_reason=long_reason,
+        recommended_sizing_pct=50.0, actual_sizing_pct=45.0,
+    )
+
+    detail_html = RiskIntelligenceUI._format_history_detail_html(entry)
+
+    assert long_reason in detail_html
+
+
+def test_history_detail_html_includes_state_sizing_gap_and_timestamp():
+    entry = RiskHistoryEntry(
+        timestamp="2026-08-17 09:15 UTC", state="WARNING",
+        trigger_reason="Portfolio drawdown -11.4% -- approaching daily loss limit.",
+        recommended_sizing_pct=75.0, actual_sizing_pct=70.0,
+    )
+
+    detail_html = RiskIntelligenceUI._format_history_detail_html(entry)
+
+    assert "state-warning" in detail_html
+    assert "WARNING" in detail_html
+    assert "2026-08-17 09:15 UTC" in detail_html
+    assert "75%" in detail_html
+    assert "70%" in detail_html
+    assert "+5%" in detail_html
+
+
+def test_history_detail_list_html_produces_one_card_per_entry():
+    entry_a = RiskHistoryEntry(
+        timestamp="2026-08-18 14:00 UTC", state="NORMAL", trigger_reason="a",
+        recommended_sizing_pct=100.0, actual_sizing_pct=100.0,
+    )
+    entry_b = RiskHistoryEntry(
+        timestamp="2026-08-17 09:15 UTC", state="WARNING", trigger_reason="b",
+        recommended_sizing_pct=75.0, actual_sizing_pct=70.0,
+    )
+
+    list_html = RiskIntelligenceUI._format_history_detail_list_html((entry_a, entry_b))
+
+    assert list_html.count('<details class="ri-history-detail-card">') == 2
+
+
+def test_build_renders_a_detail_card_per_history_entry_when_history_exists():
+    ui = RiskIntelligenceUI()
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    combined = "\n".join(html_values)
+    assert combined.count('<details class="ri-history-detail-card">') == len(ui._screen.history)
+
+
+def test_build_renders_no_detail_cards_when_history_is_empty():
+    empty_screen = RiskScreen(current=_make_snapshot())
+    ui = RiskIntelligenceUI(screen=empty_screen)
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    combined = "\n".join(html_values)
+    assert '<details class="ri-history-detail-card">' not in combined
+
+
+def test_page_header_title_carries_the_aara_eyebrow_class():
+    ui = RiskIntelligenceUI()
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    combined = "\n".join(html_values)
+    assert '<h2 class="aara-eyebrow">Risk Intelligence</h2>' in combined
+
+
+def test_illustrative_data_disclosure_is_unchanged_by_this_unit():
+    """Regression lock: the detail-card addition must not alter the
+    existing illustrative-data disclosure in any way."""
+    assert _ILLUSTRATIVE_DATA_HTML == (
+        '<div class="ri-disclosure">'
+        f'<div class="ri-disclosure-title">{_ILLUSTRATIVE_DATA_TITLE}</div>'
+        f'<div class="ri-disclosure-body">{_ILLUSTRATIVE_DATA_BODY}</div>'
+        "</div>"
+    )

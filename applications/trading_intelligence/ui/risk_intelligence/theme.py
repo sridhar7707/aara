@@ -152,4 +152,57 @@ CSS = """
   color: var(--ri-color-text-secondary);
   padding: 8px 0;
 }
+
+.ri-history-detail-list {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ri-history-detail-card {
+  padding: 10px 12px;
+  background: var(--ri-color-surface);
+  border: 1px solid var(--ri-color-border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.ri-history-detail-card summary {
+  cursor: pointer;
+  list-style: none;
+}
+.ri-history-detail-card summary::-webkit-details-marker {
+  display: none;
+}
+.ri-history-detail-timestamp {
+  margin-left: 8px;
+  color: var(--ri-color-text-secondary);
+  font-size: 12px;
+}
+.ri-record-card-fields {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ri-record-field {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ri-record-field .record-label {
+  color: var(--ri-color-text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.ri-record-field .record-value {
+  color: var(--ri-color-text);
+  text-align: right;
+  white-space: normal;
+  word-break: break-word;
+}
+.ri-record-field .record-value.ri-gap-nonzero {
+  color: #8a6a2f;
+}
 """

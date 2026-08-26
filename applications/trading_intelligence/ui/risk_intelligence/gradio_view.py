@@ -68,10 +68,12 @@ _ILLUSTRATIVE_DATA_HTML = (
 
 _PAGE_HEADER_HTML = (
     '<div class="ri-page-header">'
-    "<h2>Risk Intelligence</h2>"
+    '<h2 class="aara-eyebrow">Risk Intelligence</h2>'
     '<div class="ri-subtitle">Current risk-governor state and position sizing</div>'
     "</div>"
 )
+
+_HISTORY_DETAIL_SECTION_LABEL_HTML = '<div class="ri-section-label">Evaluation Details</div>'
 
 
 class RiskIntelligenceUI:
@@ -105,6 +107,8 @@ class RiskIntelligenceUI:
                     elem_classes=["ri-history-table"],
                     **{_DATAFRAME_HEIGHT_KWARG: 320},
                 )
+                gr.HTML(_HISTORY_DETAIL_SECTION_LABEL_HTML)
+                gr.HTML(self._format_history_detail_list_html(self._screen.history))
 
         return demo
 
@@ -159,6 +163,56 @@ class RiskIntelligenceUI:
             ]
             for entry in history
         ]
+
+    @staticmethod
+    def _format_history_detail_html(entry: RiskHistoryEntry) -> str:
+        """One expandable, fully-readable record for a single history
+        entry -- native <details>/<summary>, no JS, matching
+        _format_current_state_html's own trigger-reason disclosure
+        pattern. Renders exactly the five fields RiskHistoryEntry already
+        carries (state, trigger_reason, recommended_sizing_pct,
+        actual_sizing_pct, timestamp) plus the sizing gap, computed the
+        same way RiskSnapshot.sizing_gap_pct already defines it
+        (recommended minus actual) -- a presentation-only computation, not
+        a new domain field, since RiskHistoryEntry itself carries no such
+        property. Exists because the Dataframe's own trigger_reason cell
+        has no line-wrapping rule (theme.py's .ri-history-table styles
+        only font/alignment) and can clip a full sentence -- this is the
+        one place on the page where every history entry's complete text
+        is guaranteed readable."""
+        badge_html = RiskIntelligenceUI._format_state_badge_html(entry.state)
+        gap = entry.recommended_sizing_pct - entry.actual_sizing_pct
+        gap_class = "ri-gap-nonzero" if abs(gap) > 0.01 else ""
+        rows = [
+            ("Trigger Reason", entry.trigger_reason),
+            ("Recommended Sizing", f"{entry.recommended_sizing_pct:.0f}%"),
+            ("Actual Sizing", f"{entry.actual_sizing_pct:.0f}%"),
+            ("Gap", f"{gap:+.0f}%"),
+        ]
+        field_html = "".join(
+            '<div class="ri-record-field">'
+            f'<span class="record-label">{html.escape(label)}</span>'
+            f'<span class="record-value {gap_class if label == "Gap" else ""}">'
+            f'{html.escape(value)}</span>'
+            "</div>"
+            for label, value in rows
+        )
+        return (
+            '<details class="ri-history-detail-card">'
+            "<summary>"
+            f"{badge_html}"
+            f'<span class="ri-history-detail-timestamp">{html.escape(entry.timestamp)}</span>'
+            "</summary>"
+            f'<div class="ri-record-card-fields">{field_html}</div>'
+            "</details>"
+        )
+
+    @staticmethod
+    def _format_history_detail_list_html(history: Tuple[RiskHistoryEntry, ...]) -> str:
+        cards = "".join(
+            RiskIntelligenceUI._format_history_detail_html(entry) for entry in history
+        )
+        return f'<div class="ri-history-detail-list">{cards}</div>'
 
     @staticmethod
     def _format_empty_message_html(screen: RiskScreen) -> str:
