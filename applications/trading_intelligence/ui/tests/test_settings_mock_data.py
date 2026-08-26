@@ -33,6 +33,40 @@ def test_build_mock_screen_gives_every_area_a_non_empty_unavailable_message():
         assert area.unavailable_message.strip() != ""
 
 
+def test_thresholds_stays_unavailable_with_no_preference_fields():
+    screen = build_mock_screen()
+
+    assert screen.thresholds.preference_fields == ()
+    assert screen.thresholds.is_available is False
+
+
+def test_user_settings_and_notification_preferences_each_carry_exactly_one_allow_listed_field():
+    """The smallest defensible allow-list: one ordinary, non-trading
+    preference per area. Not risk_tolerance/max_position_pct/
+    max_drawdown_pct/stop_loss_pct/notifications_enabled (database/
+    user_settings.py's own protected fields) -- those are Governor/risk/
+    persistence-adjacent and out of this backlog slice's authorized scope."""
+    screen = build_mock_screen()
+
+    assert screen.user_settings.is_available is True
+    assert len(screen.user_settings.preference_fields) == 1
+    assert screen.user_settings.preference_fields[0].label == "Display Theme"
+
+    assert screen.notification_preferences.is_available is True
+    assert len(screen.notification_preferences.preference_fields) == 1
+    assert screen.notification_preferences.preference_fields[0].label == "Show In-App Notifications"
+
+
+def test_available_areas_still_carry_a_non_persistence_disclosure():
+    """unavailable_message stays populated -- and truthful -- even once an
+    area has preference_fields: it now explains that nothing there is
+    saved, not that the whole area has no source."""
+    screen = build_mock_screen()
+
+    assert "not saved" in screen.user_settings.unavailable_message.lower()
+    assert "not saved" in screen.notification_preferences.unavailable_message.lower()
+
+
 def test_build_mock_screen_contains_no_values_resembling_real_settings():
     """No email addresses, boolean-looking toggle values, or numeric
     threshold-looking figures -- unlike ui/portfolio_intelligence/mock_data.py

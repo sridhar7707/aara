@@ -1,4 +1,4 @@
-"""Deterministic all-unavailable data for the Settings screen shell.
+"""Deterministic data for the Settings screen shell.
 
 No sentinel_engine/bot/dashboard import. No persistence/configuration
 contract import or reference of any kind: per docs/products/
@@ -6,27 +6,38 @@ AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md Section 2, Settings has
 "none proposed" for Sentinel Engine inputs, and no product-layer
 persistence contract is wired in this application. This module -- the
 sole data source for this screen, same role ui/morning_brief/mock_data.py
-plays for its screen -- builds a fixed, honest all-unavailable
-SettingsScreen rather than illustrative values. Unlike
+plays for its screen -- builds a fixed SettingsScreen rather than
+illustrative values standing in for a real contract. Thresholds stays
+all-unavailable (risk/execution-adjacent configuration, out of this
+screen's authorized scope). User Settings and Notification Preferences
+each carry exactly one allow-listed, non-trading, UI-local preference
+field (display theme; in-app notification visibility) -- ordinary
+display/notification preferences that carry no persistence claim, per
+screen.py's SettingsPreferenceField docstring. Unlike
 ui/portfolio_intelligence/mock_data.py's and
 ui/risk_intelligence/mock_data.py's mock data (hand-picked but fabricated
-figures), nothing here is a value standing in for a real user setting --
-every field is a literal explanation of why that area has no source yet,
-so it can never be mistaken for a real user's configuration.
+figures standing in for real numbers), nothing here stands in for a real
+wired setting -- these two fields are genuinely all that's here.
 """
 from applications.trading_intelligence.ui.settings.screen import (
     NOTIFICATION_PREFERENCES_TITLE,
     THRESHOLDS_TITLE,
     USER_SETTINGS_TITLE,
     SettingsArea,
+    SettingsPreferenceField,
     SettingsScreen,
 )
 
 _USER_SETTINGS = SettingsArea(
     title=USER_SETTINGS_TITLE,
     unavailable_message=(
-        "No product-layer user-settings persistence contract is wired "
-        "yet -- this area has no source."
+        "Not saved between sessions -- no product-layer user-settings "
+        "persistence contract is wired yet."
+    ),
+    preference_fields=(
+        SettingsPreferenceField(
+            label="Display Theme", options=("Light", "Dark"), default="Light",
+        ),
     ),
 )
 
@@ -41,8 +52,13 @@ _THRESHOLDS = SettingsArea(
 _NOTIFICATION_PREFERENCES = SettingsArea(
     title=NOTIFICATION_PREFERENCES_TITLE,
     unavailable_message=(
-        "No product-layer notification-preferences contract is wired "
-        "yet -- this area has no source."
+        "Not saved between sessions -- no product-layer notification-"
+        "preferences persistence contract is wired yet."
+    ),
+    preference_fields=(
+        SettingsPreferenceField(
+            label="Show In-App Notifications", options=("On", "Off"), default="On",
+        ),
     ),
 )
 

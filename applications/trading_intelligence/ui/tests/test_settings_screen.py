@@ -3,6 +3,7 @@ from applications.trading_intelligence.ui.settings.screen import (
     THRESHOLDS_TITLE,
     USER_SETTINGS_TITLE,
     SettingsArea,
+    SettingsPreferenceField,
     SettingsScreen,
 )
 
@@ -56,3 +57,31 @@ def test_each_area_carries_its_own_unavailable_message():
     )
 
     assert screen.user_settings.unavailable_message == "no settings source"
+
+
+def test_area_with_no_preference_fields_is_not_available():
+    area = SettingsArea(title=THRESHOLDS_TITLE, unavailable_message="unavailable")
+
+    assert area.preference_fields == ()
+    assert area.is_available is False
+
+
+def test_area_with_preference_fields_is_available():
+    area = SettingsArea(
+        title=USER_SETTINGS_TITLE,
+        unavailable_message="not saved",
+        preference_fields=(
+            SettingsPreferenceField(label="Display Theme", options=("Light", "Dark"), default="Light"),
+        ),
+    )
+
+    assert area.is_available is True
+
+
+def test_settings_preference_field_carries_label_options_and_default():
+    field = SettingsPreferenceField(label="Display Theme", options=("Light", "Dark"), default="Light")
+
+    assert field.label == "Display Theme"
+    assert field.options == ("Light", "Dark")
+    assert field.default == "Light"
+    assert field.default in field.options

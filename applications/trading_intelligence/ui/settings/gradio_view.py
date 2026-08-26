@@ -12,12 +12,15 @@ Like ui/morning_brief/gradio_view.py, and unlike
 ui/portfolio_intelligence/gradio_view.py and
 ui/risk_intelligence/gradio_view.py, this screen renders no "Illustrative
 Data" disclosure banner -- there is no illustrative data here to disclose,
-and inventing any could be mistaken for real user settings. Every area
-instead shows its own honest, fixed unavailable message, per
-docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md Section 2's
-"Required information" for Settings and Section 7's "evidence over
-emotion" UX principle: mark unbuilt functionality as unavailable rather
-than invent content to fill it.
+and inventing any could be mistaken for real user settings. An area with
+no preference_fields (Thresholds, always) shows its own honest, fixed
+unavailable message, per docs/products/AARA_TRADING_INTELLIGENCE_UI_
+SPECIFICATION.md Section 2's "Required information" for Settings and
+Section 7's "evidence over emotion" UX principle: mark unbuilt
+functionality as unavailable rather than invent content to fill it. An
+area with preference_fields (User Settings, Notification Preferences)
+instead renders its allow-listed controls plus a disclosure that nothing
+there is saved between sessions -- see screen.py's module docstring.
 
 AARA shell consistency pass: renders the same AARA logo header + inter-
 screen nav Decision Center/Portfolio Intelligence/Risk Intelligence/
@@ -56,7 +59,17 @@ class SettingsUI:
 
             for area in self._screen.areas:
                 gr.HTML(self._format_section_label_html(area))
-                gr.HTML(self._format_unavailable_message_html(area))
+                if area.is_available:
+                    gr.HTML(self._format_session_only_notice_html(area))
+                    for pref_field in area.preference_fields:
+                        gr.Radio(
+                            choices=list(pref_field.options),
+                            value=pref_field.default,
+                            label=pref_field.label,
+                            interactive=True,
+                        )
+                else:
+                    gr.HTML(self._format_unavailable_message_html(area))
 
         return demo
 
@@ -68,6 +81,14 @@ class SettingsUI:
     def _format_unavailable_message_html(area: SettingsArea) -> str:
         return (
             '<div class="st-unavailable-message">'
+            f'{html.escape(area.unavailable_message)}'
+            "</div>"
+        )
+
+    @staticmethod
+    def _format_session_only_notice_html(area: SettingsArea) -> str:
+        return (
+            '<div class="st-session-only-notice">'
             f'{html.escape(area.unavailable_message)}'
             "</div>"
         )

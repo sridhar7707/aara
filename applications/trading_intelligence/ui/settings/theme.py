@@ -58,4 +58,12 @@ CSS = """
   border-left: 2px solid var(--st-color-border);
   margin-bottom: var(--st-space-4);
 }
+
+.st-session-only-notice {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--st-color-text-secondary);
+  padding: 0 0 var(--st-space-6) var(--st-space-12);
+  margin-bottom: var(--st-space-4);
+}
 """
