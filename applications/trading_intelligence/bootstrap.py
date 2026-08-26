@@ -26,7 +26,7 @@ real trading data.
 """
 from dataclasses import replace
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import gradio as gr
 
@@ -57,6 +57,11 @@ from applications.platform.registry.product_registry import Product, ProductRegi
 from applications.platform.workspaces.workspace import Workspace
 from applications.platform.workspaces.workspace_registry import WorkspaceRegistry
 from applications.trading_intelligence.adapters.legacy_capital_source import LegacyCapitalSource
+from applications.trading_intelligence.adapters.legacy_position_source import (
+    LegacyPositionSource,
+    OpenPosition,
+)
+from applications.trading_intelligence.adapters.live_price_source import LivePriceSource
 from applications.trading_intelligence.adapters.sentinel_audit_source import SentinelAuditSource
 from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
 from applications.trading_intelligence.adapters.sentinel_governance_source import (
@@ -89,6 +94,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
 from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import (
     build_mock_screen as build_mock_portfolio_screen,
 )
+from applications.trading_intelligence.ui.portfolio_intelligence.screen import PortfolioHolding
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import RiskIntelligenceUI
 from applications.trading_intelligence.ui.settings.gradio_view import SettingsUI
 
@@ -630,21 +636,67 @@ _INNER_NAV_LINK_JS = """
 """
 
 
+def _build_portfolio_holdings(
+    positions: Tuple[OpenPosition, ...], prices: Dict[str, float],
+) -> Tuple[PortfolioHolding, ...]:
+    """Combines real open positions with real live prices into
+    PortfolioHolding rows -- weight_pct is each holding's share of total
+    *holdings* market value (not total portfolio value including cash),
+    matching mock_data.py's own existing convention where weight_pct sums
+    to 100.0 across holdings. Pure function, no I/O -- both inputs must
+    already be real (or this would silently mix real and fabricated
+    figures), which is why callers only invoke this after both
+    LegacyPositionSource and LivePriceSource have already succeeded."""
+    market_values = {position.symbol: prices[position.symbol] * position.quantity for position in positions}
+    total_market_value = sum(market_values.values())
+    return tuple(
+        PortfolioHolding(
+            symbol=position.symbol,
+            quantity=position.quantity,
+            price=prices[position.symbol],
+            market_value=market_values[position.symbol],
+            weight_pct=(
+                (market_values[position.symbol] / total_market_value) * 100
+                if total_market_value > 0 else 0.0
+            ),
+        )
+        for position in positions
+    )
+
+
 def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
     """Real Capital Summary/Allocation when the legacy trades.db capital
-    pool is available; Holdings stays on its existing illustrative path
-    regardless -- see adapters/legacy_capital_source.py's own docstring
-    for the read-only boundary this crosses and why Holdings is out of
-    scope for this unit. Falls back to the fully-illustrative screen
-    unchanged (same as PortfolioIntelligenceUI()'s own default) when the
-    adapter finds no real data -- expected in the deployed HF Space today,
-    which has no mechanism yet to obtain trades.db."""
+    pool is available (see adapters/legacy_capital_source.py). Holdings
+    additionally becomes real only when BOTH the real open positions
+    (adapters/legacy_position_source.py, a local trades.db read) AND real
+    current prices (adapters/live_price_source.py, a live network call)
+    are available -- an explicitly authorized live network dependency for
+    this UI (2026-08-26 decision). Any single failure anywhere in that
+    chain falls back to the existing illustrative screen at exactly the
+    point of failure: no capital -> fully illustrative; capital but no
+    positions or no prices -> real capital, illustrative Holdings; never
+    a partial/mixed Holdings table. Expected to stay on the illustrative
+    path in the deployed HF Space today, which has no mechanism yet to
+    obtain trades.db and may also lack outbound network access to the
+    price provider."""
     real_capital = LegacyCapitalSource().get_capital_summary()
     if real_capital is None:
         return PortfolioIntelligenceUI()
     illustrative_screen = build_mock_portfolio_screen()
     screen = replace(illustrative_screen, capital=real_capital)
-    return PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
+
+    real_positions = LegacyPositionSource().get_open_positions()
+    if real_positions is None:
+        return PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
+
+    symbols = tuple(position.symbol for position in real_positions)
+    real_prices = LivePriceSource().get_current_prices(symbols)
+    if real_prices is None:
+        return PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
+
+    real_holdings = _build_portfolio_holdings(real_positions, real_prices)
+    screen = replace(screen, holdings=real_holdings)
+    return PortfolioIntelligenceUI(screen=screen, capital_is_real=True, holdings_is_real=True)
 
 
 def build_trading_intelligence_app() -> gr.Blocks:

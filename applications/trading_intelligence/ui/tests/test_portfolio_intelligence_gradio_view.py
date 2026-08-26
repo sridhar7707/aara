@@ -5,6 +5,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
     _ILLUSTRATIVE_DATA_HTML,
     _ILLUSTRATIVE_DATA_TITLE,
     _PARTIAL_ILLUSTRATIVE_DATA_HTML,
+    _REAL_DATA_HTML,
     PortfolioIntelligenceUI,
 )
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
@@ -272,3 +273,68 @@ def test_holdings_remains_illustrative_and_unaffected_when_capital_is_real():
     dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
     assert len(dataframes) == 1
     assert dataframes[0].value["data"] == ui._format_holdings_rows(illustrative_screen.holdings)
+
+
+# --- Real Holdings (legacy_position_source + live_price_source) pass ---
+
+
+def test_disclosure_is_the_real_data_variant_when_capital_and_holdings_are_both_real():
+    real_capital = _make_capital()
+    holding = PortfolioHolding(
+        symbol="AAPL", quantity=19.11, price=334.67, market_value=6396.0, weight_pct=100.0,
+    )
+    screen = PortfolioScreen(capital=real_capital, holdings=(holding,))
+    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=True, holdings_is_real=True)
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    assert _REAL_DATA_HTML in html_values
+    assert _PARTIAL_ILLUSTRATIVE_DATA_HTML not in html_values
+    assert _ILLUSTRATIVE_DATA_HTML not in html_values
+
+
+def test_disclosure_stays_partial_when_capital_is_real_but_holdings_is_not():
+    """Regression lock: holdings_is_real defaults to False, so every
+    existing capital_is_real=True call site (before this unit) keeps
+    rendering the exact same partial-illustrative disclosure."""
+    ui = PortfolioIntelligenceUI(screen=PortfolioScreen(capital=_make_capital()), capital_is_real=True)
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    assert _PARTIAL_ILLUSTRATIVE_DATA_HTML in html_values
+    assert _REAL_DATA_HTML not in html_values
+
+
+def test_real_holdings_render_the_real_price_and_market_value_not_entry_price():
+    real_capital = _make_capital()
+    holding = PortfolioHolding(
+        symbol="AAPL", quantity=19.11, price=334.67, market_value=6396.0359, weight_pct=100.0,
+    )
+    screen = PortfolioScreen(capital=real_capital, holdings=(holding,))
+    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=True, holdings_is_real=True)
+
+    demo = ui.build()
+
+    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
+    assert len(dataframes) == 1
+    assert dataframes[0].value["data"] == [["AAPL", "19.11", "$334.67", "$6,396.04", "100.0%"]]
+
+
+def test_real_holdings_can_be_empty_with_the_real_data_disclosure():
+    """A real position source reporting zero open positions is a genuine
+    real state (not illustrative) -- the empty-state message still
+    renders, but under the real-data disclosure rather than the
+    illustrative one."""
+    real_capital = _make_capital()
+    screen = PortfolioScreen(capital=real_capital, holdings=())
+    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=True, holdings_is_real=True)
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
+    assert dataframes == []
+    assert _REAL_DATA_HTML in html_values
+    assert any("No holdings recorded yet." in value for value in html_values)

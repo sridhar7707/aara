@@ -1,9 +1,14 @@
-"""Gradio shell for Portfolio Intelligence -- illustrative MVP.
+"""Gradio shell for Portfolio Intelligence.
 
 Self-contained: does not import ui/decision_center/ (no gradio_view.py,
-theme.py, screen.py, or mock_data.py cross-import). Renders mock_data.py's
-PortfolioScreen only -- no controller, no service, no sentinel_engine/bot
-import. Wired into main.py/bootstrap.py as the 2nd Trading Intelligence tab.
+theme.py, screen.py, or mock_data.py cross-import). Renders whatever
+PortfolioScreen it is given -- mock_data.py's illustrative screen by
+default, or a real one bootstrap.py assembles from
+adapters.legacy_capital_source.LegacyCapitalSource,
+adapters.legacy_position_source.LegacyPositionSource, and
+adapters.live_price_source.LivePriceSource when all three are available.
+No controller, no service, no sentinel_engine/bot import. Wired into
+main.py/bootstrap.py as the 2nd Trading Intelligence tab.
 
 AARA shell consistency pass: renders the same AARA logo header + inter-screen
 nav Decision Center shows, via `ui/shell.py` (a sibling of all three screen
@@ -50,11 +55,11 @@ _ILLUSTRATIVE_DATA_HTML = (
 )
 
 # Used only when a real Capital Summary/Allocation was supplied (see
-# PortfolioIntelligenceUI's capital_is_real param) -- the plain
-# _ILLUSTRATIVE_DATA_HTML above would then be false: Capital Summary and
-# Allocation are real managed-capital-pool figures at that point, only
-# Holdings remains illustrative. Same title (still accurate -- part of the
-# page is still illustrative), corrected body only.
+# PortfolioIntelligenceUI's capital_is_real param) but Holdings could not
+# be -- Capital Summary and Allocation are real managed-capital-pool
+# figures at that point, only Holdings remains illustrative. Same title
+# (still accurate -- part of the page is still illustrative), corrected
+# body only.
 _PARTIAL_ILLUSTRATIVE_DATA_BODY = (
     "Capital Summary and Allocation reflect the real managed capital "
     "pool. Holdings shown below is illustrative and is not real trading "
@@ -67,6 +72,25 @@ _PARTIAL_ILLUSTRATIVE_DATA_HTML = (
     "</div>"
 )
 
+# Used only when both Capital Summary/Allocation AND Holdings were
+# supplied from real sources (see PortfolioIntelligenceUI's capital_is_real
+# and holdings_is_real params) -- nothing on the page is illustrative at
+# that point. Holdings' current price/market value are fetched live (see
+# adapters/live_price_source.py); the disclosure says so rather than
+# implying a static, always-fresh figure.
+_REAL_DATA_TITLE = "Real Data"
+_REAL_DATA_BODY = (
+    "Capital Summary, Allocation, and Holdings reflect the real managed "
+    "capital pool and current open positions. Prices are fetched live "
+    "from a market data provider and may be briefly delayed."
+)
+_REAL_DATA_HTML = (
+    '<div class="pi-disclosure">'
+    f'<div class="pi-disclosure-title">{html.escape(_REAL_DATA_TITLE)}</div>'
+    f'<div class="pi-disclosure-body">{html.escape(_REAL_DATA_BODY)}</div>'
+    "</div>"
+)
+
 _PAGE_HEADER_HTML = (
     '<div class="pi-page-header">'
     "<h2>Portfolio Intelligence</h2>"
@@ -76,14 +100,26 @@ _PAGE_HEADER_HTML = (
 
 
 class PortfolioIntelligenceUI:
-    def __init__(self, screen: PortfolioScreen = None, capital_is_real: bool = False):
+    def __init__(
+        self,
+        screen: PortfolioScreen = None,
+        capital_is_real: bool = False,
+        holdings_is_real: bool = False,
+    ):
         """capital_is_real: True only when `screen.capital` was supplied
         from a real source (see bootstrap.py's use of
-        adapters.legacy_capital_source.LegacyCapitalSource) -- controls
-        only the disclosure wording below; Holdings' own rendering is
-        completely unaffected and always illustrative in this unit."""
+        adapters.legacy_capital_source.LegacyCapitalSource).
+        holdings_is_real: True only when `screen.holdings` was supplied
+        from real sources (see bootstrap.py's use of
+        adapters.legacy_position_source.LegacyPositionSource and
+        adapters.live_price_source.LivePriceSource) -- both must succeed
+        together, since a real quantity next to an illustrative price
+        would misrepresent market value. Both flags together only control
+        disclosure wording below; the table/summary rendering itself
+        renders whatever `screen` already contains either way."""
         self._screen = screen if screen is not None else build_mock_screen()
         self._capital_is_real = capital_is_real
+        self._holdings_is_real = holdings_is_real
 
     def build(self) -> gr.Blocks:
         with gr.Blocks(
@@ -119,7 +155,11 @@ class PortfolioIntelligenceUI:
         return demo
 
     def _format_disclosure_html(self) -> str:
-        return _PARTIAL_ILLUSTRATIVE_DATA_HTML if self._capital_is_real else _ILLUSTRATIVE_DATA_HTML
+        if self._capital_is_real and self._holdings_is_real:
+            return _REAL_DATA_HTML
+        if self._capital_is_real:
+            return _PARTIAL_ILLUSTRATIVE_DATA_HTML
+        return _ILLUSTRATIVE_DATA_HTML
 
     @staticmethod
     def _format_capital_summary_html(capital: CapitalSummary) -> str:
