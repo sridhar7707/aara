@@ -24,6 +24,7 @@ way a real caller (a future signal-generation adapter) would produce
 decisions. This is illustrative seed data for a first visible slice, not
 real trading data.
 """
+from dataclasses import replace
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -55,6 +56,7 @@ from applications.platform.navigation.navigation_builder import NavigationBuilde
 from applications.platform.registry.product_registry import Product, ProductRegistry
 from applications.platform.workspaces.workspace import Workspace
 from applications.platform.workspaces.workspace_registry import WorkspaceRegistry
+from applications.trading_intelligence.adapters.legacy_capital_source import LegacyCapitalSource
 from applications.trading_intelligence.adapters.sentinel_audit_source import SentinelAuditSource
 from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
 from applications.trading_intelligence.adapters.sentinel_governance_source import (
@@ -83,6 +85,9 @@ from applications.trading_intelligence.ui.performance_learning.gradio_view impor
 )
 from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
     PortfolioIntelligenceUI,
+)
+from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import (
+    build_mock_screen as build_mock_portfolio_screen,
 )
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import RiskIntelligenceUI
 from applications.trading_intelligence.ui.settings.gradio_view import SettingsUI
@@ -625,6 +630,23 @@ _INNER_NAV_LINK_JS = """
 """
 
 
+def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
+    """Real Capital Summary/Allocation when the legacy trades.db capital
+    pool is available; Holdings stays on its existing illustrative path
+    regardless -- see adapters/legacy_capital_source.py's own docstring
+    for the read-only boundary this crosses and why Holdings is out of
+    scope for this unit. Falls back to the fully-illustrative screen
+    unchanged (same as PortfolioIntelligenceUI()'s own default) when the
+    adapter finds no real data -- expected in the deployed HF Space today,
+    which has no mechanism yet to obtain trades.db."""
+    real_capital = LegacyCapitalSource().get_capital_summary()
+    if real_capital is None:
+        return PortfolioIntelligenceUI()
+    illustrative_screen = build_mock_portfolio_screen()
+    screen = replace(illustrative_screen, capital=real_capital)
+    return PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
+
+
 def build_trading_intelligence_app() -> gr.Blocks:
     """Composes every Trading Intelligence screen into one tabbed app via
     gr.TabbedInterface -- the smallest wiring that reaches multiple
@@ -652,7 +674,7 @@ def build_trading_intelligence_app() -> gr.Blocks:
     docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md Section 1."""
     morning_brief_blocks = MorningBriefUI().build()
     decision_blocks = build_application().build()
-    portfolio_blocks = PortfolioIntelligenceUI().build()
+    portfolio_blocks = _build_portfolio_intelligence_ui().build()
     risk_blocks = RiskIntelligenceUI().build()
     performance_learning_blocks = PerformanceLearningUI().build()
     settings_blocks = SettingsUI().build()

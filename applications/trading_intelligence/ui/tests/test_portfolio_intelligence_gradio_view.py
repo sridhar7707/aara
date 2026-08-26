@@ -4,6 +4,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
     _ILLUSTRATIVE_DATA_BODY,
     _ILLUSTRATIVE_DATA_HTML,
     _ILLUSTRATIVE_DATA_TITLE,
+    _PARTIAL_ILLUSTRATIVE_DATA_HTML,
     PortfolioIntelligenceUI,
 )
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
@@ -175,3 +176,99 @@ def test_build_renders_a_dataframe_when_holdings_exist():
     dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
     assert len(dataframes) == 1
     assert "pi-holdings-table" in dataframes[0].elem_classes
+
+
+# --- Real Capital Summary/Allocation (legacy_capital_source) pass ------
+
+
+def _html_values(demo):
+    return [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+
+
+def test_real_supplied_capital_renders_real_values_when_capital_is_real():
+    real_capital = _make_capital(
+        allocated_amount=96933.32, available_cash=38850.78,
+        invested_amount=58082.54, reserve=0.0, realized_profit=0.0,
+    )
+    screen = PortfolioScreen(capital=real_capital)
+    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
+
+    demo = ui.build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "$96,933.32" in combined
+    assert "$38,850.78" in combined
+    assert "$58,082.54" in combined
+
+
+def test_derived_allocation_values_render_correctly_for_a_real_screen():
+    real_capital = _make_capital(available_cash=250.0, invested_amount=750.0)
+    screen = PortfolioScreen(capital=real_capital)
+    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
+
+    demo = ui.build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "Invested 75.0%" in combined
+    assert "Cash 25.0%" in combined
+
+
+def test_disclosure_is_the_partial_variant_when_capital_is_real():
+    ui = PortfolioIntelligenceUI(screen=PortfolioScreen(capital=_make_capital()), capital_is_real=True)
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    assert _PARTIAL_ILLUSTRATIVE_DATA_HTML in html_values
+    assert _ILLUSTRATIVE_DATA_HTML not in html_values
+
+
+def test_disclosure_stays_the_original_fully_illustrative_variant_by_default():
+    """Regression lock: constructing PortfolioIntelligenceUI exactly as
+    every existing call site already does (no capital_is_real argument)
+    must render byte-identical disclosure HTML to before this unit."""
+    ui = PortfolioIntelligenceUI()
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    assert _ILLUSTRATIVE_DATA_HTML in html_values
+    assert _PARTIAL_ILLUSTRATIVE_DATA_HTML not in html_values
+
+
+def test_illustrative_fallback_still_works_when_no_real_screen_is_supplied():
+    """Mirrors what bootstrap.py does when LegacyCapitalSource returns
+    None -- constructing PortfolioIntelligenceUI() with no args at all
+    must still render the full illustrative mock screen unchanged."""
+    ui = PortfolioIntelligenceUI()
+
+    demo = ui.build()
+
+    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
+    assert len(dataframes) == 1
+    assert _ILLUSTRATIVE_DATA_HTML in _html_values(demo)
+
+
+def test_holdings_remains_illustrative_and_unaffected_when_capital_is_real():
+    """The one thing this unit must never do: make Holdings look real just
+    because Capital Summary/Allocation are. Supplying a real capital value
+    alongside the mock screen's own illustrative holdings must render
+    those exact same illustrative holdings, unchanged."""
+    from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import (
+        build_mock_screen,
+    )
+    from dataclasses import replace
+
+    illustrative_screen = build_mock_screen()
+    real_capital = _make_capital(allocated_amount=96933.32)
+    screen = replace(illustrative_screen, capital=real_capital)
+    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
+
+    demo = ui.build()
+
+    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
+    assert len(dataframes) == 1
+    assert dataframes[0].value["data"] == ui._format_holdings_rows(illustrative_screen.holdings)

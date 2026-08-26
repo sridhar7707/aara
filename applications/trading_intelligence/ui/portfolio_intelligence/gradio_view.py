@@ -49,6 +49,24 @@ _ILLUSTRATIVE_DATA_HTML = (
     "</div>"
 )
 
+# Used only when a real Capital Summary/Allocation was supplied (see
+# PortfolioIntelligenceUI's capital_is_real param) -- the plain
+# _ILLUSTRATIVE_DATA_HTML above would then be false: Capital Summary and
+# Allocation are real managed-capital-pool figures at that point, only
+# Holdings remains illustrative. Same title (still accurate -- part of the
+# page is still illustrative), corrected body only.
+_PARTIAL_ILLUSTRATIVE_DATA_BODY = (
+    "Capital Summary and Allocation reflect the real managed capital "
+    "pool. Holdings shown below is illustrative and is not real trading "
+    "activity."
+)
+_PARTIAL_ILLUSTRATIVE_DATA_HTML = (
+    '<div class="pi-disclosure">'
+    f'<div class="pi-disclosure-title">{html.escape(_ILLUSTRATIVE_DATA_TITLE)}</div>'
+    f'<div class="pi-disclosure-body">{html.escape(_PARTIAL_ILLUSTRATIVE_DATA_BODY)}</div>'
+    "</div>"
+)
+
 _PAGE_HEADER_HTML = (
     '<div class="pi-page-header">'
     "<h2>Portfolio Intelligence</h2>"
@@ -58,8 +76,14 @@ _PAGE_HEADER_HTML = (
 
 
 class PortfolioIntelligenceUI:
-    def __init__(self, screen: PortfolioScreen = None):
+    def __init__(self, screen: PortfolioScreen = None, capital_is_real: bool = False):
+        """capital_is_real: True only when `screen.capital` was supplied
+        from a real source (see bootstrap.py's use of
+        adapters.legacy_capital_source.LegacyCapitalSource) -- controls
+        only the disclosure wording below; Holdings' own rendering is
+        completely unaffected and always illustrative in this unit."""
         self._screen = screen if screen is not None else build_mock_screen()
+        self._capital_is_real = capital_is_real
 
     def build(self) -> gr.Blocks:
         with gr.Blocks(
@@ -69,7 +93,7 @@ class PortfolioIntelligenceUI:
             gr.HTML(build_shell_nav_html("Portfolio Intelligence"), elem_classes=["aara-shell-nav"])
 
             gr.HTML(_PAGE_HEADER_HTML)
-            gr.HTML(_ILLUSTRATIVE_DATA_HTML)
+            gr.HTML(self._format_disclosure_html())
 
             gr.HTML('<div class="pi-section-label">Capital Summary</div>')
             gr.HTML(self._format_capital_summary_html(self._screen.capital))
@@ -93,6 +117,9 @@ class PortfolioIntelligenceUI:
                 )
 
         return demo
+
+    def _format_disclosure_html(self) -> str:
+        return _PARTIAL_ILLUSTRATIVE_DATA_HTML if self._capital_is_real else _ILLUSTRATIVE_DATA_HTML
 
     @staticmethod
     def _format_capital_summary_html(capital: CapitalSummary) -> str:
