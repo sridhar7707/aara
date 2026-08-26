@@ -66,4 +66,28 @@ CSS = """
   padding: 0 0 var(--st-space-6) var(--st-space-12);
   margin-bottom: var(--st-space-4);
 }
+
+/* Accessibility parity pass: visible keyboard focus for the Display
+   Theme / Show In-App Notifications radio controls -- live-verified
+   (getComputedStyle on a real Tab-focused radio): Gradio's own base
+   theme renders these with outline: none and a focus box-shadow whose
+   color resolves to fully transparent (rgba(0, 0, 0, 0)), so a
+   keyboard user currently gets zero visual indication of which radio
+   is focused. !important is required, not optional, for the same
+   reason ui/risk_intelligence/theme.py's own Accessibility parity pass
+   needed it: this is overriding Gradio's own already-!important-or-
+   equivalent-specificity base styling, not merely adding a new rule
+   into empty space. Scoped to this screen's own new
+   .st-preference-control hook (see gradio_view.py) rather than a bare
+   `input[type="radio"]` selector -- no other screen in this composed
+   app renders a radio input today, so this cannot leak onto or collide
+   with anything else, but scoping to a local, purpose-built class
+   keeps that true even if one is added later. --st-color-navy already
+   passes the WCAG 3:1 UI-component-boundary floor against the white/
+   warm surfaces this control sits on, so no new color token is
+   needed. */
+.st-preference-control input[type="radio"]:focus-visible {
+  outline: 2px solid var(--st-color-navy) !important;
+  outline-offset: 2px;
+}
 """

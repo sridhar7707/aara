@@ -67,6 +67,7 @@ class SettingsUI:
                             value=pref_field.default,
                             label=pref_field.label,
                             interactive=True,
+                            elem_classes=["st-preference-control"],
                         )
                 else:
                     gr.HTML(self._format_unavailable_message_html(area))

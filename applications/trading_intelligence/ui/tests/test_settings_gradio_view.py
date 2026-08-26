@@ -7,6 +7,7 @@ from applications.trading_intelligence.ui.settings.screen import (
     THRESHOLDS_TITLE,
     USER_SETTINGS_TITLE,
 )
+from applications.trading_intelligence.ui.settings.theme import CSS
 from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
 
 
@@ -150,3 +151,33 @@ def test_no_save_or_submit_control_is_rendered():
 
     buttons = [block for block in demo.blocks.values() if isinstance(block, gr.Button)]
     assert buttons == []
+
+
+# --- Accessibility & Keyboard Interaction Parity pass -----------------
+
+
+def test_both_preference_radios_carry_the_focus_visible_hook():
+    """Both gr.Radio controls must carry the elem_classes hook theme.py's
+    :focus-visible rule targets -- without it, that CSS rule can never
+    match anything."""
+    ui = SettingsUI()
+
+    demo = ui.build()
+
+    radios = [block for block in demo.blocks.values() if isinstance(block, gr.Radio)]
+    assert len(radios) == 2
+    assert all("st-preference-control" in (radio.elem_classes or []) for radio in radios)
+
+
+def test_theme_defines_a_focus_visible_rule_for_preference_radios():
+    """Local, Settings-scoped :focus-visible rule for the radio inputs
+    Gradio's own base theme otherwise renders with no visible focus
+    indicator at all (live-verified: outline: none and a fully
+    transparent focus box-shadow).
+
+    Regression lock (learned directly from the Risk Intelligence
+    accessibility defect): the outline declaration must carry
+    !important, or it is silently inert against Gradio's own base
+    styling for this element."""
+    assert '.st-preference-control input[type="radio"]:focus-visible' in CSS
+    assert "outline: 2px solid var(--st-color-navy) !important;" in CSS
