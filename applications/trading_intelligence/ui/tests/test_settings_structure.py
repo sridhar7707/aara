@@ -55,6 +55,18 @@ def test_settings_does_not_import_any_sibling_screen_package():
                 )
 
 
+def test_settings_theme_defines_local_spacing_tokens():
+    """Local spacing-token extraction: theme.py must declare its own
+    --st-space-* custom properties rather than raw px literals or an
+    import of another package's tokens (see test above)."""
+    from applications.trading_intelligence.ui.settings.theme import CSS
+
+    for px in (4, 6, 8, 12, 16):
+        assert f"--st-space-{px}: {px}px;" in CSS, (
+            f"expected a --st-space-{px} token declared in theme.py's CSS"
+        )
+
+
 def test_settings_does_not_import_sentinel_engine_bot_or_dashboard():
     """Redundant with test_ui_structure.py's whole-tree scan, but kept
     explicit per-package (matching every other screen package's own

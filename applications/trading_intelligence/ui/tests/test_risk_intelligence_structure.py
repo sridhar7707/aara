@@ -52,6 +52,18 @@ def test_risk_intelligence_does_not_import_decision_center_or_portfolio_intellig
                 )
 
 
+def test_risk_intelligence_theme_defines_local_spacing_tokens():
+    """Local spacing-token extraction: theme.py must declare its own
+    --ri-space-* custom properties rather than raw px literals or an
+    import of another package's tokens (see test above)."""
+    from applications.trading_intelligence.ui.risk_intelligence.theme import CSS
+
+    for px in (2, 3, 4, 6, 8, 10, 12, 16, 24):
+        assert f"--ri-space-{px}: {px}px;" in CSS, (
+            f"expected a --ri-space-{px} token declared in theme.py's CSS"
+        )
+
+
 def test_risk_intelligence_does_not_define_a_riskevaluation_class():
     """Explicit compliance check: no `RiskEvaluation` (or equivalently
     contract-shaped) class is added anywhere in this package -- no such

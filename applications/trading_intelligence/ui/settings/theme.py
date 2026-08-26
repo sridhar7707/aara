@@ -17,6 +17,12 @@ CSS = """
   --st-color-text: #1A1A1A;
   --st-color-text-secondary: #666666;
   --st-color-border: #E2E8F0;
+
+  --st-space-4: 4px;
+  --st-space-6: 6px;
+  --st-space-8: 8px;
+  --st-space-12: 12px;
+  --st-space-16: 16px;
 }
 
 .gradio-container {
@@ -32,7 +38,7 @@ CSS = """
 .st-page-header .st-subtitle {
   font-size: 14px;
   color: var(--st-color-text-secondary);
-  margin-top: 4px;
+  margin-top: var(--st-space-4);
 }
 
 .st-section-label {
@@ -41,15 +47,15 @@ CSS = """
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--st-color-text-secondary);
-  margin: 16px 0 6px 0;
+  margin: var(--st-space-16) 0 var(--st-space-6) 0;
 }
 
 .st-unavailable-message {
   font-size: 13px;
   font-style: italic;
   color: var(--st-color-text-secondary);
-  padding: 8px 0 8px 12px;
+  padding: var(--st-space-8) 0 var(--st-space-8) var(--st-space-12);
   border-left: 2px solid var(--st-color-border);
-  margin-bottom: 4px;
+  margin-bottom: var(--st-space-4);
 }
 """

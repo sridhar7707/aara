@@ -22,6 +22,16 @@ CSS = """
   --ri-color-text: #1A1A1A;
   --ri-color-text-secondary: #666666;
   --ri-color-border: #E2E8F0;
+
+  --ri-space-2: 2px;
+  --ri-space-3: 3px;
+  --ri-space-4: 4px;
+  --ri-space-6: 6px;
+  --ri-space-8: 8px;
+  --ri-space-10: 10px;
+  --ri-space-12: 12px;
+  --ri-space-16: 16px;
+  --ri-space-24: 24px;
 }
 
 .gradio-container {
@@ -37,13 +47,13 @@ CSS = """
 .ri-page-header .ri-subtitle {
   font-size: 14px;
   color: var(--ri-color-text-secondary);
-  margin-top: 4px;
+  margin-top: var(--ri-space-4);
 }
 
 .ri-disclosure {
   border-left: 2px solid var(--ri-color-border);
-  padding: 8px 0 8px 12px;
-  margin: 8px 0;
+  padding: var(--ri-space-8) 0 var(--ri-space-8) var(--ri-space-12);
+  margin: var(--ri-space-8) 0;
 }
 .ri-disclosure-title {
   font-size: 13px;
@@ -62,11 +72,11 @@ CSS = """
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--ri-color-text-secondary);
-  margin: 16px 0 6px 0;
+  margin: var(--ri-space-16) 0 var(--ri-space-6) 0;
 }
 
 .ri-current-state {
-  padding: 12px;
+  padding: var(--ri-space-12);
   background: var(--ri-color-surface);
   border: 1px solid var(--ri-color-border);
   border-radius: 8px;
@@ -74,7 +84,7 @@ CSS = """
 
 .ri-state-badge {
   display: inline-block;
-  padding: 3px 10px;
+  padding: var(--ri-space-3) var(--ri-space-10);
   border-radius: 4px;
   font-size: 13px;
   font-weight: 700;
@@ -98,7 +108,7 @@ CSS = """
 }
 
 .ri-trigger-reason {
-  margin-top: 10px;
+  margin-top: var(--ri-space-10);
   font-size: 13px;
 }
 .ri-trigger-reason summary {
@@ -107,20 +117,20 @@ CSS = """
   color: var(--ri-color-navy);
 }
 .ri-trigger-reason .ri-trigger-body {
-  margin-top: 6px;
+  margin-top: var(--ri-space-6);
   color: var(--ri-color-text-secondary);
   font-style: italic;
 }
 
 .ri-sizing-metrics {
   display: flex;
-  gap: 24px;
-  margin-top: 12px;
+  gap: var(--ri-space-24);
+  margin-top: var(--ri-space-12);
 }
 .ri-metric {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--ri-space-2);
 }
 .ri-metric-label {
   font-size: 10px;
@@ -150,17 +160,17 @@ CSS = """
   font-size: 13px;
   font-style: italic;
   color: var(--ri-color-text-secondary);
-  padding: 8px 0;
+  padding: var(--ri-space-8) 0;
 }
 
 .ri-history-detail-list {
-  margin-top: 8px;
+  margin-top: var(--ri-space-8);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--ri-space-8);
 }
 .ri-history-detail-card {
-  padding: 10px 12px;
+  padding: var(--ri-space-10) var(--ri-space-12);
   background: var(--ri-color-surface);
   border: 1px solid var(--ri-color-border);
   border-radius: 8px;
@@ -174,20 +184,20 @@ CSS = """
   display: none;
 }
 .ri-history-detail-timestamp {
-  margin-left: 8px;
+  margin-left: var(--ri-space-8);
   color: var(--ri-color-text-secondary);
   font-size: 12px;
 }
 .ri-record-card-fields {
-  margin-top: 8px;
+  margin-top: var(--ri-space-8);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--ri-space-6);
 }
 .ri-record-field {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--ri-space-12);
 }
 .ri-record-field .record-label {
   color: var(--ri-color-text-secondary);
