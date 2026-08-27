@@ -56,6 +56,10 @@ from applications.platform.navigation.navigation_builder import NavigationBuilde
 from applications.platform.registry.product_registry import Product, ProductRegistry
 from applications.platform.workspaces.workspace import Workspace
 from applications.platform.workspaces.workspace_registry import WorkspaceRegistry
+from applications.trading_intelligence.adapters.legacy_candidate_screening_source import (
+    CandidateScreeningSnapshot,
+    LegacyCandidateScreeningSource,
+)
 from applications.trading_intelligence.adapters.legacy_capital_source import LegacyCapitalSource
 from applications.trading_intelligence.adapters.legacy_position_source import (
     LegacyPositionSource,
@@ -640,21 +644,42 @@ _INNER_NAV_LINK_JS = """
 """
 
 
+def _format_candidate_screening_summary(snapshot: CandidateScreeningSnapshot) -> str:
+    """Pure formatting, no I/O -- always states the actual persisted
+    screened_at date literally (never "today"), so a stale local
+    screener_log (the screener may not have run recently) can never be
+    misrepresented as a fresh, current-day result."""
+    screened_date = datetime.fromisoformat(snapshot.screened_at).date().isoformat()
+    count = len(snapshot.picks)
+    plural = "s" if count != 1 else ""
+    top = snapshot.picks[0]
+    if top.rank is None:
+        return f"{count} candidate{plural} screened on {screened_date}."
+    score_clause = f", score {top.composite_score:.2f}" if top.composite_score is not None else ""
+    return (
+        f"{count} candidate{plural} screened on {screened_date} -- "
+        f"top pick {top.symbol} (rank {top.rank}{score_clause})."
+    )
+
+
 def _build_morning_brief_ui() -> MorningBriefUI:
     """Real Portfolio Snapshot (reusing the exact same, unmodified
     LegacyCapitalSource already wired for Portfolio Intelligence -- no
-    second capital adapter) and real Market Mood/Regime (via
-    LegacyRegimeSource) when their respective legacy trades.db data is
-    available. Candidate Screening Summary and Overnight Holdings News
-    stay on their existing unavailable path unconditionally -- neither
-    has an authorized real data source in this unit. Each of the two
-    real-eligible sections falls back to its own existing unavailable
-    message independently when its adapter finds no real data -- expected
-    in the deployed HF Space today, which has no mechanism yet to obtain
-    trades.db."""
+    second capital adapter), real Market Mood/Regime (via
+    LegacyRegimeSource), and real Candidate Screening Summary (via
+    LegacyCandidateScreeningSource, reading trades.db's screener_log --
+    explicitly not the Trust Ledger's candidate_evaluation_events, which
+    stays gated behind ADR-004/Q1) when their respective legacy trades.db
+    data is available. Overnight Holdings News stays on its existing
+    unavailable path unconditionally -- it has no authorized real data
+    source in this unit. Each real-eligible section falls back to its own
+    existing unavailable message independently when its adapter finds no
+    real data -- expected in the deployed HF Space today, which has no
+    mechanism yet to obtain trades.db."""
     illustrative_screen = build_mock_morning_brief_screen()
     portfolio_snapshot = illustrative_screen.portfolio_snapshot
     market_mood_regime = illustrative_screen.market_mood_regime
+    candidate_screening_summary = illustrative_screen.candidate_screening_summary
 
     real_capital = LegacyCapitalSource().get_capital_summary()
     if real_capital is not None:
@@ -674,10 +699,18 @@ def _build_morning_brief_ui() -> MorningBriefUI:
             available_summary=f"Current market regime: {real_regime}.",
         )
 
+    real_screening = LegacyCandidateScreeningSource().get_latest_screening()
+    if real_screening is not None:
+        candidate_screening_summary = replace(
+            candidate_screening_summary,
+            available_summary=_format_candidate_screening_summary(real_screening),
+        )
+
     screen = replace(
         illustrative_screen,
         portfolio_snapshot=portfolio_snapshot,
         market_mood_regime=market_mood_regime,
+        candidate_screening_summary=candidate_screening_summary,
     )
     return MorningBriefUI(screen=screen)
 
