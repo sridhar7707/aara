@@ -56,7 +56,22 @@ is the intended, safe behavior, not a bug.
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
-from config import ALPACA_BASE_URL, ALPACA_KEY, ALPACA_SECRET
+try:
+    from config import ALPACA_BASE_URL, ALPACA_KEY, ALPACA_SECRET
+except ImportError:
+    # config.py (top-level, not part of this product) is not staged in
+    # the deployed Trading Intelligence HF Space -- see
+    # .github/workflows/deploy_trading_intelligence.yml, which stages
+    # only applications/, sentinel_engine/, and brand/logos/. Falling
+    # back to empty credentials here is the correct, safe behavior: the
+    # Space has no Alpaca Space secrets configured today either (see this
+    # module's own "Production note" below), so get_account()/
+    # get_positions() would already return None regardless -- this only
+    # prevents that expected, documented gap from crashing the entire
+    # Space at import time instead.
+    ALPACA_KEY = ""
+    ALPACA_SECRET = ""
+    ALPACA_BASE_URL = ""
 
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     AlpacaAccountSnapshot,

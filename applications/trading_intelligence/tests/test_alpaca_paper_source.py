@@ -226,3 +226,41 @@ def test_module_imports_no_protected_package():
             assert not module_name.startswith(forbidden), (
                 f"forbidden import from {module_name!r}"
             )
+
+
+def test_module_imports_cleanly_when_top_level_config_is_unavailable():
+    """Regression lock for a real production incident: the deployed
+    Trading Intelligence HF Space stages only applications/,
+    sentinel_engine/, and brand/logos/ (see
+    .github/workflows/deploy_trading_intelligence.yml) -- top-level
+    config.py is never present there. A module-level `from config import
+    ...` with no fallback previously crashed the entire Space at import
+    time. Run in an isolated subprocess (rather than mutating
+    sys.modules/builtins.__import__ in-process, which would leave a
+    second AlpacaPaperSource class object behind and silently break every
+    other test in this suite that imports/patches the real one) so this
+    simulation can never pollute the rest of the test run."""
+    import subprocess
+    import sys
+
+    script = (
+        "import builtins\n"
+        "_orig = builtins.__import__\n"
+        "def _blocked(name, globals=None, locals=None, fromlist=(), level=0):\n"
+        "    if name == 'config' and level == 0:\n"
+        "        raise ImportError('simulated: config not staged in HF Space')\n"
+        "    return _orig(name, globals, locals, fromlist, level)\n"
+        "builtins.__import__ = _blocked\n"
+        "from applications.trading_intelligence.adapters.alpaca_paper_source import (\n"
+        "    ALPACA_KEY, ALPACA_SECRET, AlpacaPaperSource,\n"
+        ")\n"
+        "assert ALPACA_KEY == ''\n"
+        "assert ALPACA_SECRET == ''\n"
+        "source = AlpacaPaperSource()\n"
+        "assert source.get_account() is None\n"
+        "assert source.get_positions() is None\n"
+        "print('OK')\n"
+    )
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert "OK" in result.stdout
