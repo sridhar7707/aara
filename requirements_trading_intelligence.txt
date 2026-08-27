@@ -72,3 +72,19 @@ tzdata
 # @spaces.GPU decorator's API has been stable across these versions, so
 # there's nothing this pin was protecting beyond a resolver dry-run.
 spaces
+
+# alpaca-py: the two read-only Alpaca adapters in this product --
+# adapters/alpaca_paper_source.py (paper account + positions) and
+# adapters/alpaca_news_source.py (Overnight Holdings News). Both are
+# GET-only observation: no order/execution API is imported or reachable.
+# Without this package installed, each adapter's lazy `import alpaca...`
+# raises inside a try/except and the adapter returns None, so the app
+# still starts and the affected sections stay on their existing honest
+# unavailable state -- adding it here is what lets those sections show
+# real data in the deployed Space (which also needs ALPACA_KEY /
+# ALPACA_SECRET provided as Space secrets). Same lower-bound pin as the
+# root requirements.txt (`alpaca-py>=0.40.0`); local dev already has it
+# from that file. This is the one non-minimal dependency in this list --
+# it pulls pandas/numpy transitively -- and is justified by the two
+# adapters above being the only path to real broker data in the Space.
+alpaca-py>=0.40.0

@@ -56,6 +56,10 @@ from applications.platform.navigation.navigation_builder import NavigationBuilde
 from applications.platform.registry.product_registry import Product, ProductRegistry
 from applications.platform.workspaces.workspace import Workspace
 from applications.platform.workspaces.workspace_registry import WorkspaceRegistry
+from applications.trading_intelligence.adapters.alpaca_news_source import (
+    AlpacaNewsSource,
+    OvernightHoldingsNews,
+)
 from applications.trading_intelligence.adapters.alpaca_paper_source import AlpacaPaperSource
 from applications.trading_intelligence.adapters.legacy_candidate_screening_source import (
     CandidateScreeningSnapshot,
@@ -666,6 +670,31 @@ def _format_candidate_screening_summary(snapshot: CandidateScreeningSnapshot) ->
     )
 
 
+def _format_overnight_holdings_news(
+    news: OvernightHoldingsNews, holdings_symbols: Tuple[str, ...]
+) -> str:
+    """Pure formatting, no I/O. news is already a real, successful fetch
+    result (callers only reach here when AlpacaNewsSource returned
+    non-None) -- an empty result means the fetch succeeded and simply
+    matched nothing, which is stated plainly rather than left as an
+    unavailable section. The headline text is the provider's own,
+    unmodified: this summary reports what Alpaca returned for the current
+    holdings, it never characterises, scores, or acts on it."""
+    if not holdings_symbols:
+        return "No open holdings -- no overnight holdings news to report."
+    symbols_clause = ", ".join(holdings_symbols)
+    if news.is_empty:
+        return f"No recent news for current holdings ({symbols_clause})."
+    count = len(news.items)
+    plural = "s" if count != 1 else ""
+    latest = news.items[0]
+    source_clause = f" ({latest.source})" if latest.source else ""
+    return (
+        f"{count} recent headline{plural} for current holdings ({symbols_clause}) -- "
+        f'latest: "{latest.headline}"{source_clause}.'
+    )
+
+
 def _build_morning_brief_ui() -> MorningBriefUI:
     """Real Portfolio Snapshot (reusing the exact same, unmodified
     LegacyCapitalSource already wired for Portfolio Intelligence -- no
@@ -674,16 +703,23 @@ def _build_morning_brief_ui() -> MorningBriefUI:
     LegacyCandidateScreeningSource, reading trades.db's screener_log --
     explicitly not the Trust Ledger's candidate_evaluation_events, which
     stays gated behind ADR-004/Q1) when their respective legacy trades.db
-    data is available. Overnight Holdings News stays on its existing
-    unavailable path unconditionally -- it has no authorized real data
-    source in this unit. Each real-eligible section falls back to its own
-    existing unavailable message independently when its adapter finds no
-    real data -- expected in the deployed HF Space today, which has no
-    mechanism yet to obtain trades.db."""
+    data is available. Overnight Holdings News is real Alpaca news (via
+    AlpacaNewsSource, read-only NewsClient GET) filtered to the current
+    holdings symbols from the same LegacyPositionSource Portfolio
+    Intelligence already uses -- attempted only when real holdings can be
+    determined; a None from either adapter (no trades.db, no Alpaca
+    credentials, network/API failure, malformed response) leaves the
+    section on its existing honest unavailable message, and news is
+    treated as source/evidence only, never as a decision input. Each
+    real-eligible section falls back to its own existing unavailable
+    message independently when its adapter finds no real data -- expected
+    in the deployed HF Space today, which has no mechanism yet to obtain
+    trades.db and no Alpaca credentials."""
     illustrative_screen = build_mock_morning_brief_screen()
     portfolio_snapshot = illustrative_screen.portfolio_snapshot
     market_mood_regime = illustrative_screen.market_mood_regime
     candidate_screening_summary = illustrative_screen.candidate_screening_summary
+    overnight_holdings_news = illustrative_screen.overnight_holdings_news
 
     real_capital = LegacyCapitalSource().get_capital_summary()
     if real_capital is not None:
@@ -710,11 +746,24 @@ def _build_morning_brief_ui() -> MorningBriefUI:
             available_summary=_format_candidate_screening_summary(real_screening),
         )
 
+    real_positions = LegacyPositionSource().get_open_positions()
+    if real_positions is not None:
+        holdings_symbols = tuple(position.symbol for position in real_positions)
+        real_news = AlpacaNewsSource().get_overnight_holdings_news(holdings_symbols)
+        if real_news is not None:
+            overnight_holdings_news = replace(
+                overnight_holdings_news,
+                available_summary=_format_overnight_holdings_news(
+                    real_news, holdings_symbols
+                ),
+            )
+
     screen = replace(
         illustrative_screen,
         portfolio_snapshot=portfolio_snapshot,
         market_mood_regime=market_mood_regime,
         candidate_screening_summary=candidate_screening_summary,
+        overnight_holdings_news=overnight_holdings_news,
     )
     return MorningBriefUI(screen=screen)
 
