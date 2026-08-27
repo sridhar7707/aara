@@ -37,6 +37,11 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _RISK_CONTEXT_BODY,
     _RISK_CONTEXT_HTML,
     _RISK_CONTEXT_TITLE,
+    _RISK_REFERENCE_CLARIFICATION_HTML,
+    _RISK_REFERENCE_NAV_LINK_CLASS,
+    _RISK_REFERENCE_NAV_LINK_HTML,
+    _RISK_REFERENCE_NAV_LINK_JS,
+    _RISK_REFERENCE_NAV_LINK_LABEL,
     _SELECT_DECISION_HTML,
     _SELECT_DECISION_MESSAGE,
     _SELECTION_ARIA_SYNC_JS,
@@ -500,6 +505,91 @@ def test_render_detail_header_omits_reference_fields_when_none_are_present():
     assert "Evidence Reference" not in header
     assert "Risk Reference" not in header
     assert "opaque pointer" not in header.lower()
+
+
+def test_risk_reference_clarification_html_is_unchanged():
+    """DC-01 regression lock: the existing opaque-pointer disclosure must
+    remain byte-for-byte unchanged by the new navigation link added
+    alongside it -- this pins the exact prior value so any future edit to
+    this constant fails a test instead of silently drifting."""
+    assert _RISK_REFERENCE_CLARIFICATION_HTML == (
+        '<div class="aara-disclosure-message">'
+        '<div class="aara-disclosure-body">'
+        "This is an opaque pointer, not resolved risk analysis -- Risk "
+        "Intelligence is not currently implemented for this workspace."
+        "</div></div>"
+    )
+
+
+def test_render_detail_header_includes_risk_intelligence_nav_link_when_risk_reference_present():
+    """DC-01: a navigational element to Risk Intelligence appears alongside
+    the existing opaque-pointer clarification, only when risk_reference is
+    present -- structure only (element exists, correct class/role/label);
+    actual cross-tab click behavior is not verifiable at this level (see
+    module docstring) and must be confirmed live."""
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(
+            decision=view, evidence_reference="evidence-001", risk_reference="risk-001",
+        )
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    header = ui._render_detail("dec-001")[0]
+
+    assert _RISK_REFERENCE_CLARIFICATION_HTML in header
+    assert _RISK_REFERENCE_NAV_LINK_HTML in header
+    assert f'class="{_RISK_REFERENCE_NAV_LINK_CLASS}"' in header
+    assert 'role="button"' in header
+    assert 'tabindex="0"' in header
+    assert _RISK_REFERENCE_NAV_LINK_LABEL in header
+    # The clarification must precede the nav link, not replace it.
+    assert header.index(_RISK_REFERENCE_CLARIFICATION_HTML) < header.index(
+        _RISK_REFERENCE_NAV_LINK_HTML
+    )
+
+
+def test_render_detail_header_omits_risk_intelligence_nav_link_when_no_risk_reference():
+    """The nav link is tied to risk_reference existing, identically to the
+    existing clarification note it accompanies -- an Evidence-only decision
+    must not carry either."""
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(
+            decision=view, evidence_reference="evidence-001", risk_reference=None,
+        )
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    header = ui._render_detail("dec-001")[0]
+
+    assert _RISK_REFERENCE_NAV_LINK_CLASS not in header
+    assert _RISK_REFERENCE_NAV_LINK_LABEL not in header
+
+
+def test_risk_reference_nav_link_script_is_present_in_built_layout():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    assert _RISK_REFERENCE_NAV_LINK_JS in demo.head
+
+
+def test_risk_reference_nav_link_script_targets_the_documented_dom_contract():
+    """DC-01: the bridge must forward to the real outer "Risk Intelligence"
+    tab button via the same findRealTab()/click() pattern bootstrap.py's
+    _INNER_NAV_LINK_JS already uses, scoped only to this one element's own
+    class -- never broadening bootstrap.py's six-item, shell-nav-scoped
+    bridge. Asserted here as a contract check so a future edit can't
+    silently drop the selector or target label without failing a test."""
+    assert _RISK_REFERENCE_NAV_LINK_CLASS in _RISK_REFERENCE_NAV_LINK_JS
+    assert 'querySelectorAll(\'button[role="tab"]\')' in _RISK_REFERENCE_NAV_LINK_JS
+    assert '"Risk Intelligence"' in _RISK_REFERENCE_NAV_LINK_JS
+    assert "tabButton.click()" in _RISK_REFERENCE_NAV_LINK_JS
+    # Must never reference or extend the six-screen shell-nav bridge.
+    assert "aara-shell-nav-list" not in _RISK_REFERENCE_NAV_LINK_JS
+    assert "EXPECTED_NAV_LISTS" not in _RISK_REFERENCE_NAV_LINK_JS
 
 
 def test_render_detail_header_escapes_raw_reference_values():

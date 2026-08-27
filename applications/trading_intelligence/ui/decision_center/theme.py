@@ -843,6 +843,25 @@ footer { display: none !important; }
   padding: var(--space-sm) var(--space-md);
 }
 
+/* DC-01 (UI navigation audit): the risk-reference navigation link
+   (gradio_view.py's _RISK_REFERENCE_NAV_LINK_HTML). Styled as a small,
+   clearly-clickable label -- navy text (the same link/action color
+   .aara-shell-nav-list .nav-item.active already uses), underlined so it
+   reads as a link even without hover, cursor:pointer for mouse affordance.
+   No new focus-visible rule needed: the generic
+   ".gradio-container [tabindex]:focus-visible" rule above already covers
+   this element via its own tabindex="0". */
+.aara-risk-reference-nav {
+  padding: var(--space-xs) 0 var(--space-xs) var(--space-sm);
+}
+.aara-risk-reference-nav-link {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-navy-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* Keyboard focus visibility -- buttons and any interactive element get an
    obvious, consistent focus ring.
    P2 #2 fix: the Decision Journey's four stage links

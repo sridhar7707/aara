@@ -777,6 +777,105 @@ _RISK_REFERENCE_CLARIFICATION_HTML = (
     "</div>"
 )
 
+# DC-01 (UI navigation audit): a navigational element pointing to the Risk
+# Intelligence screen, rendered alongside -- never in place of --
+# _RISK_REFERENCE_CLARIFICATION_HTML above, which stays byte-for-byte
+# unchanged as its own constant. Navigation only: never resolves,
+# interprets, or validates risk_reference, and never filters or scrolls
+# Risk Intelligence to this specific decision or a symbol -- Risk
+# Intelligence has no such per-decision concept to filter to (see
+# _RISK_CONTEXT_HTML above). Wired by its own independent, narrowly-scoped
+# JS bridge (_RISK_REFERENCE_NAV_LINK_JS below), not by extending
+# bootstrap.py's six-item _INNER_NAV_LINK_JS bridge, which is scoped
+# specifically to .aara-shell-nav-list .nav-item elements this is not one
+# of. Performs only the same generic outer-tab switch every cross-screen
+# navigation in this app already uses (the identical findRealTab()/
+# .click() pattern _INNER_NAV_LINK_JS itself uses), so a click here is
+# indistinguishable in effect from clicking the outer "Risk Intelligence"
+# tab directly. role="button" (not role="link"): there is no real href --
+# this is a JS-driven action, and Space-key activation (which role="link"
+# does not receive per native <a> semantics) should work the same as
+# Enter, matching every other actionable element in this file.
+_RISK_REFERENCE_NAV_LINK_CLASS = "aara-risk-reference-nav-link"
+_RISK_REFERENCE_NAV_LINK_LABEL = "View Risk Intelligence"
+_RISK_REFERENCE_NAV_LINK_HTML = (
+    '<div class="aara-risk-reference-nav">'
+    f'<span class="{_RISK_REFERENCE_NAV_LINK_CLASS}" role="button" tabindex="0">'
+    f'{html.escape(_RISK_REFERENCE_NAV_LINK_LABEL)}'
+    "</span>"
+    "</div>"
+)
+
+# DC-01 (UI navigation audit): sixth, independent JS bridge (distinct
+# concern from keyboard activation, live-region announcement, selection
+# ARIA sync, grid accessible name, and Decision Journey focus, all defined
+# earlier in this file) -- wires the element above to the real outer
+# "Risk Intelligence" tab button. Deliberately NOT merged into
+# bootstrap.py's _INNER_NAV_LINK_JS: that bridge's own querySelectorAll is
+# scoped to ".aara-shell-nav-list .nav-item" specifically, which this
+# element is not (it lives inside the decision-detail panel's
+# risk-reference field, not the shell nav row), and its LABELS list is
+# the six frozen screen names -- extending either for one, single-purpose
+# link would broaden a shared, six-screen mechanism for a one-off,
+# Decision-Center-only need. findRealTab()/click() below is the identical
+# pattern _INNER_NAV_LINK_JS already uses for the same real tab buttons --
+# reused for consistency, not shared code, since the two bridges have
+# different triggering elements and lifecycles.
+#
+# One-shot bounded poll, not a MutationObserver: the link is Gradio's own
+# stable per-component root content (only decision-dependent in whether
+# it exists at all -- see _raw_reference_fields_html -- not in identity
+# once rendered for a given risk_reference-bearing decision), so wiring
+# it once when found is sufficient, matching _ACCESSIBLE_NAME_SETUP_JS's
+# and _JOURNEY_TARGET_FOCUS_SETUP_JS's own precedent rather than
+# _SELECTION_ARIA_SYNC_JS's ongoing-resync one.
+_RISK_REFERENCE_NAV_LINK_JS = f"""
+<script>
+(function () {{
+  var LINK_CLASS = "{_RISK_REFERENCE_NAV_LINK_CLASS}";
+  var TARGET_TAB_LABEL = "Risk Intelligence";
+
+  function findRealTab() {{
+    return Array.from(document.querySelectorAll('button[role="tab"]')).find(
+      function (btn) {{ return btn.textContent.trim() === TARGET_TAB_LABEL; }}
+    );
+  }}
+
+  function activateRiskIntelligenceTab() {{
+    var tabButton = findRealTab();
+    if (tabButton) {{
+      tabButton.click();
+    }}
+  }}
+
+  function wireLink(el) {{
+    el.addEventListener("click", activateRiskIntelligenceTab);
+    el.addEventListener("keydown", function (event) {{
+      if (event.key === "Enter" || event.key === " ") {{
+        event.preventDefault();
+        activateRiskIntelligenceTab();
+      }}
+    }});
+  }}
+
+  var attempts = 0;
+  var maxAttempts = 100;
+  var intervalId = setInterval(function () {{
+    attempts += 1;
+    var el = document.querySelector("." + LINK_CLASS);
+    if (el) {{
+      wireLink(el);
+      clearInterval(intervalId);
+      return;
+    }}
+    if (attempts >= maxAttempts) {{
+      clearInterval(intervalId);
+    }}
+  }}, 50);
+}})();
+</script>
+"""
+
 # P0 illustrative-data disclosure (UI-completion Product/UX audit): static,
 # decision-independent, persistent -- built once at build() time like
 # _SHELL_NAV_HTML, never wired into detail_outputs/_DetailValues/any
@@ -878,7 +977,7 @@ class DecisionCenterUI:
             head=(
                 _KEYBOARD_SELECTION_BRIDGE_JS + _LIVE_REGION_SETUP_JS
                 + _SELECTION_ARIA_SYNC_JS + _ACCESSIBLE_NAME_SETUP_JS
-                + _JOURNEY_TARGET_FOCUS_SETUP_JS
+                + _JOURNEY_TARGET_FOCUS_SETUP_JS + _RISK_REFERENCE_NAV_LINK_JS
             ),
         ) as demo:
             gr.HTML(_SHELL_IDENTITY_HTML, elem_classes=["aara-shell-header"])
@@ -1633,8 +1732,11 @@ class DecisionCenterUI:
         field is rendered for a None value. When risk_reference is present,
         appends _RISK_REFERENCE_CLARIFICATION_HTML (P1, Decision Center UI
         audit) so the raw pointer can't be mistaken for resolved Risk
-        Intelligence -- Evidence Reference is unaffected, since only the
-        Risk field carries that ambiguity."""
+        Intelligence, followed by _RISK_REFERENCE_NAV_LINK_HTML (DC-01) --
+        a navigational element to the Risk Intelligence screen, not a
+        resolution of the pointer itself. Evidence Reference is unaffected
+        by either addition, since only the Risk field carries that
+        ambiguity."""
         fields = [
             (label, value)
             for label, value in (
@@ -1653,7 +1755,8 @@ class DecisionCenterUI:
             for label, value in fields
         )
         clarification_html = (
-            _RISK_REFERENCE_CLARIFICATION_HTML if risk_reference is not None else ""
+            _RISK_REFERENCE_CLARIFICATION_HTML + _RISK_REFERENCE_NAV_LINK_HTML
+            if risk_reference is not None else ""
         )
         return f'<div class="aara-record-card-fields">{field_html}</div>{clarification_html}'
 
