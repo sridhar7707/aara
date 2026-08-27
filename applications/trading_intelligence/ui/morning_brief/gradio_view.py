@@ -9,12 +9,15 @@ bootstrap.py as the 4th Trading Intelligence tab.
 
 Unlike ui/portfolio_intelligence/gradio_view.py and
 ui/risk_intelligence/gradio_view.py, this screen renders no "Illustrative
-Data" disclosure banner -- there is no illustrative data here to disclose.
-Every section instead shows its own honest, fixed unavailable message, per
-docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md Section 2's
-"Required information" for Morning Brief and Section 7's "evidence over
-emotion" UX principle: mark unbuilt functionality as unavailable rather
-than invent content to fill it.
+Data" disclosure banner -- there is no illustrative data here to disclose,
+real or otherwise: a section either shows its own real, adapter-sourced
+available_summary (see bootstrap.py's _build_morning_brief_ui()) or its
+own honest, fixed unavailable message, per docs/products/AARA_TRADING_
+INTELLIGENCE_UI_SPECIFICATION.md Section 2's "Required information" for
+Morning Brief and Section 7's "evidence over emotion" UX principle: mark
+unbuilt functionality as unavailable rather than invent content to fill
+it. No new theme.py class backs available_summary's markup -- this unit
+does not touch theme.py; a follow-on visual-polish pass can style it.
 
 AARA shell consistency pass: renders the same AARA logo header + inter-
 screen nav Decision Center/Portfolio Intelligence/Risk Intelligence show,
@@ -56,7 +59,10 @@ class MorningBriefUI:
 
             for section in self._screen.sections:
                 gr.HTML(self._format_section_label_html(section))
-                gr.HTML(self._format_unavailable_message_html(section))
+                if section.is_available:
+                    gr.HTML(self._format_available_summary_html(section))
+                else:
+                    gr.HTML(self._format_unavailable_message_html(section))
 
         return demo
 
@@ -69,5 +75,13 @@ class MorningBriefUI:
         return (
             '<div class="mb-unavailable-message">'
             f'{html.escape(section.unavailable_message)}'
+            "</div>"
+        )
+
+    @staticmethod
+    def _format_available_summary_html(section: MorningBriefSection) -> str:
+        return (
+            '<div class="mb-available-summary">'
+            f'{html.escape(section.available_summary)}'
             "</div>"
         )

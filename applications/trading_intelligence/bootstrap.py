@@ -61,6 +61,7 @@ from applications.trading_intelligence.adapters.legacy_position_source import (
     LegacyPositionSource,
     OpenPosition,
 )
+from applications.trading_intelligence.adapters.legacy_regime_source import LegacyRegimeSource
 from applications.trading_intelligence.adapters.live_price_source import LivePriceSource
 from applications.trading_intelligence.adapters.sentinel_audit_source import SentinelAuditSource
 from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
@@ -85,6 +86,9 @@ from applications.trading_intelligence.services.decision_query_service import De
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
 from applications.trading_intelligence.ui.decision_center.gradio_view import DecisionCenterUI
 from applications.trading_intelligence.ui.morning_brief.gradio_view import MorningBriefUI
+from applications.trading_intelligence.ui.morning_brief.mock_data import (
+    build_mock_screen as build_mock_morning_brief_screen,
+)
 from applications.trading_intelligence.ui.performance_learning.gradio_view import (
     PerformanceLearningUI,
 )
@@ -636,6 +640,48 @@ _INNER_NAV_LINK_JS = """
 """
 
 
+def _build_morning_brief_ui() -> MorningBriefUI:
+    """Real Portfolio Snapshot (reusing the exact same, unmodified
+    LegacyCapitalSource already wired for Portfolio Intelligence -- no
+    second capital adapter) and real Market Mood/Regime (via
+    LegacyRegimeSource) when their respective legacy trades.db data is
+    available. Candidate Screening Summary and Overnight Holdings News
+    stay on their existing unavailable path unconditionally -- neither
+    has an authorized real data source in this unit. Each of the two
+    real-eligible sections falls back to its own existing unavailable
+    message independently when its adapter finds no real data -- expected
+    in the deployed HF Space today, which has no mechanism yet to obtain
+    trades.db."""
+    illustrative_screen = build_mock_morning_brief_screen()
+    portfolio_snapshot = illustrative_screen.portfolio_snapshot
+    market_mood_regime = illustrative_screen.market_mood_regime
+
+    real_capital = LegacyCapitalSource().get_capital_summary()
+    if real_capital is not None:
+        portfolio_snapshot = replace(
+            portfolio_snapshot,
+            available_summary=(
+                f"Total value ${real_capital.total_value:,.2f} "
+                f"(${real_capital.available_cash:,.2f} cash, "
+                f"${real_capital.invested_amount:,.2f} invested)."
+            ),
+        )
+
+    real_regime = LegacyRegimeSource().get_latest_regime()
+    if real_regime is not None:
+        market_mood_regime = replace(
+            market_mood_regime,
+            available_summary=f"Current market regime: {real_regime}.",
+        )
+
+    screen = replace(
+        illustrative_screen,
+        portfolio_snapshot=portfolio_snapshot,
+        market_mood_regime=market_mood_regime,
+    )
+    return MorningBriefUI(screen=screen)
+
+
 def _build_portfolio_holdings(
     positions: Tuple[OpenPosition, ...], prices: Dict[str, float],
 ) -> Tuple[PortfolioHolding, ...]:
@@ -724,7 +770,7 @@ def build_trading_intelligence_app() -> gr.Blocks:
     Learning, and Settings -- each Blocks object unmodified from its own
     build(). This is the complete, frozen six-screen set per
     docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md Section 1."""
-    morning_brief_blocks = MorningBriefUI().build()
+    morning_brief_blocks = _build_morning_brief_ui().build()
     decision_blocks = build_application().build()
     portfolio_blocks = _build_portfolio_intelligence_ui().build()
     risk_blocks = RiskIntelligenceUI().build()

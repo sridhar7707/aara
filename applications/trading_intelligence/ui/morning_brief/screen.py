@@ -2,17 +2,17 @@
 
 Framework-independent dataclasses (no gradio import), mirroring
 ui/portfolio_intelligence/screen.py's and ui/risk_intelligence/screen.py's
-pattern. Unlike those two siblings, this package never carries a
-"populated" branch: per docs/products/AARA_TRADING_INTELLIGENCE_UI_
-SPECIFICATION.md Section 2, Morning Brief's four required sections --
-Portfolio Snapshot, Market Mood/Regime, Candidate Screening Summary,
-Overnight Holdings News -- have no Sentinel-side contract, wired or
-proposed, and no producer of any kind exists anywhere in this application
-for any of them. Inventing illustrative numbers here (the way Portfolio/
-Risk Intelligence do for their own, differently-scoped gaps) would
-misrepresent an unbuilt data path as a populated one. Every section is
-therefore always unavailable, with a fixed, honest message -- there is no
-code path in this package that could ever report one as available.
+pattern. Per docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md
+Section 2, Morning Brief's four required sections -- Portfolio Snapshot,
+Market Mood/Regime, Candidate Screening Summary, Overnight Holdings News --
+have no Sentinel-side contract, wired or proposed, for any of them.
+Inventing illustrative numbers here (the way Portfolio/Risk Intelligence
+do for their own, differently-scoped gaps) would misrepresent an unbuilt
+data path as a populated one -- `available_summary` therefore only ever
+carries a real, adapter-sourced value (see bootstrap.py's
+_build_morning_brief_ui()), never a fabricated one. A section with no
+real source stays exactly as it always has: an honest, fixed unavailable
+message.
 
 Section titles are exact string literals matching the frozen IA's own
 "Required information" wording verbatim -- in particular
@@ -21,7 +21,7 @@ activity, DecisionProjection, or MorningBriefQuery-derived content (see
 this package's mock_data.py docstring).
 """
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 PORTFOLIO_SNAPSHOT_TITLE = "Portfolio Snapshot"
 MARKET_MOOD_REGIME_TITLE = "Market Mood / Regime"
@@ -33,6 +33,15 @@ OVERNIGHT_HOLDINGS_NEWS_TITLE = "Overnight Holdings News"
 class MorningBriefSection:
     title: str
     unavailable_message: str
+    available_summary: Optional[str] = None
+
+    @property
+    def is_available(self) -> bool:
+        """True only once a real, adapter-sourced summary has been
+        supplied (see bootstrap.py) -- default None means unavailable,
+        matching every other screen's own is_available convention
+        (SettingsArea, PortfolioScreen's is_empty)."""
+        return self.available_summary is not None
 
 
 @dataclass(frozen=True)
@@ -54,12 +63,12 @@ class MorningBriefScreen:
 
     @property
     def is_empty(self) -> bool:
-        """Always True in this shell -- no section has a wired data source
-        yet. Kept as an explicit property (rather than a bare constant)
-        to match DecisionListArea/PortfolioScreen/RiskScreen's own
-        is_empty convention, so this screen's emptiness is queried the
-        same way every sibling screen's is."""
-        return True
+        """True only when every section is unavailable. Kept as an
+        explicit property (rather than a bare constant) to match
+        DecisionListArea/PortfolioScreen/RiskScreen's own is_empty
+        convention, so this screen's emptiness is queried the same way
+        every sibling screen's is."""
+        return not any(section.is_available for section in self.sections)
 
     @property
     def empty_state_message(self) -> str:

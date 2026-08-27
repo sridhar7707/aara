@@ -50,12 +50,49 @@ def test_sections_property_returns_all_four_in_frozen_ia_order():
     ]
 
 
-def test_screen_is_always_empty():
-    """This shell has no code path that could ever report a section as
-    available -- is_empty is always True, unconditionally."""
+def test_screen_is_empty_when_every_section_is_unavailable():
+    """The default/mock screen -- no section carries available_summary --
+    stays empty, matching this shell's original all-unavailable shape."""
     screen = _make_screen()
 
     assert screen.is_empty is True
+
+
+def test_screen_is_not_empty_when_at_least_one_section_is_available():
+    screen = _make_screen(
+        portfolio_snapshot=MorningBriefSection(
+            title=PORTFOLIO_SNAPSHOT_TITLE, unavailable_message="unavailable-1",
+            available_summary="Total value $10,000.00.",
+        ),
+    )
+
+    assert screen.is_empty is False
+
+
+def test_screen_is_empty_again_once_the_only_available_section_reverts():
+    available_screen = _make_screen(
+        market_mood_regime=MorningBriefSection(
+            title=MARKET_MOOD_REGIME_TITLE, unavailable_message="unavailable-2",
+            available_summary="Current market regime: TRENDING_UP.",
+        ),
+    )
+    reverted_screen = _make_screen()
+
+    assert available_screen.is_empty is False
+    assert reverted_screen.is_empty is True
+
+
+def test_section_is_available_only_when_available_summary_is_set():
+    unavailable_section = MorningBriefSection(
+        title=PORTFOLIO_SNAPSHOT_TITLE, unavailable_message="unavailable-1",
+    )
+    available_section = MorningBriefSection(
+        title=PORTFOLIO_SNAPSHOT_TITLE, unavailable_message="unavailable-1",
+        available_summary="Total value $10,000.00.",
+    )
+
+    assert unavailable_section.is_available is False
+    assert available_section.is_available is True
 
 
 def test_empty_state_message_is_a_fixed_honest_string():
