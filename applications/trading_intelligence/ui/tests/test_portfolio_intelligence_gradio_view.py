@@ -1,6 +1,8 @@
 import gradio as gr
 
 from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
+    _ALPACA_PAPER_BADGE_TEXT,
+    _ALPACA_UNAVAILABLE_MESSAGE,
     _ILLUSTRATIVE_DATA_BODY,
     _ILLUSTRATIVE_DATA_HTML,
     _ILLUSTRATIVE_DATA_TITLE,
@@ -9,6 +11,8 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
     PortfolioIntelligenceUI,
 )
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
+    AlpacaAccountSnapshot,
+    AlpacaPosition,
     CapitalSummary,
     PortfolioHolding,
     PortfolioScreen,
@@ -26,6 +30,12 @@ def _make_capital(**overrides):
     )
     defaults.update(overrides)
     return CapitalSummary(**defaults)
+
+
+def _make_alpaca_account(**overrides):
+    defaults = dict(equity=100018.33, cash=59869.06, buying_power=351894.19, portfolio_value=100018.33)
+    defaults.update(overrides)
+    return AlpacaAccountSnapshot(**defaults)
 
 
 def test_ui_can_be_constructed_with_default_mock_screen():
@@ -338,3 +348,93 @@ def test_real_holdings_can_be_empty_with_the_real_data_disclosure():
     assert dataframes == []
     assert _REAL_DATA_HTML in html_values
     assert any("No holdings recorded yet." in value for value in html_values)
+
+
+# --- Alpaca Paper Account (alpaca_paper_source) pass -----------------
+
+
+def test_alpaca_section_shows_unavailable_message_by_default():
+    ui = PortfolioIntelligenceUI(screen=PortfolioScreen(capital=_make_capital()))
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    assert any(_ALPACA_UNAVAILABLE_MESSAGE in value for value in html_values)
+
+
+def test_alpaca_badge_is_always_present_regardless_of_availability():
+    """Phase 4 safety requirement: the 'ALPACA PAPER' label must always be
+    visible in the section header, whether or not real data is available,
+    so the section can never be mistaken for anything else."""
+    ui = PortfolioIntelligenceUI(screen=PortfolioScreen(capital=_make_capital()))
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    assert any(_ALPACA_PAPER_BADGE_TEXT in value for value in html_values)
+
+
+def test_alpaca_account_and_positions_render_when_available():
+    account = _make_alpaca_account()
+    position = AlpacaPosition(
+        symbol="AAPL", quantity=19.111355, avg_entry_price=315.012151, current_price=310.21,
+        market_value=5928.533435, unrealized_pl=-91.775612, unrealized_plpc=-0.01524, side="long",
+    )
+    screen = PortfolioScreen(
+        capital=_make_capital(), alpaca_account=account, alpaca_positions=(position,),
+    )
+    ui = PortfolioIntelligenceUI(screen=screen)
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    combined = "\n".join(html_values)
+    assert "$100,018.33" in combined  # equity
+    assert "$59,869.06" in combined  # cash
+    assert "$351,894.19" in combined  # buying power
+    assert not any(_ALPACA_UNAVAILABLE_MESSAGE in v for v in html_values)
+
+    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
+    alpaca_tables = [d for d in dataframes if "pi-alpaca-positions-table" in d.elem_classes]
+    assert len(alpaca_tables) == 1
+    assert alpaca_tables[0].value["data"] == [
+        ["AAPL", "19.1114", "$315.01", "$310.21", "$5,928.53", "$-91.78", "-1.52%", "long"],
+    ]
+
+
+def test_alpaca_section_shows_empty_message_when_connected_with_zero_positions():
+    """A real, connected Alpaca account with zero open positions is a
+    legitimate real state -- must render the Alpaca-specific empty
+    message, never the unavailable message, and never a Holdings-style
+    table."""
+    screen = PortfolioScreen(
+        capital=_make_capital(), alpaca_account=_make_alpaca_account(), alpaca_positions=(),
+    )
+    ui = PortfolioIntelligenceUI(screen=screen)
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
+    alpaca_tables = [d for d in dataframes if "pi-alpaca-positions-table" in d.elem_classes]
+    assert alpaca_tables == []
+    assert any("Alpaca Paper account has no open positions." in v for v in html_values)
+    assert not any(_ALPACA_UNAVAILABLE_MESSAGE in v for v in html_values)
+
+
+def test_alpaca_section_is_independent_of_capital_and_holdings_reality():
+    """The Alpaca section's availability must never be coupled to
+    capital_is_real/holdings_is_real -- it can be real while Capital
+    Summary/Holdings stay fully illustrative, and the illustrative
+    disclosure must still read exactly as it always has."""
+    screen = PortfolioScreen(
+        capital=_make_capital(), alpaca_account=_make_alpaca_account(), alpaca_positions=(),
+    )
+    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=False, holdings_is_real=False)
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    assert _ILLUSTRATIVE_DATA_HTML in html_values
+    assert any(_ALPACA_PAPER_BADGE_TEXT in v for v in html_values)
+    assert any("Alpaca Paper account has no open positions." in v for v in html_values)

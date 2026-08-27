@@ -8,9 +8,20 @@ and total_value/tradeable_cash reuse its exact definitions -- not imported
 (bot/ is ADR-002-protected and out of scope for this package), just the
 same real names rather than inventing new ones, per the "Feature Discovery
 vs. Feature Invention" principle applied elsewhere in this product's docs.
+
+AlpacaAccountSnapshot/AlpacaPosition (2026-08-27 unit) are a deliberately
+SEPARATE concept from CapitalSummary/PortfolioHolding, not a replacement --
+CapitalSummary/PortfolioHolding reflect the bot's own internal bookkeeping
+(capital_pools/position_state, trades.db), while these reflect Alpaca's
+own broker-side paper account, the actual system of record for what the
+paper account holds. The two are expected to occasionally disagree (a
+real, observed divergence: as of this unit, Alpaca's paper account holds
+5 positions while position_state holds 6 -- BAC is absent from Alpaca).
+Rendered as its own clearly-labeled "ALPACA PAPER" section, never merged
+into or silently reconciled with Holdings.
 """
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -56,9 +67,31 @@ class CapitalSummary:
 
 
 @dataclass(frozen=True)
+class AlpacaPosition:
+    symbol: str
+    quantity: float
+    avg_entry_price: float
+    current_price: float
+    market_value: float
+    unrealized_pl: float
+    unrealized_plpc: float
+    side: str
+
+
+@dataclass(frozen=True)
+class AlpacaAccountSnapshot:
+    equity: float
+    cash: float
+    buying_power: float
+    portfolio_value: float
+
+
+@dataclass(frozen=True)
 class PortfolioScreen:
     capital: CapitalSummary
     holdings: Tuple[PortfolioHolding, ...] = field(default=())
+    alpaca_account: Optional[AlpacaAccountSnapshot] = None
+    alpaca_positions: Tuple[AlpacaPosition, ...] = field(default=())
 
     @property
     def is_empty(self) -> bool:
@@ -67,3 +100,17 @@ class PortfolioScreen:
     @property
     def empty_state_message(self) -> str:
         return "No holdings recorded yet."
+
+    @property
+    def alpaca_is_available(self) -> bool:
+        """True only once a real AlpacaAccountSnapshot has been supplied
+        (see bootstrap.py) -- default None means unavailable, matching
+        every other real/unavailable convention in this product.
+        alpaca_positions is meaningful only when this is True; an empty
+        tuple then means "connected, zero open positions" (a legitimate
+        real state), not "unavailable"."""
+        return self.alpaca_account is not None
+
+    @property
+    def alpaca_empty_state_message(self) -> str:
+        return "Alpaca Paper account has no open positions."

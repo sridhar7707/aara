@@ -1,0 +1,95 @@
+"""Tests for bootstrap._with_alpaca_paper_data -- attaching real Alpaca
+Paper account/positions to a PortfolioScreen independently of Capital
+Summary/Holdings' own real/illustrative state.
+"""
+from unittest.mock import patch
+
+from applications.trading_intelligence.bootstrap import _with_alpaca_paper_data
+from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import build_mock_screen
+from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
+    AlpacaAccountSnapshot,
+    AlpacaPosition,
+)
+
+_ACCOUNT = AlpacaAccountSnapshot(equity=100018.33, cash=59869.06, buying_power=351894.19, portfolio_value=100018.33)
+_POSITION = AlpacaPosition(
+    symbol="AAPL", quantity=19.11, avg_entry_price=315.01, current_price=310.21,
+    market_value=5928.53, unrealized_pl=-91.78, unrealized_plpc=-0.0152, side="long",
+)
+
+
+def test_attaches_account_and_positions_when_both_available():
+    screen = build_mock_screen()
+    with patch(
+        "applications.trading_intelligence.adapters.alpaca_paper_source.AlpacaPaperSource.get_account",
+        return_value=_ACCOUNT,
+    ), patch(
+        "applications.trading_intelligence.adapters.alpaca_paper_source.AlpacaPaperSource.get_positions",
+        return_value=(_POSITION,),
+    ):
+        result = _with_alpaca_paper_data(screen)
+
+    assert result.alpaca_account == _ACCOUNT
+    assert result.alpaca_positions == (_POSITION,)
+    assert result.alpaca_is_available is True
+
+
+def test_leaves_screen_unchanged_when_account_unavailable():
+    screen = build_mock_screen()
+    with patch(
+        "applications.trading_intelligence.adapters.alpaca_paper_source.AlpacaPaperSource.get_account",
+        return_value=None,
+    ):
+        result = _with_alpaca_paper_data(screen)
+
+    assert result == screen
+    assert result.alpaca_is_available is False
+
+
+def test_leaves_screen_unchanged_when_account_available_but_positions_are_not():
+    """All-or-nothing: an account snapshot without a matching positions
+    fetch must not be presented as a connected-but-empty account."""
+    screen = build_mock_screen()
+    with patch(
+        "applications.trading_intelligence.adapters.alpaca_paper_source.AlpacaPaperSource.get_account",
+        return_value=_ACCOUNT,
+    ), patch(
+        "applications.trading_intelligence.adapters.alpaca_paper_source.AlpacaPaperSource.get_positions",
+        return_value=None,
+    ):
+        result = _with_alpaca_paper_data(screen)
+
+    assert result == screen
+    assert result.alpaca_is_available is False
+
+
+def test_attaches_a_genuinely_empty_positions_tuple_when_account_has_no_positions():
+    screen = build_mock_screen()
+    with patch(
+        "applications.trading_intelligence.adapters.alpaca_paper_source.AlpacaPaperSource.get_account",
+        return_value=_ACCOUNT,
+    ), patch(
+        "applications.trading_intelligence.adapters.alpaca_paper_source.AlpacaPaperSource.get_positions",
+        return_value=(),
+    ):
+        result = _with_alpaca_paper_data(screen)
+
+    assert result.alpaca_is_available is True
+    assert result.alpaca_positions == ()
+
+
+def test_does_not_alter_the_screens_existing_capital_or_holdings():
+    """Alpaca attachment must never touch Capital Summary/Holdings --
+    the two are independent concepts, never merged."""
+    screen = build_mock_screen()
+    with patch(
+        "applications.trading_intelligence.adapters.alpaca_paper_source.AlpacaPaperSource.get_account",
+        return_value=_ACCOUNT,
+    ), patch(
+        "applications.trading_intelligence.adapters.alpaca_paper_source.AlpacaPaperSource.get_positions",
+        return_value=(_POSITION,),
+    ):
+        result = _with_alpaca_paper_data(screen)
+
+    assert result.capital == screen.capital
+    assert result.holdings == screen.holdings

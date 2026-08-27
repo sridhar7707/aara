@@ -56,6 +56,7 @@ from applications.platform.navigation.navigation_builder import NavigationBuilde
 from applications.platform.registry.product_registry import Product, ProductRegistry
 from applications.platform.workspaces.workspace import Workspace
 from applications.platform.workspaces.workspace_registry import WorkspaceRegistry
+from applications.trading_intelligence.adapters.alpaca_paper_source import AlpacaPaperSource
 from applications.trading_intelligence.adapters.legacy_candidate_screening_source import (
     CandidateScreeningSnapshot,
     LegacyCandidateScreeningSource,
@@ -102,7 +103,10 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
 from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import (
     build_mock_screen as build_mock_portfolio_screen,
 )
-from applications.trading_intelligence.ui.portfolio_intelligence.screen import PortfolioHolding
+from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
+    PortfolioHolding,
+    PortfolioScreen,
+)
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import RiskIntelligenceUI
 from applications.trading_intelligence.ui.settings.gradio_view import SettingsUI
 
@@ -743,6 +747,27 @@ def _build_portfolio_holdings(
     )
 
 
+def _with_alpaca_paper_data(screen: PortfolioScreen) -> PortfolioScreen:
+    """Attaches Alpaca's own Paper account/positions to `screen` when both
+    are available, leaving it unchanged (alpaca_account stays None --
+    unavailable) otherwise. Deliberately independent of every other
+    branch in _build_portfolio_intelligence_ui() below: Alpaca is a
+    completely separate broker-side source from capital_pools/
+    position_state, so its availability must never be gated by whether
+    the legacy capital/holdings adapters found data, and vice versa. All
+    or nothing, like every other adapter pairing in this product -- a
+    real account snapshot next to a failed positions fetch would imply a
+    connected-but-empty account when the true state is simply unknown."""
+    alpaca = AlpacaPaperSource()
+    real_account = alpaca.get_account()
+    if real_account is None:
+        return screen
+    real_positions = alpaca.get_positions()
+    if real_positions is None:
+        return screen
+    return replace(screen, alpaca_account=real_account, alpaca_positions=real_positions)
+
+
 def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
     """Real Capital Summary/Allocation when the legacy trades.db capital
     pool is available (see adapters/legacy_capital_source.py). Holdings
@@ -757,24 +782,36 @@ def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
     a partial/mixed Holdings table. Expected to stay on the illustrative
     path in the deployed HF Space today, which has no mechanism yet to
     obtain trades.db and may also lack outbound network access to the
-    price provider."""
+    price provider.
+
+    Alpaca Paper Account/Positions (2026-08-27 unit, via
+    adapters/alpaca_paper_source.py) are attached independently of the
+    above via _with_alpaca_paper_data() on every return path -- a second,
+    explicitly authorized live network dependency, entirely separate from
+    the legacy trades.db-based Capital Summary/Holdings this function
+    already builds. See that adapter's own docstring for the paper-only
+    safety guarantees."""
     real_capital = LegacyCapitalSource().get_capital_summary()
     if real_capital is None:
-        return PortfolioIntelligenceUI()
+        screen = _with_alpaca_paper_data(build_mock_portfolio_screen())
+        return PortfolioIntelligenceUI(screen=screen)
     illustrative_screen = build_mock_portfolio_screen()
     screen = replace(illustrative_screen, capital=real_capital)
 
     real_positions = LegacyPositionSource().get_open_positions()
     if real_positions is None:
+        screen = _with_alpaca_paper_data(screen)
         return PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
 
     symbols = tuple(position.symbol for position in real_positions)
     real_prices = LivePriceSource().get_current_prices(symbols)
     if real_prices is None:
+        screen = _with_alpaca_paper_data(screen)
         return PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
 
     real_holdings = _build_portfolio_holdings(real_positions, real_prices)
     screen = replace(screen, holdings=real_holdings)
+    screen = _with_alpaca_paper_data(screen)
     return PortfolioIntelligenceUI(screen=screen, capital_is_real=True, holdings_is_real=True)
 
 

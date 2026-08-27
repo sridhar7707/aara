@@ -10,6 +10,17 @@ adapters.live_price_source.LivePriceSource when all three are available.
 No controller, no service, no sentinel_engine/bot import. Wired into
 main.py/bootstrap.py as the 2nd Trading Intelligence tab.
 
+Alpaca Paper Account section (2026-08-27 unit): a separate, always
+distinctly-labeled "ALPACA PAPER" block rendered below Holdings, sourced
+from adapters.alpaca_paper_source.AlpacaPaperSource -- Alpaca's own
+broker-side paper account, not the bot's internal capital_pools/
+position_state bookkeeping Capital Summary/Holdings reflect. The two are
+never merged: this section has its own independent available/unavailable
+state (screen.alpaca_is_available), never influenced by capital_is_real/
+holdings_is_real, and is never counted toward the "Real Data"/partial/
+illustrative disclosure above, which describes Capital Summary/Allocation/
+Holdings only.
+
 AARA shell consistency pass: renders the same AARA logo header + inter-screen
 nav Decision Center shows, via `ui/shell.py` (a sibling of all three screen
 packages, not `ui/decision_center/` -- see that module's own docstring for
@@ -25,6 +36,8 @@ import gradio as gr
 
 from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import build_mock_screen
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
+    AlpacaAccountSnapshot,
+    AlpacaPosition,
     CapitalSummary,
     PortfolioHolding,
     PortfolioScreen,
@@ -41,6 +54,24 @@ _gr_major = int(gr.__version__.split(".")[0])
 _DATAFRAME_HEIGHT_KWARG = "height" if _gr_major < 5 else "max_height"
 
 _HOLDINGS_HEADERS = ["Symbol", "Quantity", "Price", "Market Value", "Weight %"]
+
+_ALPACA_POSITIONS_HEADERS = [
+    "Symbol", "Quantity", "Avg Entry", "Current Price", "Market Value",
+    "Unrealized P/L", "Unrealized P/L %", "Side",
+]
+
+# Unmistakable environment identifier (Phase 4 safety requirement) --
+# always rendered verbatim wherever Alpaca-sourced data appears, so Paper
+# data can never be mistaken for live brokerage data. This section only
+# ever reads Alpaca's Paper endpoint (see adapters/alpaca_paper_source.py's
+# own hard-coded paper=True) -- this label is a UI-visibility guarantee on
+# top of that, not the safety mechanism itself.
+_ALPACA_PAPER_BADGE_TEXT = "ALPACA PAPER"
+
+_ALPACA_UNAVAILABLE_MESSAGE = (
+    "Alpaca Paper account data is not available -- credentials or "
+    "network access are not configured for this environment."
+)
 
 _ILLUSTRATIVE_DATA_TITLE = "Illustrative Data"
 _ILLUSTRATIVE_DATA_BODY = (
@@ -152,6 +183,31 @@ class PortfolioIntelligenceUI:
                     **{_DATAFRAME_HEIGHT_KWARG: 320},
                 )
 
+            gr.HTML(
+                f'<div class="pi-section-label">Alpaca Paper Account '
+                f'<span class="pi-alpaca-badge">{html.escape(_ALPACA_PAPER_BADGE_TEXT)}</span></div>'
+            )
+            if not self._screen.alpaca_is_available:
+                gr.HTML(f'<div class="pi-alpaca-unavailable">{html.escape(_ALPACA_UNAVAILABLE_MESSAGE)}</div>')
+            else:
+                gr.HTML(self._format_alpaca_account_html(self._screen.alpaca_account))
+                if len(self._screen.alpaca_positions) == 0:
+                    gr.HTML(
+                        f'<div class="pi-empty-message">'
+                        f'{html.escape(self._screen.alpaca_empty_state_message)}</div>'
+                    )
+                else:
+                    gr.Dataframe(
+                        headers=_ALPACA_POSITIONS_HEADERS,
+                        value=self._format_alpaca_positions_rows(self._screen.alpaca_positions),
+                        datatype=["str"] * len(_ALPACA_POSITIONS_HEADERS),
+                        interactive=False,
+                        label="Alpaca Paper Positions",
+                        show_label=False,
+                        elem_classes=["pi-alpaca-positions-table"],
+                        **{_DATAFRAME_HEIGHT_KWARG: 320},
+                    )
+
         return demo
 
     def _format_disclosure_html(self) -> str:
@@ -212,3 +268,36 @@ class PortfolioIntelligenceUI:
     @staticmethod
     def _format_empty_message_html(screen: PortfolioScreen) -> str:
         return f'<div class="pi-empty-message">{html.escape(screen.empty_state_message)}</div>'
+
+    @staticmethod
+    def _format_alpaca_account_html(account: AlpacaAccountSnapshot) -> str:
+        fields = [
+            ("Equity", account.equity),
+            ("Cash", account.cash),
+            ("Buying Power", account.buying_power),
+            ("Portfolio Value", account.portfolio_value),
+        ]
+        metrics_html = "".join(
+            '<div class="pi-metric">'
+            f'<span class="pi-metric-label">{html.escape(label)}</span>'
+            f'<span class="pi-metric-value">${value:,.2f}</span>'
+            "</div>"
+            for label, value in fields
+        )
+        return f'<div class="pi-capital-summary">{metrics_html}</div>'
+
+    @staticmethod
+    def _format_alpaca_positions_rows(positions: Tuple[AlpacaPosition, ...]) -> List[List[str]]:
+        return [
+            [
+                position.symbol,
+                f"{position.quantity:g}",
+                f"${position.avg_entry_price:,.2f}",
+                f"${position.current_price:,.2f}",
+                f"${position.market_value:,.2f}",
+                f"${position.unrealized_pl:,.2f}",
+                f"{position.unrealized_plpc * 100:.2f}%",
+                position.side,
+            ]
+            for position in positions
+        ]
