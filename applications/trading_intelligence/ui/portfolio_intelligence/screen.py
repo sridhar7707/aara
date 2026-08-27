@@ -21,6 +21,7 @@ Rendered as its own clearly-labeled "ALPACA PAPER" section, never merged
 into or silently reconciled with Holdings.
 """
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional, Tuple
 
 
@@ -87,11 +88,49 @@ class AlpacaAccountSnapshot:
 
 
 @dataclass(frozen=True)
+class AlpacaOrder:
+    """One row of Alpaca's own broker-side Paper order history (2026-08-27
+    unit). A pure observation record: `side`/`status` are the broker's own
+    verbatim strings, `order_id` is retained only for dedupe/stable
+    ordering and is never presented as a Decision identifier, and no
+    client_order_id/order_class/legs/strategy metadata is carried. Working
+    (still-live) orders are flagged via `is_working`; the raw `status`
+    string is preserved unchanged regardless."""
+    order_id: str
+    symbol: str
+    side: str
+    order_type: str
+    quantity: str
+    filled_quantity: str
+    status: str
+    submitted_at: datetime
+    filled_at: Optional[datetime]
+    limit_price: str
+    is_working: bool
+
+
+@dataclass(frozen=True)
+class AlpacaOrdersSnapshot:
+    """A successful, real read of Alpaca Paper recent orders. An empty
+    `orders` tuple is a legitimate real result ("connected, no matching
+    recent orders"), distinct from the adapter returning None
+    (unavailable). `truncated` is True when either underlying API call hit
+    its defensive per-call cap, so the UI can say so explicitly."""
+    orders: Tuple[AlpacaOrder, ...] = ()
+    truncated: bool = False
+
+    @property
+    def is_empty(self) -> bool:
+        return len(self.orders) == 0
+
+
+@dataclass(frozen=True)
 class PortfolioScreen:
     capital: CapitalSummary
     holdings: Tuple[PortfolioHolding, ...] = field(default=())
     alpaca_account: Optional[AlpacaAccountSnapshot] = None
     alpaca_positions: Tuple[AlpacaPosition, ...] = field(default=())
+    alpaca_orders: Optional[AlpacaOrdersSnapshot] = None
 
     @property
     def is_empty(self) -> bool:
@@ -114,3 +153,15 @@ class PortfolioScreen:
     @property
     def alpaca_empty_state_message(self) -> str:
         return "Alpaca Paper account has no open positions."
+
+    @property
+    def alpaca_orders_available(self) -> bool:
+        """True only once a real AlpacaOrdersSnapshot has been supplied
+        (see bootstrap.py) -- default None means unavailable. Fully
+        independent of alpaca_is_available: the recent-orders channel can
+        be available while the account snapshot is not, and vice versa."""
+        return self.alpaca_orders is not None
+
+    @property
+    def alpaca_orders_empty_state_message(self) -> str:
+        return "Alpaca Paper account has no recent orders."

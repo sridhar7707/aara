@@ -1,6 +1,11 @@
+from datetime import datetime, timezone
+
 import gradio as gr
 
 from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
+    _ALPACA_ORDERS_TRUNCATION_NOTE,
+    _ALPACA_ORDERS_UNAVAILABLE_MESSAGE,
+    _ALPACA_ORDERS_WORKING_MARKER,
     _ALPACA_PAPER_BADGE_TEXT,
     _ALPACA_UNAVAILABLE_MESSAGE,
     _ILLUSTRATIVE_DATA_BODY,
@@ -12,6 +17,8 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
 )
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     AlpacaAccountSnapshot,
+    AlpacaOrder,
+    AlpacaOrdersSnapshot,
     AlpacaPosition,
     CapitalSummary,
     PortfolioHolding,
@@ -438,3 +445,170 @@ def test_alpaca_section_is_independent_of_capital_and_holdings_reality():
     assert _ILLUSTRATIVE_DATA_HTML in html_values
     assert any(_ALPACA_PAPER_BADGE_TEXT in v for v in html_values)
     assert any("Alpaca Paper account has no open positions." in v for v in html_values)
+
+
+# --- Alpaca Paper Recent Orders (alpaca_paper_orders_source) pass -----
+
+
+def _make_order(**overrides):
+    defaults = dict(
+        order_id="ord-abc-123",
+        symbol="AAPL",
+        side="buy",
+        order_type="limit",
+        quantity="10",
+        filled_quantity="4",
+        status="partially_filled",
+        submitted_at=datetime(2026, 8, 27, 19, 30, tzinfo=timezone.utc),
+        filled_at=None,
+        limit_price="321.50",
+        is_working=True,
+    )
+    defaults.update(overrides)
+    return AlpacaOrder(**defaults)
+
+
+def _orders_dataframe(demo):
+    return [
+        block
+        for block in demo.blocks.values()
+        if isinstance(block, gr.Dataframe) and "pi-alpaca-orders-table" in (block.elem_classes or [])
+    ]
+
+
+def test_orders_section_shows_unavailable_message_by_default():
+    ui = PortfolioIntelligenceUI(screen=PortfolioScreen(capital=_make_capital()))
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    assert any(_ALPACA_ORDERS_UNAVAILABLE_MESSAGE in v for v in html_values)
+    assert _orders_dataframe(demo) == []
+
+
+def test_orders_section_header_always_carries_the_alpaca_paper_badge():
+    ui = PortfolioIntelligenceUI(screen=PortfolioScreen(capital=_make_capital()))
+
+    demo = ui.build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "Recent Orders" in combined
+    # the badge span appears for both Alpaca sub-sections
+    assert combined.count(f">{_ALPACA_PAPER_BADGE_TEXT}<") >= 2
+
+
+def test_orders_section_shows_empty_message_when_connected_with_zero_orders():
+    screen = PortfolioScreen(
+        capital=_make_capital(), alpaca_orders=AlpacaOrdersSnapshot(orders=(), truncated=False),
+    )
+    ui = PortfolioIntelligenceUI(screen=screen)
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    assert any("Alpaca Paper account has no recent orders." in v for v in html_values)
+    assert not any(_ALPACA_ORDERS_UNAVAILABLE_MESSAGE in v for v in html_values)
+    assert _orders_dataframe(demo) == []
+
+
+def test_orders_render_in_a_dataframe_with_verbatim_side_and_status():
+    order = _make_order(side="sell", status="pending_new", is_working=True)
+    screen = PortfolioScreen(
+        capital=_make_capital(),
+        alpaca_orders=AlpacaOrdersSnapshot(orders=(order,), truncated=False),
+    )
+    ui = PortfolioIntelligenceUI(screen=screen)
+
+    demo = ui.build()
+
+    tables = _orders_dataframe(demo)
+    assert len(tables) == 1
+    row = tables[0].value["data"][0]
+    # Submitted, Symbol, Side, Type, Quantity, Filled Qty, Limit Price, Status, Working, Filled At
+    assert row[1] == "AAPL"
+    assert row[2] == "sell"                       # broker-verbatim
+    assert row[3] == "limit"
+    assert row[4] == "10"
+    assert row[5] == "4"
+    assert row[6] == "321.50"
+    assert row[7] == "pending_new"                # broker-verbatim, unaltered
+    assert row[8] == _ALPACA_ORDERS_WORKING_MARKER
+    assert row[9] == ""                           # no filled_at
+    assert "CDT" in row[0] or "CST" in row[0]     # America/Chicago display
+
+
+def test_non_working_order_has_an_empty_working_cell():
+    order = _make_order(status="filled", is_working=False, filled_quantity="10",
+                        filled_at=datetime(2026, 8, 27, 19, 45, tzinfo=timezone.utc))
+    screen = PortfolioScreen(
+        capital=_make_capital(),
+        alpaca_orders=AlpacaOrdersSnapshot(orders=(order,), truncated=False),
+    )
+
+    demo = PortfolioIntelligenceUI(screen=screen).build()
+
+    row = _orders_dataframe(demo)[0].value["data"][0]
+    assert row[7] == "filled"
+    assert row[8] == ""
+
+
+def test_order_id_is_never_rendered_as_a_cell():
+    order = _make_order(order_id="ord-should-not-appear-xyz")
+    screen = PortfolioScreen(
+        capital=_make_capital(),
+        alpaca_orders=AlpacaOrdersSnapshot(orders=(order,), truncated=False),
+    )
+
+    demo = PortfolioIntelligenceUI(screen=screen).build()
+
+    rendered = "\n".join(str(v) for v in _orders_dataframe(demo)[0].value["data"])
+    assert "ord-should-not-appear-xyz" not in rendered
+
+
+def test_truncation_note_is_shown_only_when_snapshot_is_truncated():
+    order = _make_order()
+    truncated_screen = PortfolioScreen(
+        capital=_make_capital(),
+        alpaca_orders=AlpacaOrdersSnapshot(orders=(order,), truncated=True),
+    )
+    not_truncated_screen = PortfolioScreen(
+        capital=_make_capital(),
+        alpaca_orders=AlpacaOrdersSnapshot(orders=(order,), truncated=False),
+    )
+
+    truncated_html = "\n".join(_html_values(PortfolioIntelligenceUI(screen=truncated_screen).build()))
+    plain_html = "\n".join(_html_values(PortfolioIntelligenceUI(screen=not_truncated_screen).build()))
+
+    assert _ALPACA_ORDERS_TRUNCATION_NOTE in truncated_html
+    assert _ALPACA_ORDERS_TRUNCATION_NOTE not in plain_html
+
+
+def test_orders_section_is_independent_of_account_and_disclosure_state():
+    """Orders can be available while the Alpaca account section is
+    unavailable and the whole page is illustrative -- and the illustrative
+    disclosure must still read exactly as always."""
+    screen = PortfolioScreen(
+        capital=_make_capital(),
+        alpaca_account=None,
+        alpaca_orders=AlpacaOrdersSnapshot(orders=(_make_order(),), truncated=False),
+    )
+    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=False, holdings_is_real=False)
+
+    demo = ui.build()
+
+    html_values = _html_values(demo)
+    assert _ILLUSTRATIVE_DATA_HTML in html_values
+    assert any(_ALPACA_UNAVAILABLE_MESSAGE in v for v in html_values)   # account section
+    assert len(_orders_dataframe(demo)) == 1                            # orders section
+    assert not any(_ALPACA_ORDERS_UNAVAILABLE_MESSAGE in v for v in html_values)
+
+
+def test_default_screen_still_has_exactly_one_holdings_dataframe():
+    """Regression lock: the orders section adds no Dataframe when orders
+    are unavailable (the default), so existing Dataframe-count assertions
+    elsewhere in this file stay valid."""
+    demo = PortfolioIntelligenceUI().build()
+
+    all_dataframes = [b for b in demo.blocks.values() if isinstance(b, gr.Dataframe)]
+    assert len(all_dataframes) == 1
+    assert "pi-holdings-table" in all_dataframes[0].elem_classes

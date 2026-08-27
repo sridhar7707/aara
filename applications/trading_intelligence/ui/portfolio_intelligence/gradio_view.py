@@ -30,13 +30,16 @@ they use are Decision Center's theme.py rules, already merged into the
 composed app's single stylesheet by `bootstrap.py`.
 """
 import html
-from typing import List, Tuple
+from datetime import datetime, timezone
+from typing import List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import gradio as gr
 
 from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import build_mock_screen
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     AlpacaAccountSnapshot,
+    AlpacaOrder,
     AlpacaPosition,
     CapitalSummary,
     PortfolioHolding,
@@ -72,6 +75,54 @@ _ALPACA_UNAVAILABLE_MESSAGE = (
     "Alpaca Paper account data is not available -- credentials or "
     "network access are not configured for this environment."
 )
+
+# ALPACA PAPER -- RECENT ORDERS (2026-08-27 unit). A separate, additive
+# section rendered below the Alpaca Paper Account block, sourced from
+# adapters/alpaca_paper_orders_source.py -- a read-only observation of
+# Alpaca's own broker-side order history. Its own independent
+# available/unavailable state (screen.alpaca_orders_available), never
+# coupled to screen.alpaca_is_available, capital_is_real, or
+# holdings_is_real, and never counted toward the disclosure above.
+_ALPACA_ORDERS_HEADERS = [
+    "Submitted", "Symbol", "Side", "Type", "Quantity", "Filled Qty",
+    "Limit Price", "Status", "Working", "Filled At",
+]
+
+_ALPACA_ORDERS_UNAVAILABLE_MESSAGE = (
+    "Alpaca Paper recent orders are not available -- credentials or "
+    "network access are not configured for this environment."
+)
+
+# Shown only when an underlying API call hit its defensive per-call cap
+# (screen.alpaca_orders.truncated) -- makes the truncation explicit rather
+# than silently showing a clipped list.
+_ALPACA_ORDERS_TRUNCATION_NOTE = (
+    "Showing the 50 most recent open orders and the 50 most recent orders "
+    "from the last 14 days."
+)
+
+# Broker-verbatim order status is always displayed unchanged; this marker
+# is shown in a separate "Working" column for orders still live at the
+# broker, never by altering the status string itself.
+_ALPACA_ORDERS_WORKING_MARKER = "WORKING"
+
+# Portfolio Intelligence must not import ui/decision_center/, so its
+# format_display_timestamp() is duplicated here as a local primitive
+# (same "duplicate the primitive, never cross-import" convention as
+# _DATAFRAME_HEIGHT_KWARG above). Alpaca's Order timestamps are tz-aware
+# UTC; Decision Center's own helper assumes naive-UTC, so this variant
+# normalises either case before converting to America/Chicago for display,
+# DST-aware via zoneinfo, matching Decision Center's "%Y-%m-%d %H:%M %Z"
+# format for visual consistency.
+_ORDERS_DISPLAY_TIMEZONE = ZoneInfo("America/Chicago")
+
+
+def _format_order_timestamp(moment: Optional[datetime]) -> str:
+    if not isinstance(moment, datetime):
+        return ""
+    aware = moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
+    return aware.astimezone(_ORDERS_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
+
 
 _ILLUSTRATIVE_DATA_TITLE = "Illustrative Data"
 _ILLUSTRATIVE_DATA_BODY = (
@@ -208,6 +259,37 @@ class PortfolioIntelligenceUI:
                         **{_DATAFRAME_HEIGHT_KWARG: 320},
                     )
 
+            gr.HTML(
+                f'<div class="pi-section-label">Alpaca Paper &mdash; Recent Orders '
+                f'<span class="pi-alpaca-badge">{html.escape(_ALPACA_PAPER_BADGE_TEXT)}</span></div>'
+            )
+            if not self._screen.alpaca_orders_available:
+                gr.HTML(
+                    f'<div class="pi-alpaca-unavailable">'
+                    f'{html.escape(_ALPACA_ORDERS_UNAVAILABLE_MESSAGE)}</div>'
+                )
+            elif self._screen.alpaca_orders.is_empty:
+                gr.HTML(
+                    f'<div class="pi-empty-message">'
+                    f'{html.escape(self._screen.alpaca_orders_empty_state_message)}</div>'
+                )
+            else:
+                if self._screen.alpaca_orders.truncated:
+                    gr.HTML(
+                        f'<div class="pi-alpaca-orders-truncation">'
+                        f'{html.escape(_ALPACA_ORDERS_TRUNCATION_NOTE)}</div>'
+                    )
+                gr.Dataframe(
+                    headers=_ALPACA_ORDERS_HEADERS,
+                    value=self._format_alpaca_orders_rows(self._screen.alpaca_orders.orders),
+                    datatype=["str"] * len(_ALPACA_ORDERS_HEADERS),
+                    interactive=False,
+                    label="Alpaca Paper Recent Orders",
+                    show_label=False,
+                    elem_classes=["pi-alpaca-orders-table"],
+                    **{_DATAFRAME_HEIGHT_KWARG: 320},
+                )
+
         return demo
 
     def _format_disclosure_html(self) -> str:
@@ -300,4 +382,27 @@ class PortfolioIntelligenceUI:
                 position.side,
             ]
             for position in positions
+        ]
+
+    @staticmethod
+    def _format_alpaca_orders_rows(orders: Tuple[AlpacaOrder, ...]) -> List[List[str]]:
+        """side/status are rendered exactly as the broker returned them.
+        The working/pending flag is surfaced in its own column, never by
+        rewriting the status string. order_id is intentionally not
+        rendered -- it is an internal dedupe/sort key, not a decision
+        identifier."""
+        return [
+            [
+                _format_order_timestamp(order.submitted_at),
+                order.symbol,
+                order.side,
+                order.order_type,
+                order.quantity,
+                order.filled_quantity,
+                order.limit_price,
+                order.status,
+                _ALPACA_ORDERS_WORKING_MARKER if order.is_working else "",
+                _format_order_timestamp(order.filled_at),
+            ]
+            for order in orders
         ]

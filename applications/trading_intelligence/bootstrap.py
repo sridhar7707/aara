@@ -60,6 +60,9 @@ from applications.trading_intelligence.adapters.alpaca_news_source import (
     AlpacaNewsSource,
     OvernightHoldingsNews,
 )
+from applications.trading_intelligence.adapters.alpaca_paper_orders_source import (
+    AlpacaPaperOrdersSource,
+)
 from applications.trading_intelligence.adapters.alpaca_paper_source import AlpacaPaperSource
 from applications.trading_intelligence.adapters.legacy_candidate_screening_source import (
     CandidateScreeningSnapshot,
@@ -817,6 +820,26 @@ def _with_alpaca_paper_data(screen: PortfolioScreen) -> PortfolioScreen:
     return replace(screen, alpaca_account=real_account, alpaca_positions=real_positions)
 
 
+def _with_alpaca_orders_data(screen: PortfolioScreen) -> PortfolioScreen:
+    """Attaches Alpaca's own broker-side recent Paper orders to `screen`
+    when the read succeeds, leaving it unchanged (alpaca_orders stays
+    None -- unavailable) otherwise. Deliberately independent of every
+    other branch in _build_portfolio_intelligence_ui() AND of
+    _with_alpaca_paper_data(): the recent-orders observation channel is a
+    separate Alpaca read from the account/positions one, so its
+    availability must never be gated by whether that one found data, or by
+    capital_pools/position_state. A read that matched no orders returns an
+    empty AlpacaOrdersSnapshot (attached -- a real "no recent orders"
+    state); only a None leaves the section unavailable. Read-only
+    observation only, never merged with Holdings/Capital Summary and
+    carrying no Decision Center linkage -- see
+    adapters/alpaca_paper_orders_source.py's own docstring."""
+    orders = AlpacaPaperOrdersSource().get_recent_orders()
+    if orders is None:
+        return screen
+    return replace(screen, alpaca_orders=orders)
+
+
 def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
     """Real Capital Summary/Allocation when the legacy trades.db capital
     pool is available (see adapters/legacy_capital_source.py). Holdings
@@ -839,28 +862,37 @@ def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
     explicitly authorized live network dependency, entirely separate from
     the legacy trades.db-based Capital Summary/Holdings this function
     already builds. See that adapter's own docstring for the paper-only
-    safety guarantees."""
+    safety guarantees.
+
+    Alpaca Paper recent orders (2026-08-27 unit, via
+    adapters/alpaca_paper_orders_source.py) are likewise attached on every
+    return path via _with_alpaca_orders_data(), independently of both the
+    legacy chain above and the Alpaca account/positions attachment -- a
+    read-only observation of Alpaca's own broker-side order history, never
+    merged with Holdings and carrying no Decision Center linkage."""
     real_capital = LegacyCapitalSource().get_capital_summary()
     if real_capital is None:
-        screen = _with_alpaca_paper_data(build_mock_portfolio_screen())
+        screen = _with_alpaca_orders_data(
+            _with_alpaca_paper_data(build_mock_portfolio_screen())
+        )
         return PortfolioIntelligenceUI(screen=screen)
     illustrative_screen = build_mock_portfolio_screen()
     screen = replace(illustrative_screen, capital=real_capital)
 
     real_positions = LegacyPositionSource().get_open_positions()
     if real_positions is None:
-        screen = _with_alpaca_paper_data(screen)
+        screen = _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
         return PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
 
     symbols = tuple(position.symbol for position in real_positions)
     real_prices = LivePriceSource().get_current_prices(symbols)
     if real_prices is None:
-        screen = _with_alpaca_paper_data(screen)
+        screen = _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
         return PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
 
     real_holdings = _build_portfolio_holdings(real_positions, real_prices)
     screen = replace(screen, holdings=real_holdings)
-    screen = _with_alpaca_paper_data(screen)
+    screen = _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
     return PortfolioIntelligenceUI(screen=screen, capital_is_real=True, holdings_is_real=True)
 
 
