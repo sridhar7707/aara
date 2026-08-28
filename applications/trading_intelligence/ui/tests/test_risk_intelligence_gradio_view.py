@@ -3,9 +3,14 @@ import pathlib
 import gradio as gr
 
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import (
+    _AS_OF_PREFIX,
     _LIVE_ANNOUNCER_ELEM_ID,
     _LIVE_REGION_SETUP_JS,
+    _OBSERVED_CLASSIFICATION_HTML,
+    _SIZING_UNAVAILABLE_HTML,
+    _TRIGGER_REASON_UNAVAILABLE_HTML,
     _UNAVAILABLE_MESSAGE_HTML,
+    _format_as_of_html,
     RiskIntelligenceUI,
 )
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
@@ -68,10 +73,12 @@ def test_build_returns_a_gradio_blocks_instance():
 
 
 def test_default_build_renders_the_unavailable_message_and_no_fabricated_content():
-    """Production default: no governed real risk source, so the view must
-    render a single UNAVAILABLE message and never a fabricated state
-    badge, history table, evaluation card, sizing metric, timestamp, or an
-    "Illustrative Data" disclosure."""
+    """Production default: no real risk source, so the view must render a
+    single UNAVAILABLE message and never a fabricated state badge, history
+    table, evaluation card, sizing metric, timestamp, or an "Illustrative
+    Data" disclosure. The stable component tree still contains a hidden
+    history Dataframe (toggled via `visible=` in _render), so assert it is
+    not visible rather than absent."""
     ui = RiskIntelligenceUI()
 
     demo = ui.build()
@@ -80,12 +87,12 @@ def test_default_build_renders_the_unavailable_message_and_no_fabricated_content
         block.value for block in demo.blocks.values()
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
-    combined = "\n".join(html_values)
+    combined = "\n".join(value for value in html_values if value)
     dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
 
     assert _UNAVAILABLE_MESSAGE_HTML in html_values
     assert "Risk Intelligence data is currently unavailable." in combined
-    assert dataframes == []
+    assert all(df.visible is False for df in dataframes)
     assert "Illustrative Data" not in combined
     for fabricated in ("state-normal", "state-warning", "state-defensive", "ri-state-badge"):
         assert fabricated not in combined
@@ -245,7 +252,7 @@ def test_build_renders_empty_message_instead_of_a_table_when_no_history():
         block.value for block in demo.blocks.values()
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
-    assert dataframes == []
+    assert all(df.visible is False for df in dataframes)
     assert any("No risk evaluations recorded yet." in value for value in html_values)
 
 
@@ -463,6 +470,260 @@ def test_announce_current_state_does_not_claim_the_data_is_live():
 
     for forbidden in ("live", "real-time", "real time"):
         assert forbidden not in announcement.lower()
+
+
+# --- Slice B: render-time refresh pattern + optional-field rendering -------
+
+
+class _CountingProvider:
+    """A screen_provider that records how many times it was invoked."""
+
+    def __init__(self, screen):
+        self._screen = screen
+        self.calls = 0
+
+    def __call__(self):
+        self.calls += 1
+        return self._screen
+
+
+def _partial_snapshot(**overrides):
+    """A RiskSnapshot with only the two fields the operational risk_state
+    table can supply -- state + as_of -- everything else left None."""
+    defaults = dict(state="NORMAL", as_of="2026-08-20 10:03 CDT")
+    defaults.update(overrides)
+    return RiskSnapshot(**defaults)
+
+
+def _bound_render_functions(demo, ui):
+    return [
+        bf for bf in demo.fns.values()
+        if getattr(bf.fn, "__func__", None) is RiskIntelligenceUI._render
+        and getattr(bf.fn, "__self__", None) is ui
+    ]
+
+
+def test_build_renders_exactly_one_refresh_button_with_the_shared_class():
+    demo = RiskIntelligenceUI().build()
+
+    buttons = [
+        block for block in demo.blocks.values()
+        if isinstance(block, gr.Button) and "aara-refresh-button" in (block.elem_classes or [])
+    ]
+    assert len(buttons) == 1
+
+
+def test_disable_refresh_button_returns_a_non_interactive_update():
+    update = RiskIntelligenceUI._disable_refresh_button()
+
+    assert update.get("interactive") is False
+
+
+def test_enable_refresh_button_returns_an_interactive_update():
+    update = RiskIntelligenceUI._enable_refresh_button()
+
+    assert update.get("interactive") is True
+
+
+def test_refresh_button_click_is_wired_disable_then_render_then_enable():
+    ui = RiskIntelligenceUI()
+    demo = ui.build()
+
+    deps = demo.config["dependencies"]
+    disable_dep = next(
+        dep for dep in deps
+        if demo.fns[dep["id"]].fn is RiskIntelligenceUI._disable_refresh_button
+    )
+    enable_dep = next(
+        dep for dep in deps
+        if demo.fns[dep["id"]].fn is RiskIntelligenceUI._enable_refresh_button
+    )
+    render_dep = next(
+        dep for dep in deps if dep.get("trigger_after") == disable_dep["id"]
+    )
+
+    assert demo.fns[render_dep["id"]].fn.__func__ is RiskIntelligenceUI._render
+    assert enable_dep["trigger_after"] == render_dep["id"]
+
+
+def test_demo_load_and_the_refresh_chain_both_invoke_render():
+    ui = RiskIntelligenceUI()
+    demo = ui.build()
+
+    # one _render for demo.load(), one for the Refresh .then() chain
+    assert len(_bound_render_functions(demo, ui)) == 2
+
+
+def test_provider_is_called_once_at_construction_and_again_on_render():
+    provider = _CountingProvider(RiskScreen())
+    ui = RiskIntelligenceUI(screen_provider=provider)
+
+    assert provider.calls == 1
+
+    ui._render()
+
+    assert provider.calls == 2
+
+
+def test_provider_is_reinvoked_on_every_render_call():
+    provider = _CountingProvider(RiskScreen())
+    ui = RiskIntelligenceUI(screen_provider=provider)
+
+    ui._render()
+    ui._render()
+    ui._render()
+
+    assert provider.calls == 4  # 1 at construction + 3 renders
+
+
+def test_render_returns_one_update_per_dynamic_output():
+    ui = RiskIntelligenceUI(screen=_make_available_screen())
+
+    result = ui._render()
+
+    assert isinstance(result, tuple)
+    assert len(result) == 11
+    assert all(isinstance(update, dict) for update in result)
+
+
+def test_render_first_update_is_the_as_of_indicator():
+    ui = RiskIntelligenceUI()
+
+    result = ui._render()
+
+    assert _AS_OF_PREFIX in result[0]["value"]
+
+
+def test_format_as_of_html_uses_the_america_chicago_convention():
+    from datetime import datetime, timezone
+
+    moment = datetime(2026, 8, 20, 20, 3, tzinfo=timezone.utc)  # 15:03 CDT
+
+    rendered = _format_as_of_html(moment)
+
+    assert _AS_OF_PREFIX in rendered
+    assert "2026-08-20 15:03 CDT" in rendered
+
+
+def test_build_shows_an_as_of_indicator_component():
+    demo = RiskIntelligenceUI().build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    assert any(_AS_OF_PREFIX in value for value in html_values)
+
+
+def test_render_collapses_to_the_unavailable_state_when_provider_returns_unavailable():
+    provider = _CountingProvider(RiskScreen())
+    ui = RiskIntelligenceUI(screen_provider=provider)
+
+    result = ui._render()
+    combined = "\n".join(update.get("value") or "" for update in result if isinstance(update.get("value"), str))
+
+    assert "Risk Intelligence data is currently unavailable." in combined
+    # unavailable message visible, current-state / history hidden
+    unavailable_update = result[2]
+    assert unavailable_update.get("visible") is True
+    for hidden in result[3:6]:  # observed note, current label, current state
+        assert hidden.get("visible") is False
+
+
+def test_render_never_falls_back_to_mock_or_illustrative_data():
+    provider = _CountingProvider(RiskScreen())
+    ui = RiskIntelligenceUI(screen_provider=provider)
+
+    result = ui._render()
+    combined = "\n".join(update.get("value") or "" for update in result if isinstance(update.get("value"), str))
+
+    for fabricated in (
+        "ri-state-badge", "state-normal", "state-warning", "state-defensive",
+        "ri-sizing-metrics", "ri-current-state", "ri-history-detail-card",
+        "Illustrative Data",
+    ):
+        assert fabricated not in combined
+
+
+def test_current_state_html_states_reason_is_not_recorded_when_missing():
+    current_html = RiskIntelligenceUI._format_current_state_html(_partial_snapshot())
+
+    assert _TRIGGER_REASON_UNAVAILABLE_HTML in current_html
+    assert "not recorded in this data source" in current_html
+    assert '<details class="ri-trigger-reason">' not in current_html
+
+
+def test_current_state_html_states_sizing_is_not_recorded_when_missing():
+    current_html = RiskIntelligenceUI._format_current_state_html(_partial_snapshot())
+
+    assert _SIZING_UNAVAILABLE_HTML in current_html
+    assert "ri-sizing-metrics" not in current_html
+    assert "Recommended Sizing" not in current_html
+
+
+def test_current_state_html_computes_no_sizing_gap_when_values_missing():
+    current_html = RiskIntelligenceUI._format_current_state_html(_partial_snapshot())
+
+    assert "Gap" not in current_html
+    assert _partial_snapshot().sizing_gap_pct is None
+
+
+def test_current_state_html_still_shows_the_real_badge_and_as_of_when_partial():
+    current_html = RiskIntelligenceUI._format_current_state_html(
+        _partial_snapshot(state="WARNING", as_of="2026-08-20 10:03 CDT")
+    )
+
+    assert "state-warning" in current_html
+    assert "WARNING" in current_html
+    assert "as of 2026-08-20 10:03 CDT" in current_html
+
+
+def test_partial_snapshot_screen_shows_no_history_table_or_detail_cards():
+    ui = RiskIntelligenceUI(screen=RiskScreen(current=_partial_snapshot()))
+
+    demo = ui.build()
+
+    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    combined = "\n".join(value for value in html_values if value)
+    assert all(df.visible is False for df in dataframes)
+    assert '<details class="ri-history-detail-card">' not in combined
+    assert "No risk evaluations recorded yet." in combined
+
+
+def test_build_renders_the_observed_governor_classification_disclosure_when_available():
+    ui = RiskIntelligenceUI(screen=RiskScreen(current=_partial_snapshot()))
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    assert _OBSERVED_CLASSIFICATION_HTML in html_values
+
+
+def test_observed_classification_wording_does_not_imply_enforcement():
+    text = _OBSERVED_CLASSIFICATION_HTML.lower()
+
+    assert "observed governor classification" in text
+    assert "not a confirmation that the system enforced" in text
+    # never a bare positive enforcement claim
+    assert "the system enforced this state." not in text
+
+
+def test_observed_disclosure_is_hidden_in_the_default_unavailable_build():
+    demo = RiskIntelligenceUI().build()
+
+    observed_blocks = [
+        block for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and block.value == _OBSERVED_CLASSIFICATION_HTML
+    ]
+    assert len(observed_blocks) == 1
+    assert observed_blocks[0].visible is False
 
 
 def test_existing_current_state_and_history_rendering_is_unaffected():

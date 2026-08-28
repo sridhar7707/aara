@@ -73,6 +73,56 @@ def test_sizing_gap_pct_can_be_negative_when_actual_exceeds_recommended():
     assert snapshot.sizing_gap_pct == -10.0
 
 
+def test_snapshot_requires_only_state_and_as_of():
+    """Slice B: state + as_of are the only fields the operational
+    risk_state table can supply, so they stay required; trigger_reason and
+    the two sizing figures are Optional and default to None."""
+    snapshot = RiskSnapshot(state="NORMAL", as_of="2026-08-20 10:03 CDT")
+
+    assert snapshot.state == "NORMAL"
+    assert snapshot.as_of == "2026-08-20 10:03 CDT"
+    assert snapshot.trigger_reason is None
+    assert snapshot.recommended_sizing_pct is None
+    assert snapshot.actual_sizing_pct is None
+
+
+def test_snapshot_still_validates_state_when_the_other_fields_are_omitted():
+    with pytest.raises(ValueError):
+        RiskSnapshot(state="CRITICAL", as_of="2026-08-20 10:03 CDT")
+
+
+def test_sizing_gap_pct_is_none_when_recommended_is_missing():
+    snapshot = RiskSnapshot(
+        state="NORMAL", as_of="2026-08-20 10:03 CDT", actual_sizing_pct=100.0,
+    )
+
+    assert snapshot.sizing_gap_pct is None
+
+
+def test_sizing_gap_pct_is_none_when_actual_is_missing():
+    snapshot = RiskSnapshot(
+        state="NORMAL", as_of="2026-08-20 10:03 CDT", recommended_sizing_pct=100.0,
+    )
+
+    assert snapshot.sizing_gap_pct is None
+
+
+def test_sizing_gap_pct_is_none_when_both_are_missing():
+    snapshot = RiskSnapshot(state="NORMAL", as_of="2026-08-20 10:03 CDT")
+
+    assert snapshot.sizing_gap_pct is None
+
+
+def test_screen_with_a_partial_snapshot_is_available_and_empty():
+    """A state-only snapshot is still a real, available screen -- it just
+    has no history and no reason/sizing detail."""
+    screen = RiskScreen(current=RiskSnapshot(state="WARNING", as_of="2026-08-20 10:03 CDT"))
+
+    assert screen.is_available is True
+    assert screen.is_empty is True
+    assert screen.history == ()
+
+
 def test_risk_screen_is_empty_with_no_history():
     screen = RiskScreen(current=_make_snapshot())
 

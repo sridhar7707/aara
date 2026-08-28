@@ -11,12 +11,20 @@ an Enum reusing any real class name from bot/trust_ledger/risk.py or the
 unrelated sentinel/backend scaffold -- NORMAL/WARNING/DEFENSIVE remain
 valid literals only for an explicitly-injected RiskSnapshot.
 
-`RiskScreen.current` defaults to None: no governed real risk source is
-wired yet (ADR-004 Deferred; the Risk Intelligence design is future
-architectural work), so the production default is "no real risk data"
-(is_available is False) and the view renders an explicit UNAVAILABLE
-state. Formatter/rendering tests may still construct a RiskScreen with an
-explicit `current=` snapshot; that path is unchanged.
+`RiskScreen.current` defaults to None: when the operational `risk_state`
+table (via adapters/legacy_risk_state_source.py) cannot be read -- the
+deployed HF Space's normal state -- the production default is "no real
+risk data" (is_available is False) and the view renders an explicit
+UNAVAILABLE state. Formatter/rendering tests may still construct a
+RiskScreen with an explicit `current=` snapshot.
+
+`RiskSnapshot.state` and `.as_of` are the only fields the operational
+`risk_state` table can supply, so they stay required. `trigger_reason`,
+`recommended_sizing_pct`, and `actual_sizing_pct` are NOT persisted in
+`risk_state` (they live only in the hash-chained `risk_evaluation_events`
+ledger table, which this slice deliberately does not read) -- they are
+Optional and default to None, and the view states explicitly when they
+are not recorded in this data source. History is never fabricated.
 """
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
@@ -40,20 +48,24 @@ class RiskHistoryEntry:
 @dataclass(frozen=True)
 class RiskSnapshot:
     state: str
-    trigger_reason: str
-    recommended_sizing_pct: float
-    actual_sizing_pct: float
     as_of: str
+    trigger_reason: Optional[str] = None
+    recommended_sizing_pct: Optional[float] = None
+    actual_sizing_pct: Optional[float] = None
 
     def __post_init__(self):
         if self.state not in _VALID_STATES:
             raise ValueError(f"state must be one of {_VALID_STATES}, got {self.state!r}")
 
     @property
-    def sizing_gap_pct(self) -> float:
+    def sizing_gap_pct(self) -> Optional[float]:
         """Positive means actual sizing is under the recommendation
         (de-risked further than required); negative means actual sizing
-        exceeds it."""
+        exceeds it. None when either sizing figure is not recorded in the
+        current data source -- callers must not compute or display a gap
+        in that case."""
+        if self.recommended_sizing_pct is None or self.actual_sizing_pct is None:
+            return None
         return self.recommended_sizing_pct - self.actual_sizing_pct
 
 

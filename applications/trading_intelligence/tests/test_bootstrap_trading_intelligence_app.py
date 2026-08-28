@@ -203,15 +203,27 @@ def test_risk_intelligence_content_is_present_in_the_composed_app():
     assert any("Risk Intelligence" in value for value in html_values)
     assert any("Current risk-governor state" in value for value in html_values)
 
-    # Phase 1 zero-illustrative-data: Risk Intelligence has no governed
-    # real source, so the composed app renders its UNAVAILABLE state --
-    # no fabricated history table, no "Illustrative Data" disclosure.
+    # Slice B: Risk Intelligence is now render-time wired to the operational
+    # risk_state table. Its explicit UNAVAILABLE message and its
+    # "observed governor classification" disclosure are both always present
+    # in the stable component tree (visibility is toggled at render time
+    # depending on whether risk_state could be read) -- never fabricated
+    # data, never an "Illustrative Data" disclosure.
     assert any(
         "Risk Intelligence data is currently unavailable." in value for value in html_values
     )
+    assert any("Observed governor classification" in value for value in html_values)
     assert not any("Illustrative Data" in value for value in html_values)
-    dataframes = [block for block in app.blocks.values() if isinstance(block, gr.Dataframe)]
-    assert not any("ri-history-table" in (df.elem_classes or []) for df in dataframes)
+
+    # The history Dataframe is part of the stable tree but is only ever
+    # shown when a real history source exists -- none is wired in this
+    # slice, so it must not be visible.
+    history_frames = [
+        block for block in app.blocks.values()
+        if isinstance(block, gr.Dataframe) and "ri-history-table" in (block.elem_classes or [])
+    ]
+    assert history_frames
+    assert all(frame.visible is False for frame in history_frames)
 
 
 def test_refresh_double_submit_guard_chain_survives_composition():

@@ -4,20 +4,42 @@ UNAVAILABLE state; never fabricated/illustrative risk figures.
 Self-contained: does not import ui/decision_center/ or
 ui/portfolio_intelligence/ (no cross-package import of any kind), and does
 not import mock_data.py. Renders whatever RiskScreen it is given; the
-production default (no `screen` supplied) is an unavailable RiskScreen()
-(current is None), which renders a single UNAVAILABLE message and no
-fabricated state badge, history table, evaluation cards, or sizing
-metrics. No controller, no service, no sentinel_engine/bot import. Wired
-into main.py/bootstrap.py as the 3rd Trading Intelligence tab.
+production default (no `screen` / `screen_provider` supplied) is an
+unavailable RiskScreen() (current is None), which renders a single
+UNAVAILABLE message and no fabricated state badge, history table,
+evaluation cards, or sizing metrics. No controller, no service, no
+sentinel_engine/bot import. Wired into bootstrap.py as the 4th Trading
+Intelligence tab.
+
+Data is fetched at render time, not build time: the UI takes a
+`screen_provider` callable (bootstrap.py's `_build_risk_intelligence_screen`,
+which reads the operational `risk_state` table via
+adapters.legacy_risk_state_source.LegacyRiskStateSource) and re-invokes it
+on every `demo.load()` and every Refresh click, so a long-running Space
+shows data as of page load rather than app start. An "As of {timestamp}"
+line (America/Chicago, the same wall-clock convention every other Trading
+Intelligence screen uses) reflects the last fetch. The Refresh button
+reuses ui/decision_center/gradio_view.py's disable -> render -> enable
+double-submit guard.
+
+Observed, not enforced: when a current risk state is shown it is the risk
+governor's most recently *observed* classification, read from the
+operational `risk_state` table. The screen states this explicitly and
+never implies the system enforced the state or blocked execution.
+`trigger_reason` and recommended/actual sizing are not persisted in
+`risk_state` (they live only in the hash-chained `risk_evaluation_events`
+ledger table, which this screen does not read), so when they are None the
+view says so plainly rather than fabricating them, and no sizing gap is
+computed. History is never fabricated -- with no history source wired it
+stays empty and the existing "No risk evaluations recorded yet." message
+is shown.
 
 Keyboard focus/activation uses native HTML controls only, no custom JS:
 the trigger-reason disclosure and each evaluation-history card are real
 <details>/<summary> elements (natively Tab-focusable, Enter/Space-
-togglable, now with a visible :focus-visible ring -- see theme.py's
+togglable, with a visible :focus-visible ring -- see theme.py's
 Accessibility parity pass), and the history table is a gr.Dataframe
-(Gradio's own native keyboard-navigable table, same mechanism
-ui/portfolio_intelligence/gradio_view.py's holdings table already relies
-on).
+(Gradio's own native keyboard-navigable table).
 
 Accessibility parity pass: one small, self-contained JS bridge
 (_LIVE_REGION_SETUP_JS below) sets aria-live/aria-atomic/role on a
@@ -27,16 +49,15 @@ already shipped and tested in ui/decision_center/gradio_view.py's own
 live-region setup, reused here as a pattern (not imported).
 
 AARA shell consistency pass: renders the same AARA logo header + inter-screen
-nav Decision Center shows, via `ui/shell.py` (a sibling of all three screen
+nav Decision Center shows, via `ui/shell.py` (a sibling of all screen
 packages, not `ui/decision_center/` or `ui/portfolio_intelligence/` -- see
 that module's own docstring for why this doesn't violate this package's
-self-containment). No new CSS is added here; `.aara-shell-header`/
-`.aara-shell-nav`/`.nav-item` and the tokens they use are Decision Center's
-theme.py rules, already merged into the composed app's single stylesheet by
-`bootstrap.py`.
+self-containment). No new CSS is added here.
 """
 import html
-from typing import List, Tuple
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import gradio as gr
 
@@ -66,10 +87,11 @@ _STATE_BADGE_CLASSES = {
 }
 
 # Rendered in place of every current-state / history / sizing element when
-# no governed real risk source is available (RiskScreen.is_available is
-# False -- the production default). Reuses the .ri-empty-message treatment
-# this screen's own theme.py already defines; no fabricated state badge,
-# history table, evaluation card, or sizing metric is emitted alongside it.
+# no real risk source is available (RiskScreen.is_available is False -- the
+# production default when the operational `risk_state` table cannot be
+# read). Reuses the .ri-empty-message treatment this screen's own theme.py
+# already defines; no fabricated state badge, history table, evaluation
+# card, or sizing metric is emitted alongside it.
 _UNAVAILABLE_MESSAGE_HTML = (
     '<div class="ri-empty-message">'
     f'{html.escape("Risk Intelligence data is currently unavailable.")}'
@@ -84,6 +106,57 @@ _PAGE_HEADER_HTML = (
 )
 
 _HISTORY_DETAIL_SECTION_LABEL_HTML = '<div class="ri-section-label">Evaluation Details</div>'
+_CURRENT_STATE_SECTION_LABEL_HTML = '<div class="ri-section-label">Current State</div>'
+_HISTORY_SECTION_LABEL_HTML = '<div class="ri-section-label">Recent Risk Evaluations</div>'
+
+# Shown alongside a current state, reusing theme.py's existing .ri-disclosure
+# treatment. Makes explicit that the state is an OBSERVED governor
+# classification read from the operational risk_state table -- not proof
+# the system enforced a risk state or blocked any execution.
+_OBSERVED_CLASSIFICATION_HTML = (
+    '<div class="ri-disclosure">'
+    '<div class="ri-disclosure-title">Observed governor classification</div>'
+    '<div class="ri-disclosure-body">'
+    "This risk state is read from the operational risk_state table and reflects "
+    "the risk governor's most recently observed classification. It is not a "
+    "confirmation that the system enforced this state or blocked any execution."
+    "</div>"
+    "</div>"
+)
+
+_TRIGGER_REASON_UNAVAILABLE_HTML = (
+    '<div class="ri-empty-message">'
+    "Trigger reason is not recorded in this data source."
+    "</div>"
+)
+_SIZING_UNAVAILABLE_HTML = (
+    '<div class="ri-empty-message">'
+    "Sizing information (recommended vs. actual) is not recorded in this data source."
+    "</div>"
+)
+
+_AS_OF_PREFIX = "As of "
+
+# Local primitive, not a cross-package import (same "duplicate the
+# primitive" convention ui/portfolio_intelligence/ and ui/morning_brief/
+# use for their own timestamp display): America/Chicago, DST-aware via
+# zoneinfo, "%Y-%m-%d %H:%M %Z" -- the wall-clock convention every other
+# Trading Intelligence timestamp uses.
+_DISPLAY_TIMEZONE = ZoneInfo("America/Chicago")
+
+
+def _format_as_of_html(moment: datetime) -> str:
+    """Render-time "as of" stamp for the whole screen. Reuses the existing
+    `.ri-page-header .ri-subtitle` treatment (muted secondary text,
+    already defined in this package's theme.py) rather than introducing a
+    new styled class."""
+    stamp = moment.astimezone(_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
+    return (
+        '<div class="ri-page-header">'
+        f'<div class="ri-subtitle">{html.escape(_AS_OF_PREFIX + stamp)}</div>'
+        "</div>"
+    )
+
 
 # Accessibility parity pass: screen-reader-only live-region announcer,
 # following the same pattern already shipped and tested in
@@ -124,16 +197,45 @@ _LIVE_REGION_SETUP_JS = f"""
 """
 
 
+def _html_update(state: Tuple[str, bool]) -> Dict[str, Any]:
+    value, visible = state
+    return gr.update(value=value, visible=visible)
+
+
+def _table_update(state: Tuple[List[List[str]], bool]) -> Dict[str, Any]:
+    rows, visible = state
+    return gr.update(value=rows, visible=visible)
+
+
 class RiskIntelligenceUI:
-    def __init__(self, screen: RiskScreen = None):
-        """The default screen (no `screen` supplied) is an unavailable
-        RiskScreen() -- current is None -- never a mock/illustrative
-        screen. When the screen is unavailable the view renders only a
-        single UNAVAILABLE message; the current-state, history, and
-        evaluation-detail sections are omitted entirely."""
-        self._screen = screen if screen is not None else RiskScreen()
+    def __init__(
+        self,
+        screen: Optional[RiskScreen] = None,
+        *,
+        screen_provider: Optional[Callable[[], RiskScreen]] = None,
+    ):
+        """Render-time data model. `screen_provider` (bootstrap.py's
+        `_build_risk_intelligence_screen`) is re-invoked on every
+        `demo.load()` and every Refresh click, so a long-running Space
+        shows data as of page load, not app start. A fixed `screen`
+        (tests) is wrapped in a constant provider. When neither is
+        supplied the provider is `RiskScreen` itself -- the explicit
+        unavailable state (current is None), never a mock/illustrative
+        screen.
+
+        The provider is also called once here so `self._screen` describes
+        the build-time snapshot. `build()` renders from that snapshot and
+        wires `demo.load()` to refresh it immediately on page load."""
+        if screen_provider is not None:
+            self._screen_provider = screen_provider
+        elif screen is not None:
+            self._screen_provider = lambda: screen
+        else:
+            self._screen_provider = RiskScreen
+        self._screen = self._screen_provider()
 
     def build(self) -> gr.Blocks:
+        initial = self._screen
         with gr.Blocks(
             title="AARA Trading Intelligence — Risk Intelligence", css=CSS,
             head=_LIVE_REGION_SETUP_JS,
@@ -142,61 +244,188 @@ class RiskIntelligenceUI:
             gr.HTML(build_shell_nav_html("Risk Intelligence"), elem_classes=["aara-shell-nav"])
 
             gr.HTML(_PAGE_HEADER_HTML)
+            refresh_button = gr.Button(
+                "↻ Refresh", size="sm", scale=0, elem_classes=["aara-refresh-button"],
+            )
+            as_of_output = gr.HTML(_format_as_of_html(self._now()))
 
             # Accessibility parity pass: visually hidden, screen-reader-only
             # live region -- see _LIVE_REGION_SETUP_JS above for how
             # aria-live/aria-atomic/role get attached to this element's
-            # stable host, and _announce_current_state below for what
-            # populates it. Empty initial value; never rendered with
-            # visible content of its own. Rendered regardless of
-            # availability so the announcer is always present.
+            # stable host, and _announcement_for below for what populates
+            # it. Empty initial value; never rendered with visible content
+            # of its own. Rendered regardless of availability so the
+            # announcer is always present.
             live_announcer = gr.HTML(
                 value="", elem_id=_LIVE_ANNOUNCER_ELEM_ID, elem_classes=["ri-sr-only"],
             )
 
-            if not self._screen.is_available:
-                gr.HTML(_UNAVAILABLE_MESSAGE_HTML)
-            else:
-                gr.HTML('<div class="ri-section-label">Current State</div>')
-                gr.HTML(self._format_current_state_html(self._screen.current))
+            # Stable component tree: every section below is created once,
+            # unconditionally, and toggled via `visible=` in _render() --
+            # the same pattern ui/portfolio_intelligence/gradio_view.py
+            # uses so demo.load()/Refresh can update it without rebuilding.
+            unavailable_value, unavailable_visible = self._unavailable_state(initial)
+            unavailable_output = gr.HTML(unavailable_value, visible=unavailable_visible)
 
-                gr.HTML('<div class="ri-section-label">Recent Risk Evaluations</div>')
-                if self._screen.is_empty:
-                    gr.HTML(self._format_empty_message_html(self._screen))
-                else:
-                    gr.Dataframe(
-                        headers=_HISTORY_HEADERS,
-                        value=self._format_history_rows(self._screen.history),
-                        datatype=["str", "str", "str", "str", "str"],
-                        interactive=False,
-                        label="Recent Risk Evaluations",
-                        show_label=False,
-                        elem_classes=["ri-history-table"],
-                        **{_DATAFRAME_HEIGHT_KWARG: 320},
-                    )
-                    gr.HTML(_HISTORY_DETAIL_SECTION_LABEL_HTML)
-                    gr.HTML(self._format_history_detail_list_html(self._screen.history))
+            observed_value, observed_visible = self._observed_note_state(initial)
+            observed_output = gr.HTML(observed_value, visible=observed_visible)
 
-            # Accessibility parity pass: this screen has no refresh button or
-            # selection interactivity (see this module's own docstring) --
-            # everything is already rendered synchronously above from
-            # self._screen -- so demo.load() is the only available trigger,
-            # matching ui/decision_center/gradio_view.py's own
-            # demo.load(fn=self._announce_screen, ...) pattern.
-            demo.load(fn=self._announce_current_state, inputs=None, outputs=[live_announcer])
+            current_label_value, current_label_visible = self._current_label_state(initial)
+            current_state_label = gr.HTML(current_label_value, visible=current_label_visible)
+            current_value, current_visible = self._current_state_output_state(initial)
+            current_state_output = gr.HTML(current_value, visible=current_visible)
+
+            history_label_value, history_label_visible = self._history_label_state(initial)
+            history_label = gr.HTML(history_label_value, visible=history_label_visible)
+
+            history_empty_value, history_empty_visible = self._history_empty_state(initial)
+            history_empty_output = gr.HTML(history_empty_value, visible=history_empty_visible)
+
+            history_rows, history_table_visible = self._history_table_state(initial)
+            history_table = gr.Dataframe(
+                headers=_HISTORY_HEADERS,
+                value=history_rows,
+                datatype=["str", "str", "str", "str", "str"],
+                interactive=False,
+                label="Recent Risk Evaluations",
+                show_label=False,
+                elem_classes=["ri-history-table"],
+                visible=history_table_visible,
+                **{_DATAFRAME_HEIGHT_KWARG: 320},
+            )
+
+            detail_label_value, detail_label_visible = self._history_detail_label_state(initial)
+            history_detail_label = gr.HTML(detail_label_value, visible=detail_label_visible)
+            detail_value, detail_visible = self._history_detail_output_state(initial)
+            history_detail_output = gr.HTML(detail_value, visible=detail_visible)
+
+            outputs = [
+                as_of_output, live_announcer,
+                unavailable_output, observed_output,
+                current_state_label, current_state_output,
+                history_label, history_empty_output, history_table,
+                history_detail_label, history_detail_output,
+            ]
+
+            # Same disable -> render -> enable double-submit guard chain as
+            # ui/decision_center/ and ui/portfolio_intelligence/: a second
+            # click while a render is in flight cannot dispatch a second
+            # concurrent fetch. _render is wired identically to demo.load()
+            # (same fn, same inputs=None, same outputs) -- only wrapped in
+            # the .then() chain here.
+            refresh_button.click(
+                fn=self._disable_refresh_button, inputs=None, outputs=[refresh_button],
+            ).then(
+                fn=self._render, inputs=None, outputs=outputs,
+            ).then(
+                fn=self._enable_refresh_button, inputs=None, outputs=[refresh_button],
+            )
+            demo.load(fn=self._render, inputs=None, outputs=outputs)
 
         return demo
 
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _disable_refresh_button() -> Dict[str, Any]:
+        """First link in the Refresh double-submit guard chain (see
+        build()) -- disables the button the instant it is clicked, before
+        _render runs. Mirrors ui/decision_center/ and
+        ui/portfolio_intelligence/."""
+        return gr.update(interactive=False)
+
+    @staticmethod
+    def _enable_refresh_button() -> Dict[str, Any]:
+        """Last link in the Refresh double-submit guard chain (see
+        build()) -- re-enables the button once _render has returned,
+        success or not."""
+        return gr.update(interactive=True)
+
+    def _render(self) -> Tuple[Dict[str, Any], ...]:
+        """Re-fetch through the provider and return one Gradio update per
+        dynamic output, in build()'s `outputs` order. Called by
+        demo.load() on page load and by the Refresh chain. A provider that
+        now returns an unavailable RiskScreen() collapses every section
+        back to the single explicit UNAVAILABLE message -- there is no
+        mock/illustrative fallback anywhere in this path."""
+        screen = self._screen_provider()
+        return (
+            gr.update(value=_format_as_of_html(self._now())),
+            gr.update(value=self._announcement_for(screen)),
+            _html_update(self._unavailable_state(screen)),
+            _html_update(self._observed_note_state(screen)),
+            _html_update(self._current_label_state(screen)),
+            _html_update(self._current_state_output_state(screen)),
+            _html_update(self._history_label_state(screen)),
+            _html_update(self._history_empty_state(screen)),
+            _table_update(self._history_table_state(screen)),
+            _html_update(self._history_detail_label_state(screen)),
+            _html_update(self._history_detail_output_state(screen)),
+        )
+
+    # --- per-section state (value, visible), shared by build() and _render() ---
+
+    @staticmethod
+    def _unavailable_state(screen: RiskScreen) -> Tuple[str, bool]:
+        return (_UNAVAILABLE_MESSAGE_HTML, not screen.is_available)
+
+    @staticmethod
+    def _observed_note_state(screen: RiskScreen) -> Tuple[str, bool]:
+        # Constant value, visibility toggled -- mirrors _unavailable_state
+        # so the disclosure element is always present in the tree and only
+        # shown alongside a real current state.
+        return (_OBSERVED_CLASSIFICATION_HTML, screen.is_available)
+
+    @staticmethod
+    def _current_label_state(screen: RiskScreen) -> Tuple[str, bool]:
+        return (_CURRENT_STATE_SECTION_LABEL_HTML, screen.is_available)
+
+    def _current_state_output_state(self, screen: RiskScreen) -> Tuple[str, bool]:
+        if screen.is_available:
+            return (self._format_current_state_html(screen.current), True)
+        return ("", False)
+
+    @staticmethod
+    def _history_label_state(screen: RiskScreen) -> Tuple[str, bool]:
+        return (_HISTORY_SECTION_LABEL_HTML, screen.is_available)
+
+    def _history_empty_state(self, screen: RiskScreen) -> Tuple[str, bool]:
+        if screen.is_available and screen.is_empty:
+            return (self._format_empty_message_html(screen), True)
+        return ("", False)
+
+    def _history_table_state(self, screen: RiskScreen) -> Tuple[List[List[str]], bool]:
+        if screen.is_available and not screen.is_empty:
+            return (self._format_history_rows(screen.history), True)
+        return ([], False)
+
+    @staticmethod
+    def _history_detail_label_state(screen: RiskScreen) -> Tuple[str, bool]:
+        return (_HISTORY_DETAIL_SECTION_LABEL_HTML, screen.is_available and not screen.is_empty)
+
+    def _history_detail_output_state(self, screen: RiskScreen) -> Tuple[str, bool]:
+        if screen.is_available and not screen.is_empty:
+            return (self._format_history_detail_list_html(screen.history), True)
+        return ("", False)
+
     def _announce_current_state(self) -> str:
-        """Accessibility parity pass: populates live_announcer on page
-        load. When no real risk source is available, announces the same
+        """Accessibility parity pass: announcement for the build-time
+        snapshot. Kept for direct unit-testing; _render() computes the
+        same string from the freshly-fetched screen via _announcement_for."""
+        return self._announcement_for(self._screen)
+
+    @staticmethod
+    def _announcement_for(screen: RiskScreen) -> str:
+        """When no real risk source is available, announces the same
         UNAVAILABLE fact the visible message states. Otherwise describes
         the current risk state exactly as _format_current_state_html
         renders it, from the same RiskScreen data -- never implies the
         state is live."""
-        if not self._screen.is_available:
-            return f"Risk Intelligence loaded. {self._screen.unavailable_message}"
-        return f"Risk Intelligence loaded. Current risk state: {self._screen.current.state}."
+        if not screen.is_available:
+            return f"Risk Intelligence loaded. {screen.unavailable_message}"
+        return f"Risk Intelligence loaded. Current risk state: {screen.current.state}."
 
     @staticmethod
     def _format_state_badge_html(state: str) -> str:
@@ -206,33 +435,45 @@ class RiskIntelligenceUI:
     @staticmethod
     def _format_current_state_html(current: RiskSnapshot) -> str:
         badge_html = RiskIntelligenceUI._format_state_badge_html(current.state)
-        gap = current.sizing_gap_pct
-        gap_class = "ri-gap-nonzero" if abs(gap) > 0.01 else ""
-        metrics_html = (
-            '<div class="ri-sizing-metrics">'
-            '<div class="ri-metric">'
-            '<span class="ri-metric-label">Recommended Sizing</span>'
-            f'<span class="ri-metric-value">{current.recommended_sizing_pct:.0f}%</span>'
-            "</div>"
-            '<div class="ri-metric">'
-            '<span class="ri-metric-label">Actual Sizing</span>'
-            f'<span class="ri-metric-value">{current.actual_sizing_pct:.0f}%</span>'
-            "</div>"
-            '<div class="ri-metric">'
-            '<span class="ri-metric-label">Gap</span>'
-            f'<span class="ri-metric-value {gap_class}">{gap:+.0f}%</span>'
-            "</div>"
-            "</div>"
-        )
+
+        if current.trigger_reason is not None:
+            trigger_html = (
+                '<details class="ri-trigger-reason">'
+                "<summary>Trigger Reason</summary>"
+                f'<div class="ri-trigger-body">{html.escape(current.trigger_reason)}</div>'
+                "</details>"
+            )
+        else:
+            trigger_html = _TRIGGER_REASON_UNAVAILABLE_HTML
+
+        if current.recommended_sizing_pct is not None and current.actual_sizing_pct is not None:
+            gap = current.sizing_gap_pct
+            gap_class = "ri-gap-nonzero" if abs(gap) > 0.01 else ""
+            metrics_html = (
+                '<div class="ri-sizing-metrics">'
+                '<div class="ri-metric">'
+                '<span class="ri-metric-label">Recommended Sizing</span>'
+                f'<span class="ri-metric-value">{current.recommended_sizing_pct:.0f}%</span>'
+                "</div>"
+                '<div class="ri-metric">'
+                '<span class="ri-metric-label">Actual Sizing</span>'
+                f'<span class="ri-metric-value">{current.actual_sizing_pct:.0f}%</span>'
+                "</div>"
+                '<div class="ri-metric">'
+                '<span class="ri-metric-label">Gap</span>'
+                f'<span class="ri-metric-value {gap_class}">{gap:+.0f}%</span>'
+                "</div>"
+                "</div>"
+            )
+        else:
+            metrics_html = _SIZING_UNAVAILABLE_HTML
+
         return (
             '<div class="ri-current-state">'
             f'{badge_html}'
             f'<span style="margin-left:8px;color:var(--ri-color-text-secondary);'
             f'font-size:12px;">as of {html.escape(current.as_of)}</span>'
-            '<details class="ri-trigger-reason">'
-            "<summary>Trigger Reason</summary>"
-            f'<div class="ri-trigger-body">{html.escape(current.trigger_reason)}</div>'
-            "</details>"
+            f'{trigger_html}'
             f'{metrics_html}'
             "</div>"
         )

@@ -25,8 +25,9 @@ read chain shares their ledger/projection repositories -- but nothing
 drives them now that seeding is removed.
 """
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import gradio as gr
 
@@ -69,6 +70,7 @@ from applications.trading_intelligence.adapters.legacy_position_source import (
     OpenPosition,
 )
 from applications.trading_intelligence.adapters.legacy_regime_source import LegacyRegimeSource
+from applications.trading_intelligence.adapters.legacy_risk_state_source import LegacyRiskStateSource
 from applications.trading_intelligence.adapters.live_price_source import LivePriceSource
 from applications.trading_intelligence.adapters.sentinel_audit_source import SentinelAuditSource
 from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
@@ -108,6 +110,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     PortfolioScreen,
 )
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import RiskIntelligenceUI
+from applications.trading_intelligence.ui.risk_intelligence.screen import RiskScreen, RiskSnapshot
 from applications.trading_intelligence.ui.settings.gradio_view import SettingsUI
 
 
@@ -755,6 +758,67 @@ def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
     return PortfolioIntelligenceUI(screen_provider=_build_portfolio_intelligence_screen)
 
 
+_RISK_STATE_DISPLAY_TIMEZONE = ZoneInfo("America/Chicago")
+
+
+def _format_risk_state_as_of(raw: str) -> str:
+    """Presentation-only: convert the `risk_state.updated_at` ISO string
+    the adapter returns into the same "%Y-%m-%d %H:%M %Z" America/Chicago
+    wall-clock format every other Trading Intelligence timestamp uses. A
+    naive value is treated as UTC (that is what bot/db/risk_state.py and
+    bot/trust_ledger/risk.py write). If it cannot be parsed at all the raw
+    string is passed through unchanged rather than dropped."""
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return raw
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(_RISK_STATE_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
+
+
+def _build_risk_intelligence_screen() -> RiskScreen:
+    """Assemble one real-or-unavailable RiskScreen from the operational
+    `risk_state` table (Group C, mutable) via the read-only
+    LegacyRiskStateSource.
+
+    The only fields that table can supply are the risk governor's most
+    recently *observed* classification (NORMAL/WARNING/DEFENSIVE) and the
+    time it was written. `trigger_reason` and recommended/actual sizing
+    are NOT persisted in `risk_state` -- they live only in the
+    hash-chained `risk_evaluation_events` ledger table, which this slice
+    deliberately does not read -- so they are left as None and the view
+    states they are not recorded in this data source. History is never
+    fabricated: it stays empty and the view shows its existing
+    "No risk evaluations recorded yet." message.
+
+    None from the adapter (no trades.db -- the deployed HF Space's normal
+    state -- missing table/row, or an empty/invalid value) yields an
+    unavailable RiskScreen() and the view renders its explicit UNAVAILABLE
+    state. Never mock/illustrative data.
+
+    This is the `screen_provider` RiskIntelligenceUI re-invokes on every
+    demo.load() and every Refresh click -- a fresh read each call, holding
+    no state and caching nothing."""
+    real_state = LegacyRiskStateSource().get_risk_state()
+    if real_state is None:
+        return RiskScreen()
+    return RiskScreen(
+        current=RiskSnapshot(
+            state=real_state.state,
+            as_of=_format_risk_state_as_of(real_state.as_of),
+        ),
+    )
+
+
+def _build_risk_intelligence_ui() -> RiskIntelligenceUI:
+    """Wire Risk Intelligence to fetch its data at render time.
+    `_build_risk_intelligence_screen` is passed as the screen provider, so
+    RiskIntelligenceUI calls it once now (for the build-time snapshot) and
+    again on every demo.load() / Refresh."""
+    return RiskIntelligenceUI(screen_provider=_build_risk_intelligence_screen)
+
+
 def build_trading_intelligence_app() -> gr.Blocks:
     """Composes every Trading Intelligence screen into one tabbed app via
     gr.TabbedInterface -- the smallest wiring that reaches multiple
@@ -783,7 +847,7 @@ def build_trading_intelligence_app() -> gr.Blocks:
     morning_brief_blocks = _build_morning_brief_ui().build()
     decision_blocks = build_application().build()
     portfolio_blocks = _build_portfolio_intelligence_ui().build()
-    risk_blocks = RiskIntelligenceUI().build()
+    risk_blocks = _build_risk_intelligence_ui().build()
     performance_learning_blocks = PerformanceLearningUI().build()
     settings_blocks = SettingsUI().build()
 
