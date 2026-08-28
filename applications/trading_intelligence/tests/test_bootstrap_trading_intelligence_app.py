@@ -171,8 +171,13 @@ def test_decision_center_content_is_present_in_the_composed_app():
         block.value for block in app.blocks.values()
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
-    assert any("Illustrative Data" in value for value in html_values)
     assert any("Decision Center" in value for value in html_values)
+    # Phase 1 zero-illustrative-data: no data-authenticity disclaimer, and
+    # no seeded decisions leak into the composed Decision Center layout.
+    assert not any("Illustrative Data" in value for value in html_values)
+    combined = "\n".join(html_values)
+    for seeded in ("dec-seed-", "risk-seed-", "evidence-seed-", "pol-seed-", "apr-seed-"):
+        assert seeded not in combined
 
 
 def test_portfolio_intelligence_content_is_present_in_the_composed_app():
@@ -198,8 +203,15 @@ def test_risk_intelligence_content_is_present_in_the_composed_app():
     assert any("Risk Intelligence" in value for value in html_values)
     assert any("Current risk-governor state" in value for value in html_values)
 
+    # Phase 1 zero-illustrative-data: Risk Intelligence has no governed
+    # real source, so the composed app renders its UNAVAILABLE state --
+    # no fabricated history table, no "Illustrative Data" disclosure.
+    assert any(
+        "Risk Intelligence data is currently unavailable." in value for value in html_values
+    )
+    assert not any("Illustrative Data" in value for value in html_values)
     dataframes = [block for block in app.blocks.values() if isinstance(block, gr.Dataframe)]
-    assert any("ri-history-table" in (df.elem_classes or []) for df in dataframes)
+    assert not any("ri-history-table" in (df.elem_classes or []) for df in dataframes)
 
 
 def test_refresh_double_submit_guard_chain_survives_composition():

@@ -15,14 +15,14 @@ not in sentinel_engine/, purely so build_application() has something
 concrete to wire today; they are expected to be replaced once ADR-004 is
 resolved.
 
-Seed data: Decision Center is read-only (SentinelProjectionDecisionSource
-never calls ProjectionRepository.save() -- see its own tests), so this
-module seeds a handful of decisions through the real Sentinel Engine
-write path (DecisionService/EvidenceService/GovernanceService via the
-SentinelEngine facade) before building the read-side chain -- the same
-way a real caller (a future signal-generation adapter) would produce
-decisions. This is illustrative seed data for a first visible slice, not
-real trading data.
+No seed data: Decision Center renders only real decisions. No production
+decision source is wired yet (ADR-004 defers the ledger backend), so
+build_application() hands DecisionCenterUI an empty decision-id
+collection and the screen shows its existing "No decisions recorded yet."
+empty state until a governed real producer exists. The write-path
+services and the SentinelEngine facade are still constructed below -- the
+read chain shares their ledger/projection repositories -- but nothing
+drives them now that seeding is removed.
 """
 from dataclasses import replace
 from datetime import datetime
@@ -30,12 +30,7 @@ from typing import Dict, List, Optional, Tuple
 
 import gradio as gr
 
-from sentinel_engine.domain.decision import Decision
-from sentinel_engine.evidence.evidence import Evidence
 from sentinel_engine.events.event import Event
-from sentinel_engine.governance.approval import Approval
-from sentinel_engine.governance.approval_status import ApprovalStatus
-from sentinel_engine.governance.policy import Policy
 from sentinel_engine.ledger.ledger import LedgerStore
 from sentinel_engine.projections.decision_projection import DecisionProjection
 from sentinel_engine.queries.decision_query import DecisionQuery
@@ -195,159 +190,6 @@ class _InMemoryWorkspaceRegistry(WorkspaceRegistry):
         return [workspace for workspace in self._workspaces if workspace.product_id == product_id]
 
 
-def _seed_decisions(engine: SentinelEngine) -> List[str]:
-    """Drive five decisions through the real Sentinel Engine write path,
-    each stopped at a different lifecycle stage (or governance verdict), so
-    the first visible Decision Center screen demonstrates DecisionState's
-    full range with genuine engine-produced data rather than hand-built
-    projections -- dec-seed-004 (added to reach GOVERNANCE_EVALUATED)
-    closes the one terminal-status gap the three original seeds left: none
-    of them ever displayed GOVERNANCE_EVALUATED as a decision's *current*
-    status, only as a passed-through stage inside dec-seed-003's own
-    journey. dec-seed-005 (added alongside the Decision List verdict badge)
-    closes the equivalent gap for approval verdict: dec-seed-003 is the
-    only prior seed reaching record_approval(), and always with APPROVED --
-    dec-seed-005 exercises the REJECTED path end to end.
-
-    Each decision gets its own fixed timestamp(s), staggered across a single
-    illustrative trading morning and advancing chronologically within a
-    decision's own lifecycle (create -> evidence -> governance -> approval),
-    rather than every event across all decisions sharing one identical
-    instant -- still fully deterministic (fixed datetime literals, no
-    randomness), just no longer visually flat. confidence is similarly
-    given a genuine spread (0.54 / 0.71 / 0.83 / 0.91) instead of clustering
-    in the 60-90% band. Governance evaluation's own displayed timestamp
-    remains real-clock (GovernanceService.evaluate_policy() stamps
-    datetime.utcnow() internally, not a caller-supplied value) -- unaffected
-    by any of this, and out of scope to change without touching
-    sentinel_engine. dec-seed-004 reuses "pol-seed-001" (already registered
-    while seeding dec-seed-003, and GovernanceService's policy registry is
-    shared across the whole engine instance for this function's duration)
-    rather than registering a second, functionally-identical policy."""
-    decision_ids: List[str] = []
-
-    # dec-seed-001: DECISION_CREATED only.
-    created_001 = datetime(2026, 8, 8, 8, 12, 0)
-    engine.create_decision(Decision(
-        decision_id="dec-seed-001", symbol="AAPL", action="BUY",
-        timestamp=created_001, confidence=0.71,
-        evidence_reference="evidence-seed-001", risk_reference="risk-seed-001",
-    ))
-    decision_ids.append("dec-seed-001")
-
-    # dec-seed-002: through EVIDENCE_ATTACHED.
-    created_002 = datetime(2026, 8, 8, 8, 47, 0)
-    evidence_attached_002 = datetime(2026, 8, 8, 8, 52, 0)
-    engine.create_decision(Decision(
-        decision_id="dec-seed-002", symbol="MSFT", action="HOLD",
-        timestamp=created_002, confidence=0.54,
-        evidence_reference="evidence-seed-002", risk_reference="risk-seed-002",
-    ))
-    engine.attach_evidence("dec-seed-002", Evidence(
-        evidence_id="ev-seed-002", evidence_type="NEWS_SENTIMENT", source="newsapi",
-        data={
-            "score": 0.58,
-            # ADR-036/ADR-037-authorized shape (data["metadata"]): illustrates
-            # the same raw_score/headlines fields the real finbert evidence
-            # record already carries, so the ADR-037 Evidence detail
-            # disclosure has something to render in the seeded demo -- see
-            # ADR-034's own "Negative consequences" section, which names this
-            # exact seed as not yet reflecting that shape.
-            "metadata": {
-                "raw_score": 0.58,
-                "headlines": [
-                    "Microsoft cloud growth steady but guidance mixed",
-                    "Analysts split on MSFT ahead of earnings",
-                ],
-            },
-        },
-        collected_at=evidence_attached_002,
-    ))
-    decision_ids.append("dec-seed-002")
-
-    # dec-seed-003: through APPROVAL_RECORDED (full lifecycle).
-    created_003 = datetime(2026, 8, 8, 9, 5, 0)
-    evidence_attached_003 = datetime(2026, 8, 8, 9, 11, 0)
-    approved_003 = datetime(2026, 8, 8, 9, 34, 0)
-    engine.create_decision(Decision(
-        decision_id="dec-seed-003", symbol="NVDA", action="SELL",
-        timestamp=created_003, confidence=0.91,
-        evidence_reference="evidence-seed-003", risk_reference="risk-seed-003",
-    ))
-    engine.attach_evidence("dec-seed-003", Evidence(
-        evidence_id="ev-seed-003", evidence_type="NEWS_SENTIMENT", source="newsapi",
-        data={"score": 0.74}, collected_at=evidence_attached_003,
-    ))
-    engine.register_policy(Policy(
-        policy_id="pol-seed-001", name="max_position_size",
-        description="Caps single-position exposure as a percent of portfolio value.",
-        enabled=True,
-    ))
-    engine.evaluate_policy("dec-seed-003", "pol-seed-001")
-    engine.record_approval(Approval(
-        approval_id="apr-seed-001", decision_id="dec-seed-003",
-        status=ApprovalStatus.APPROVED, approved_by="risk_officer", timestamp=approved_003,
-    ))
-    decision_ids.append("dec-seed-003")
-
-    # dec-seed-004: through GOVERNANCE_EVALUATED only -- governance passed,
-    # awaiting approval. No record_approval() call.
-    created_004 = datetime(2026, 8, 8, 9, 40, 0)
-    evidence_attached_004 = datetime(2026, 8, 8, 9, 46, 0)
-    engine.create_decision(Decision(
-        decision_id="dec-seed-004", symbol="GOOGL", action="BUY",
-        timestamp=created_004, confidence=0.83,
-        evidence_reference="evidence-seed-004", risk_reference="risk-seed-004",
-    ))
-    engine.attach_evidence("dec-seed-004", Evidence(
-        evidence_id="ev-seed-004", evidence_type="NEWS_SENTIMENT", source="newsapi",
-        data={
-            "score": 0.69,
-            # ADR-036/ADR-037-authorized shape (data["metadata"]), same
-            # pattern as ev-seed-002 above -- gives the ADR-037 Evidence
-            # detail disclosure something to render for this seed too (was
-            # previously the one remaining seed left in the pre-ADR-034
-            # bare-score-only shape).
-            "metadata": {
-                "raw_score": 0.69,
-                "headlines": [
-                    "Alphabet cloud unit narrows losses as AI demand grows",
-                    "Google search ad revenue tops estimates for the quarter",
-                ],
-            },
-        },
-        collected_at=evidence_attached_004,
-    ))
-    engine.evaluate_policy("dec-seed-004", "pol-seed-001")
-    decision_ids.append("dec-seed-004")
-
-    # dec-seed-005: through APPROVAL_RECORDED with a REJECTED verdict --
-    # full lifecycle like dec-seed-003, but exercising the rejection path
-    # end to end (Decision List verdict badge, Decision Detail approval
-    # card) that no prior seed demonstrated. Reuses "pol-seed-001" for the
-    # same reason dec-seed-004 does.
-    created_005 = datetime(2026, 8, 8, 9, 52, 0)
-    evidence_attached_005 = datetime(2026, 8, 8, 9, 58, 0)
-    rejected_005 = datetime(2026, 8, 8, 10, 4, 0)
-    engine.create_decision(Decision(
-        decision_id="dec-seed-005", symbol="TSLA", action="BUY",
-        timestamp=created_005, confidence=0.61,
-        evidence_reference="evidence-seed-005", risk_reference="risk-seed-005",
-    ))
-    engine.attach_evidence("dec-seed-005", Evidence(
-        evidence_id="ev-seed-005", evidence_type="NEWS_SENTIMENT", source="newsapi",
-        data={"score": 0.41}, collected_at=evidence_attached_005,
-    ))
-    engine.evaluate_policy("dec-seed-005", "pol-seed-001")
-    engine.record_approval(Approval(
-        approval_id="apr-seed-002", decision_id="dec-seed-005",
-        status=ApprovalStatus.REJECTED, approved_by="risk_officer", timestamp=rejected_005,
-    ))
-    decision_ids.append("dec-seed-005")
-
-    return decision_ids
-
-
 def build_application() -> DecisionCenterUI:
     auth_provider = SupabaseAuthenticationProvider(_NoOpSupabaseClient())
     # ADR-029 Sec 2.3/2.4: captured only -- never passed to any collaborator
@@ -393,9 +235,13 @@ def build_application() -> DecisionCenterUI:
     decision_service = DecisionService(ledger_repository, projection_repository)
     evidence_service = EvidenceService(ledger_repository, projection_repository)
     governance_service = GovernanceService(ledger_repository, projection_repository)
+    # Constructed but undriven now that seeding is removed -- same
+    # retained-seam pattern as navigation_model above. The read chain below
+    # shares ledger_repository/projection_repository; removing the
+    # SentinelEngine write-path seam would be an out-of-scope
+    # composition-root change. Real decisions appear only once a governed
+    # producer writes them.
     engine = SentinelEngine(decision_service, evidence_service, governance_service)
-
-    decision_ids = _seed_decisions(engine)
 
     decision_query = DecisionQuery(ledger_repository, projection_repository)
 
@@ -414,7 +260,7 @@ def build_application() -> DecisionCenterUI:
         query_service, evidence_query_service, governance_query_service, audit_source,
     )
 
-    return DecisionCenterUI(controller, decision_ids)
+    return DecisionCenterUI(controller, [])
 
 
 # Composition-only fix for a regression found in live verification: Decision

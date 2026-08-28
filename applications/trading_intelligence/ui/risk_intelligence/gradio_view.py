@@ -1,10 +1,14 @@
-"""Gradio shell for Risk Intelligence -- illustrative MVP.
+"""Gradio shell for Risk Intelligence -- real data or an explicit
+UNAVAILABLE state; never fabricated/illustrative risk figures.
 
 Self-contained: does not import ui/decision_center/ or
-ui/portfolio_intelligence/ (no cross-package import of any kind). Renders
-mock_data.py's RiskScreen only -- no controller, no service, no
-sentinel_engine/bot import. Wired into main.py/bootstrap.py as the 3rd
-Trading Intelligence tab.
+ui/portfolio_intelligence/ (no cross-package import of any kind), and does
+not import mock_data.py. Renders whatever RiskScreen it is given; the
+production default (no `screen` supplied) is an unavailable RiskScreen()
+(current is None), which renders a single UNAVAILABLE message and no
+fabricated state badge, history table, evaluation cards, or sizing
+metrics. No controller, no service, no sentinel_engine/bot import. Wired
+into main.py/bootstrap.py as the 3rd Trading Intelligence tab.
 
 Keyboard focus/activation uses native HTML controls only, no custom JS:
 the trigger-reason disclosure and each evaluation-history card are real
@@ -36,7 +40,6 @@ from typing import List, Tuple
 
 import gradio as gr
 
-from applications.trading_intelligence.ui.risk_intelligence.mock_data import build_mock_screen
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
     RiskHistoryEntry,
     RiskScreen,
@@ -62,16 +65,14 @@ _STATE_BADGE_CLASSES = {
     "DEFENSIVE": "state-defensive",
 }
 
-_ILLUSTRATIVE_DATA_TITLE = "Illustrative Data"
-_ILLUSTRATIVE_DATA_BODY = (
-    "The risk state, trigger reason, and position sizing shown here are "
-    "illustrative and are not derived from any real account or governance "
-    "decision."
-)
-_ILLUSTRATIVE_DATA_HTML = (
-    '<div class="ri-disclosure">'
-    f'<div class="ri-disclosure-title">{html.escape(_ILLUSTRATIVE_DATA_TITLE)}</div>'
-    f'<div class="ri-disclosure-body">{html.escape(_ILLUSTRATIVE_DATA_BODY)}</div>'
+# Rendered in place of every current-state / history / sizing element when
+# no governed real risk source is available (RiskScreen.is_available is
+# False -- the production default). Reuses the .ri-empty-message treatment
+# this screen's own theme.py already defines; no fabricated state badge,
+# history table, evaluation card, or sizing metric is emitted alongside it.
+_UNAVAILABLE_MESSAGE_HTML = (
+    '<div class="ri-empty-message">'
+    f'{html.escape("Risk Intelligence data is currently unavailable.")}'
     "</div>"
 )
 
@@ -125,7 +126,12 @@ _LIVE_REGION_SETUP_JS = f"""
 
 class RiskIntelligenceUI:
     def __init__(self, screen: RiskScreen = None):
-        self._screen = screen if screen is not None else build_mock_screen()
+        """The default screen (no `screen` supplied) is an unavailable
+        RiskScreen() -- current is None -- never a mock/illustrative
+        screen. When the screen is unavailable the view renders only a
+        single UNAVAILABLE message; the current-state, history, and
+        evaluation-detail sections are omitted entirely."""
+        self._screen = screen if screen is not None else RiskScreen()
 
     def build(self) -> gr.Blocks:
         with gr.Blocks(
@@ -136,37 +142,40 @@ class RiskIntelligenceUI:
             gr.HTML(build_shell_nav_html("Risk Intelligence"), elem_classes=["aara-shell-nav"])
 
             gr.HTML(_PAGE_HEADER_HTML)
-            gr.HTML(_ILLUSTRATIVE_DATA_HTML)
 
             # Accessibility parity pass: visually hidden, screen-reader-only
             # live region -- see _LIVE_REGION_SETUP_JS above for how
             # aria-live/aria-atomic/role get attached to this element's
             # stable host, and _announce_current_state below for what
             # populates it. Empty initial value; never rendered with
-            # visible content of its own.
+            # visible content of its own. Rendered regardless of
+            # availability so the announcer is always present.
             live_announcer = gr.HTML(
                 value="", elem_id=_LIVE_ANNOUNCER_ELEM_ID, elem_classes=["ri-sr-only"],
             )
 
-            gr.HTML('<div class="ri-section-label">Current State</div>')
-            gr.HTML(self._format_current_state_html(self._screen.current))
-
-            gr.HTML('<div class="ri-section-label">Recent Risk Evaluations</div>')
-            if self._screen.is_empty:
-                gr.HTML(self._format_empty_message_html(self._screen))
+            if not self._screen.is_available:
+                gr.HTML(_UNAVAILABLE_MESSAGE_HTML)
             else:
-                gr.Dataframe(
-                    headers=_HISTORY_HEADERS,
-                    value=self._format_history_rows(self._screen.history),
-                    datatype=["str", "str", "str", "str", "str"],
-                    interactive=False,
-                    label="Recent Risk Evaluations",
-                    show_label=False,
-                    elem_classes=["ri-history-table"],
-                    **{_DATAFRAME_HEIGHT_KWARG: 320},
-                )
-                gr.HTML(_HISTORY_DETAIL_SECTION_LABEL_HTML)
-                gr.HTML(self._format_history_detail_list_html(self._screen.history))
+                gr.HTML('<div class="ri-section-label">Current State</div>')
+                gr.HTML(self._format_current_state_html(self._screen.current))
+
+                gr.HTML('<div class="ri-section-label">Recent Risk Evaluations</div>')
+                if self._screen.is_empty:
+                    gr.HTML(self._format_empty_message_html(self._screen))
+                else:
+                    gr.Dataframe(
+                        headers=_HISTORY_HEADERS,
+                        value=self._format_history_rows(self._screen.history),
+                        datatype=["str", "str", "str", "str", "str"],
+                        interactive=False,
+                        label="Recent Risk Evaluations",
+                        show_label=False,
+                        elem_classes=["ri-history-table"],
+                        **{_DATAFRAME_HEIGHT_KWARG: 320},
+                    )
+                    gr.HTML(_HISTORY_DETAIL_SECTION_LABEL_HTML)
+                    gr.HTML(self._format_history_detail_list_html(self._screen.history))
 
             # Accessibility parity pass: this screen has no refresh button or
             # selection interactivity (see this module's own docstring) --
@@ -180,10 +189,13 @@ class RiskIntelligenceUI:
 
     def _announce_current_state(self) -> str:
         """Accessibility parity pass: populates live_announcer on page
-        load. Describes the current risk state exactly as already
-        rendered by _format_current_state_html, from the same RiskScreen
-        data -- never implies the state is live (the page's own
-        Illustrative Data disclosure already covers that)."""
+        load. When no real risk source is available, announces the same
+        UNAVAILABLE fact the visible message states. Otherwise describes
+        the current risk state exactly as _format_current_state_html
+        renders it, from the same RiskScreen data -- never implies the
+        state is live."""
+        if not self._screen.is_available:
+            return f"Risk Intelligence loaded. {self._screen.unavailable_message}"
         return f"Risk Intelligence loaded. Current risk state: {self._screen.current.state}."
 
     @staticmethod

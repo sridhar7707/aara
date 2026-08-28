@@ -84,3 +84,25 @@ def test_risk_screen_is_not_empty_with_history():
     screen = RiskScreen(current=_make_snapshot(), history=(_make_history_entry(),))
 
     assert not screen.is_empty
+
+
+def test_risk_screen_defaults_to_unavailable():
+    screen = RiskScreen()
+
+    assert screen.current is None
+    assert screen.is_available is False
+    assert screen.history == ()
+    assert screen.unavailable_message == "Risk Intelligence data is currently unavailable."
+
+
+def test_risk_screen_is_available_once_a_snapshot_is_supplied():
+    screen = RiskScreen(current=_make_snapshot())
+
+    assert screen.is_available is True
+
+
+def test_risk_screen_stays_frozen():
+    screen = RiskScreen()
+
+    with pytest.raises(Exception):
+        screen.current = _make_snapshot()

@@ -3,8 +3,9 @@
 test_ui_structure.py already scans every file under ui/ (including this
 package) for bot/dashboard/scheduler/sentinel_engine imports -- not
 repeated here. This file covers what's unique to this package: no
-coupling to ui/decision_center/ or ui/portfolio_intelligence/, and no
-`RiskEvaluation` class name anywhere (the task's explicit non-goal).
+coupling to ui/decision_center/ or ui/portfolio_intelligence/, no
+`RiskEvaluation` class name anywhere (the task's explicit non-goal), and
+no production module importing mock_data.py.
 """
 import ast
 import importlib
@@ -62,6 +63,36 @@ def test_risk_intelligence_theme_defines_local_spacing_tokens():
         assert f"--ri-space-{px}: {px}px;" in CSS, (
             f"expected a --ri-space-{px} token declared in theme.py's CSS"
         )
+
+
+def test_production_risk_modules_do_not_import_mock_data():
+    """Production guarantee: the Risk Intelligence view (gradio_view.py)
+    and the composition root (bootstrap.py) must not import or use
+    risk_intelligence.mock_data / build_mock_screen. mock_data.py stays
+    only for its own isolated unit test and must be unreachable from
+    build_trading_intelligence_app() -- Risk Intelligence renders real /
+    unavailable only."""
+    view = (_PACKAGE_ROOT / "gradio_view.py").read_text(encoding="utf-8")
+    bootstrap = (
+        pathlib.Path(__file__).resolve().parents[2] / "bootstrap.py"
+    ).read_text(encoding="utf-8")
+
+    assert "risk_intelligence.mock_data" not in view
+    assert "build_mock_screen" not in view
+    assert "risk_intelligence.mock_data" not in bootstrap
+
+
+def test_risk_intelligence_screen_current_defaults_to_none():
+    """The production default RiskScreen() must represent no real risk
+    data -- current is None, is_available is False -- so the view renders
+    an explicit UNAVAILABLE state rather than a fabricated
+    NORMAL/WARNING/DEFENSIVE snapshot."""
+    from applications.trading_intelligence.ui.risk_intelligence.screen import RiskScreen
+
+    screen = RiskScreen()
+    assert screen.current is None
+    assert screen.is_available is False
+    assert screen.unavailable_message == "Risk Intelligence data is currently unavailable."
 
 
 def test_risk_intelligence_does_not_define_a_riskevaluation_class():

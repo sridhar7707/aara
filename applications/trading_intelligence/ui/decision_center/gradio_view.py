@@ -876,44 +876,19 @@ _RISK_REFERENCE_NAV_LINK_JS = f"""
 </script>
 """
 
-# P0 illustrative-data disclosure (UI-completion Product/UX audit): static,
-# decision-independent, persistent -- built once at build() time like
-# _SHELL_NAV_HTML, never wired into detail_outputs/_DetailValues/any
-# callback path. Placed at the page-header level (every load, before any
-# decision-specific content) rather than inside a single decision's detail
-# panel, since it applies to the whole screen, not one decision. Deliberately
-# names only "decisions and supporting data" in general -- it must not
-# assert or deny that governance, approvals, audit events, persistence,
-# authentication, brokerage connectivity, or any other production capability
-# exists; that is out of scope for a single disclosure line.
-_ILLUSTRATIVE_DATA_TITLE = "Illustrative Data"
-_ILLUSTRATIVE_DATA_BODY = (
-    "The decisions and supporting data shown here are illustrative and are "
-    "not real trading activity."
-)
-_ILLUSTRATIVE_DATA_HTML = (
-    '<div class="aara-disclosure-message">'
-    f'<div class="aara-disclosure-title">{html.escape(_ILLUSTRATIVE_DATA_TITLE)}</div>'
-    f'<div class="aara-disclosure-body">{html.escape(_ILLUSTRATIVE_DATA_BODY)}</div>'
-    "</div>"
-)
-
-# P1 UI-only timestamp-semantics disclosure (GOOGL/dec-seed-004 timestamp
-# audit): "Last Updated" in the Decisions table (and the mirrored Last
-# Updated field in Decision Intelligence, via screen.py's own
-# timestamp_display) is not always narrative/seed-timeline data -- for a
-# decision whose latest recorded lifecycle stage is Governance Evaluated,
+# P1 UI-only timestamp-semantics disclosure: "Last Updated" in the
+# Decisions table (and the mirrored Last Updated field in Decision
+# Intelligence, via screen.py's own timestamp_display) is a
+# column-semantics explainer, not trading data -- for a decision whose
+# latest recorded lifecycle stage is Governance Evaluated,
 # GovernanceService.evaluate_policy() stamps real evaluation-time
 # (datetime.utcnow(), sentinel_engine/services/governance_service.py) --
-# unlike every other lifecycle step, which uses a caller-supplied/seed
+# unlike every other lifecycle step, which uses a caller-supplied
 # timestamp -- and that is out of scope to change without touching
-# sentinel_engine (see bootstrap.py's own _seed_decisions() docstring).
-# Same static/decision-independent/persistent pattern as
-# _ILLUSTRATIVE_DATA_HTML above -- a separate disclosure because it covers
-# a different topic (timestamp semantics, not data authenticity) that
-# _ILLUSTRATIVE_DATA_BODY's own docstring deliberately keeps out of scope
-# for that single line. Placed in the list toolbar, directly associated
-# with the Decisions table's own "Last Updated" column.
+# sentinel_engine. Static, decision-independent, persistent -- built once
+# at build() time, never wired into detail_outputs/_DetailValues. Placed
+# in the list toolbar, directly associated with the Decisions table's own
+# "Last Updated" column.
 _TIMESTAMP_DISCLOSURE_TITLE = "About Last Updated"
 _TIMESTAMP_DISCLOSURE_BODY = (
     '"Last Updated" may represent the latest lifecycle event recorded '
@@ -984,7 +959,6 @@ class DecisionCenterUI:
             gr.HTML(_SHELL_NAV_HTML, elem_classes=["aara-shell-nav"])
 
             gr.HTML(_PAGE_HEADER_HTML, elem_classes=["aara-page-header"])
-            gr.HTML(_ILLUSTRATIVE_DATA_HTML)
             # P1 accessibility slice: visually hidden, screen-reader-only
             # live region -- see _LIVE_REGION_SETUP_JS above for how
             # aria-live/aria-atomic/role get attached to this element's

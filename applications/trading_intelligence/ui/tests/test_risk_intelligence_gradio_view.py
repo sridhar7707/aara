@@ -1,11 +1,11 @@
+import pathlib
+
 import gradio as gr
 
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import (
-    _ILLUSTRATIVE_DATA_BODY,
-    _ILLUSTRATIVE_DATA_HTML,
-    _ILLUSTRATIVE_DATA_TITLE,
     _LIVE_ANNOUNCER_ELEM_ID,
     _LIVE_REGION_SETUP_JS,
+    _UNAVAILABLE_MESSAGE_HTML,
     RiskIntelligenceUI,
 )
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
@@ -29,10 +29,34 @@ def _make_snapshot(**overrides):
     return RiskSnapshot(**defaults)
 
 
-def test_ui_can_be_constructed_with_default_mock_screen():
+_TEST_HISTORY = (
+    RiskHistoryEntry(
+        timestamp="2026-08-18 14:00 UTC", state="NORMAL",
+        trigger_reason="Portfolio drawdown -3.1% -- within normal range.",
+        recommended_sizing_pct=100.0, actual_sizing_pct=100.0,
+    ),
+    RiskHistoryEntry(
+        timestamp="2026-08-17 09:15 UTC", state="WARNING",
+        trigger_reason="Portfolio drawdown -11.4% -- approaching daily loss limit.",
+        recommended_sizing_pct=75.0, actual_sizing_pct=70.0,
+    ),
+)
+
+
+def _make_available_screen(**overrides):
+    """An explicitly-injected, available RiskScreen for the formatter/
+    rendering tests -- this path is unchanged by the illustrative-data
+    removal (only the production *default* became unavailable)."""
+    defaults = dict(current=_make_snapshot(), history=_TEST_HISTORY)
+    defaults.update(overrides)
+    return RiskScreen(**defaults)
+
+
+def test_ui_defaults_to_an_unavailable_screen():
     ui = RiskIntelligenceUI()
 
-    assert not ui._screen.is_empty
+    assert ui._screen.is_available is False
+    assert ui._screen.current is None
 
 
 def test_build_returns_a_gradio_blocks_instance():
@@ -43,17 +67,11 @@ def test_build_returns_a_gradio_blocks_instance():
     assert isinstance(demo, gr.Blocks)
 
 
-def test_illustrative_data_disclosure_is_the_exact_fixed_text():
-    assert _ILLUSTRATIVE_DATA_TITLE == "Illustrative Data"
-    assert _ILLUSTRATIVE_DATA_HTML == (
-        '<div class="ri-disclosure">'
-        f'<div class="ri-disclosure-title">{_ILLUSTRATIVE_DATA_TITLE}</div>'
-        f'<div class="ri-disclosure-body">{_ILLUSTRATIVE_DATA_BODY}</div>'
-        "</div>"
-    )
-
-
-def test_illustrative_data_disclosure_block_is_present_in_the_built_layout():
+def test_default_build_renders_the_unavailable_message_and_no_fabricated_content():
+    """Production default: no governed real risk source, so the view must
+    render a single UNAVAILABLE message and never a fabricated state
+    badge, history table, evaluation card, sizing metric, timestamp, or an
+    "Illustrative Data" disclosure."""
     ui = RiskIntelligenceUI()
 
     demo = ui.build()
@@ -62,7 +80,49 @@ def test_illustrative_data_disclosure_block_is_present_in_the_built_layout():
         block.value for block in demo.blocks.values()
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
-    assert _ILLUSTRATIVE_DATA_HTML in html_values
+    combined = "\n".join(html_values)
+    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
+
+    assert _UNAVAILABLE_MESSAGE_HTML in html_values
+    assert "Risk Intelligence data is currently unavailable." in combined
+    assert dataframes == []
+    assert "Illustrative Data" not in combined
+    for fabricated in ("state-normal", "state-warning", "state-defensive", "ri-state-badge"):
+        assert fabricated not in combined
+    assert "ri-current-state" not in combined
+    assert "ri-sizing-metrics" not in combined
+    assert '<details class="ri-history-detail-card">' not in combined
+    assert "Recommended Sizing" not in combined
+
+
+def test_default_build_still_renders_shell_header_nav_page_header_and_announcer():
+    ui = RiskIntelligenceUI()
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    combined = "\n".join(html_values)
+    assert SHELL_IDENTITY_HTML in html_values
+    assert build_shell_nav_html("Risk Intelligence") in html_values
+    assert '<h2 class="aara-eyebrow">Risk Intelligence</h2>' in combined
+    live_blocks = [
+        block for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and getattr(block, "elem_id", None) == _LIVE_ANNOUNCER_ELEM_ID
+    ]
+    assert len(live_blocks) == 1
+
+
+def test_announce_current_state_reports_unavailable_by_default():
+    ui = RiskIntelligenceUI()
+
+    announcement = ui._announce_current_state()
+
+    assert announcement == (
+        "Risk Intelligence loaded. Risk Intelligence data is currently unavailable."
+    )
 
 
 def test_shell_header_and_nav_are_present_in_the_built_layout():
@@ -190,7 +250,7 @@ def test_build_renders_empty_message_instead_of_a_table_when_no_history():
 
 
 def test_build_renders_a_dataframe_when_history_exists():
-    ui = RiskIntelligenceUI()
+    ui = RiskIntelligenceUI(screen=_make_available_screen())
 
     demo = ui.build()
 
@@ -260,7 +320,7 @@ def test_history_detail_list_html_produces_one_card_per_entry():
 
 
 def test_build_renders_a_detail_card_per_history_entry_when_history_exists():
-    ui = RiskIntelligenceUI()
+    ui = RiskIntelligenceUI(screen=_make_available_screen())
 
     demo = ui.build()
 
@@ -299,15 +359,22 @@ def test_page_header_title_carries_the_aara_eyebrow_class():
     assert '<h2 class="aara-eyebrow">Risk Intelligence</h2>' in combined
 
 
-def test_illustrative_data_disclosure_is_unchanged_by_this_unit():
-    """Regression lock: the detail-card addition must not alter the
-    existing illustrative-data disclosure in any way."""
-    assert _ILLUSTRATIVE_DATA_HTML == (
-        '<div class="ri-disclosure">'
-        f'<div class="ri-disclosure-title">{_ILLUSTRATIVE_DATA_TITLE}</div>'
-        f'<div class="ri-disclosure-body">{_ILLUSTRATIVE_DATA_BODY}</div>'
-        "</div>"
-    )
+def test_gradio_view_module_defines_no_illustrative_data_disclosure():
+    """Guardrail: the illustrative-data disclosure constants and their
+    "Illustrative Data" text must not exist in the production view
+    module."""
+    import applications.trading_intelligence.ui.risk_intelligence.gradio_view as view_module
+
+    for removed in ("_ILLUSTRATIVE_DATA_HTML", "_ILLUSTRATIVE_DATA_TITLE", "_ILLUSTRATIVE_DATA_BODY"):
+        assert not hasattr(view_module, removed)
+    source = pathlib.Path(view_module.__file__).read_text(encoding="utf-8")
+    assert "Illustrative Data" not in source
+    assert "build_mock_screen" not in source
+    import_lines = [
+        line for line in source.splitlines()
+        if line.strip().startswith(("import ", "from ")) and "mock_data" in line
+    ]
+    assert import_lines == []
 
 
 # --- Accessibility & Keyboard Interaction Parity pass -----------------

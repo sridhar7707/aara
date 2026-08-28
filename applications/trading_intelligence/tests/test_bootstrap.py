@@ -7,6 +7,8 @@ returned DecisionCenterUI never exposes its repositories/services directly,
 so verifying "exactly one shared instance" requires observing construction
 itself rather than introspecting the final graph.
 """
+import pathlib
+
 from sentinel_engine.queries.decision_query import DecisionQuery
 from sentinel_engine.repositories.ledger_repository import LedgerRepository
 from sentinel_engine.services.decision_service import DecisionService
@@ -229,208 +231,37 @@ def test_build_application_does_not_duplicate_the_object_graph(monkeypatch):
     assert len(repository_instances) == 2  # exactly one of each, never duplicated
 
 
-def test_build_application_seeds_five_decisions_across_the_full_decision_state_range():
+def test_build_application_creates_no_decisions():
+    """Phase 1 zero-illustrative-data: bootstrap no longer seeds any
+    decisions through the Sentinel Engine write path. build_application()
+    hands DecisionCenterUI an empty decision-id collection, so the
+    Decision List renders its existing EMPTY state and no decision detail
+    is reachable."""
     ui = build_application()
 
-    list_rows, *_detail = ui._render_screen()
+    list_rows, list_empty_html, *_detail = ui._render_screen()
 
-    assert len(list_rows) == 5
-    statuses = {row[0]: row[3] for row in list_rows}
-    assert statuses["dec-seed-001"] == "Decision Created"
-    assert statuses["dec-seed-002"] == "Evidence Attached"
-    assert statuses["dec-seed-003"] == "Approval Recorded"
-    assert statuses["dec-seed-004"] == "Governance Evaluated"
-    assert statuses["dec-seed-005"] == "Approval Recorded"
-
-
-def test_build_application_seeds_both_approval_verdicts_in_the_decision_list():
-    """dec-seed-003 (APPROVED) and dec-seed-005 (REJECTED) are the only two
-    seeds carrying a recorded approval, so the Decision List's Verdict
-    column demonstrates both real verdicts -- not just one -- alongside the
-    "no verdict yet" state the other three seeds show."""
-    ui = build_application()
-
-    list_rows, *_detail = ui._render_screen()
-    verdicts = {row[0]: row[6] for row in list_rows}
-
-    assert verdicts["dec-seed-003"] == (
-        '<span class="aara-list-verdict-badge verdict-approved">Approved</span>'
-    )
-    assert verdicts["dec-seed-005"] == (
-        '<span class="aara-list-verdict-badge verdict-rejected">Rejected</span>'
-    )
-    # Backslash-escaped dash, not a bare "-" -- see gradio_view.py's
-    # _verdict_badge_html docstring (P3 manual-QA fix, CF-04): this column
-    # renders via datatype="markdown", and a bare "-" is CommonMark syntax
-    # for an empty list item, not literal text.
-    assert verdicts["dec-seed-001"] == "\\-"
-    assert verdicts["dec-seed-002"] == "\\-"
-    assert verdicts["dec-seed-004"] == "\\-"
-
-
-def test_build_application_seeded_decisions_are_reachable_by_id():
-    """The seed data is produced entirely through the real Sentinel Engine
-    write path (DecisionService/EvidenceService/GovernanceService), then
-    read back through Trading Intelligence's own read-only chain -- proving
-    the vertical slice actually renders Sentinel Engine data, not
-    hand-built projections standing in for it."""
-    ui = build_application()
-
-    (
-        header, lifecycle, confidence, _updated, _status, _why_html,
-        _evidence_html, _governance_html, _approval_html, _audit_html,
-    ) = ui._render_detail("dec-seed-003")
-
-    assert "NVDA" in header
-    assert "SELL" in header
-    assert confidence == "91%"
-    assert (
-        'class="stage active"><span class="dot"></span>'
-        '<a class="label" href="#approval-section">Approval</a>'
-    ) in lifecycle
-
-
-def test_build_application_seeds_evidence_for_decisions_that_had_it_attached():
-    """dec-seed-002/003 have evidence attached via engine.attach_evidence()
-    in _seed_decisions(); dec-seed-001 deliberately does not, so both the
-    "has evidence" and "no evidence" states are demonstrated by the existing
-    seed path without any change to it. dec-seed-002/003 each attach
-    evidence at their own distinct timestamp (staggered seed data), so each
-    is asserted against its own value rather than one shared literal."""
-    ui = build_application()
-
-    *_, evidence_002, _governance_002, _approval_002, _audit_002 = ui._render_detail("dec-seed-002")
-    *_, evidence_003, _governance_003, _approval_003, _audit_003 = ui._render_detail("dec-seed-003")
-
-    assert "NEWS_SENTIMENT" in evidence_002
-    assert "newsapi" in evidence_002
-    assert "2026-08-08 03:52 CDT" in evidence_002
-
-    assert "NEWS_SENTIMENT" in evidence_003
-    assert "newsapi" in evidence_003
-    assert "2026-08-08 04:11 CDT" in evidence_003
-
-
-def test_build_application_seeded_decision_without_attached_evidence_has_none():
-    ui = build_application()
-
-    *_, evidence_html, _governance_html, _approval_html, _audit_html = ui._render_detail(
-        "dec-seed-001"
+    assert list_rows == []
+    assert list_empty_html == (
+        '<div class="aara-empty-message">No decisions recorded yet.</div>'
     )
 
-    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
 
-
-def test_build_application_seeds_governance_and_approval_for_the_fully_approved_decision():
-    """dec-seed-003 is the only seed decision driven through
-    record_approval() in bootstrap.py's _seed_decisions() -- dec-seed-004
-    also reaches evaluate_policy() but deliberately stops before
-    record_approval(), and dec-seed-001/002 reach neither -- so "has
-    governance and approval", "has governance but not approval", and "has
-    neither" are all demonstrated by the existing seed path."""
+def test_build_application_passes_an_empty_decision_id_collection():
     ui = build_application()
 
-    *_, _evidence_html, governance_html, approval_html, audit_html = ui._render_detail(
-        "dec-seed-003"
-    )
-
-    # evaluate_policy() timestamps with datetime.utcnow() (unlike
-    # record_approval(), which uses the seed's own fixed approval
-    # timestamp), so only policy_id/enabled are asserted precisely here;
-    # evaluated_at is only checked for well-formed presence -- rendered in
-    # America/Chicago like every other Decision Center timestamp (P1
-    # UI-only timestamp fix), so real-clock evaluated_at shows CDT or CST
-    # depending on when the test runs, never a fixed value.
-    assert "pol-seed-001" in governance_html
-    assert "Yes" in governance_html
-    assert ("CDT" in governance_html) or ("CST" in governance_html)
-    assert "Approved" in approval_html
-    assert "risk_officer" in approval_html
-    assert "2026-08-08 04:34 CDT" in approval_html
-
-    # dec-seed-003 runs the full lifecycle (create -> evidence -> governance
-    # -> approval), so its audit trail carries all four event types.
-    # evaluate_policy() stamps GOVERNANCE_EVALUATED with real-clock
-    # datetime.utcnow() (unlike the other three, which use the seed's own
-    # fixed timestamps -- see _seed_decisions()'s own docstring), so its
-    # sort position relative to APPROVAL_RECORDED's fixed 2026-08-08
-    # timestamp depends on wall-clock time and is not asserted here; only
-    # the two fixed-timestamp events' relative order is deterministic.
-    assert "Decision Created" in audit_html
-    assert "Evidence Attached" in audit_html
-    assert "Governance Evaluated" in audit_html
-    assert "Approval Recorded" in audit_html
-    assert audit_html.index("Decision Created") < audit_html.index("Evidence Attached")
+    assert ui._decision_ids == []
 
 
-def test_build_application_seeded_decisions_without_governance_or_approval_have_none():
-    ui = build_application()
+def test_bootstrap_module_contains_no_seed_path():
+    """Guardrail: the _seed_decisions function and every dec-seed-* /
+    risk-seed-* / evidence-seed-* literal must be gone from the production
+    composition root."""
+    import applications.trading_intelligence.bootstrap as bootstrap_module
 
-    *_, _evidence_html_1, governance_html_1, approval_html_1, _audit_html_1 = ui._render_detail(
-        "dec-seed-001"
-    )
-    *_, _evidence_html_2, governance_html_2, approval_html_2, _audit_html_2 = ui._render_detail(
-        "dec-seed-002"
-    )
-
-    assert governance_html_1 == (
-        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
-    )
-    assert approval_html_1 == '<div class="aara-empty-message">No approval recorded.</div>'
-    assert governance_html_2 == (
-        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
-    )
-    assert approval_html_2 == '<div class="aara-empty-message">No approval recorded.</div>'
-
-
-def test_build_application_seeds_a_rejected_decision_end_to_end():
-    """dec-seed-005 exercises the REJECTED approval path through the full
-    lifecycle (create -> evidence -> governance -> approval) -- the one
-    path no prior seed demonstrated, since dec-seed-003 is the only other
-    seed reaching record_approval(), and always with APPROVED."""
-    ui = build_application()
-
-    (
-        header, lifecycle, confidence, _updated, _status, _why_html,
-        evidence_html, governance_html, approval_html, audit_html,
-    ) = ui._render_detail("dec-seed-005")
-
-    assert "TSLA" in header
-    assert "BUY" in header
-    assert confidence == "61%"
-    assert (
-        'class="stage active"><span class="dot"></span>'
-        '<a class="label" href="#approval-section">Approval</a>'
-    ) in lifecycle
-    assert "NEWS_SENTIMENT" in evidence_html
-    assert "pol-seed-001" in governance_html
-    assert "Rejected" in approval_html
-    assert "risk_officer" in approval_html
-    assert "2026-08-08 05:04 CDT" in approval_html
-    assert "Approval Recorded" in audit_html
-
-
-def test_build_application_seeds_a_decision_awaiting_approval_after_governance():
-    """dec-seed-004 stops at GOVERNANCE_EVALUATED -- governance passed, no
-    record_approval() call -- the one DecisionState terminal-status gap
-    the original three seeds left uncovered (see _seed_decisions()'s own
-    docstring)."""
-    ui = build_application()
-
-    (
-        header, lifecycle, confidence, _updated, _status, _why_html,
-        evidence_html, governance_html, approval_html, audit_html,
-    ) = ui._render_detail("dec-seed-004")
-
-    assert "GOOGL" in header
-    assert "BUY" in header
-    assert confidence == "83%"
-    assert (
-        'class="stage active"><span class="dot"></span>'
-        '<a class="label" href="#governance-section">Governance</a>'
-    ) in lifecycle
-    assert "NEWS_SENTIMENT" in evidence_html
-    assert "pol-seed-001" in governance_html
-    assert "Yes" in governance_html
-    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
-    assert "Governance Evaluated" in audit_html
+    assert not hasattr(bootstrap_module, "_seed_decisions")
+    source = pathlib.Path(bootstrap_module.__file__).read_text(encoding="utf-8")
+    assert "_seed_decisions" not in source
+    assert "dec-seed-" not in source
+    assert "risk-seed-" not in source
+    assert "evidence-seed-" not in source

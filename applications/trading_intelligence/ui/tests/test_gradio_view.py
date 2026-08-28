@@ -29,9 +29,6 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _DECISION_READ_ERROR_MESSAGE,
     _EVIDENCE_ERROR_MESSAGE,
     _GOVERNANCE_ERROR_MESSAGE,
-    _ILLUSTRATIVE_DATA_BODY,
-    _ILLUSTRATIVE_DATA_HTML,
-    _ILLUSTRATIVE_DATA_TITLE,
     _JOURNEY_TARGET_FOCUS_SETUP_JS,
     _LIVE_ANNOUNCER_ELEM_ID,
     _RISK_CONTEXT_BODY,
@@ -1902,39 +1899,24 @@ def test_risk_context_block_is_present_in_the_built_layout():
     assert _RISK_CONTEXT_HTML in html_values
 
 
-def test_illustrative_data_disclosure_is_the_exact_fixed_text():
-    """P0 Product/UX audit finding: a persistent, decision-independent
-    disclosure that all data shown is illustrative, not real trading
-    activity. Must not assert or deny that governance, approvals, audit
-    events, persistence, authentication, brokerage connectivity, or any
-    other production capability exists -- render exactly this title and
-    body, verbatim."""
-    assert _ILLUSTRATIVE_DATA_TITLE == "Illustrative Data"
-    assert _ILLUSTRATIVE_DATA_BODY == (
-        "The decisions and supporting data shown here are illustrative and are "
-        "not real trading activity."
-    )
-    assert _ILLUSTRATIVE_DATA_HTML == (
-        '<div class="aara-disclosure-message">'
-        '<div class="aara-disclosure-title">Illustrative Data</div>'
-        '<div class="aara-disclosure-body">'
-        "The decisions and supporting data shown here are illustrative and are "
-        "not real trading activity.</div>"
-        "</div>"
-    )
+def test_no_illustrative_data_disclosure_is_defined_or_rendered():
+    """Phase 1 zero-illustrative-data: the "Illustrative Data" disclosure
+    constants must not exist in the view module, and the composed layout
+    must contain no such text. Decision Center now renders only real
+    decisions (or its EMPTY state) with no data-authenticity disclaimer."""
+    import applications.trading_intelligence.ui.decision_center.gradio_view as view_module
 
+    for removed in ("_ILLUSTRATIVE_DATA_HTML", "_ILLUSTRATIVE_DATA_TITLE", "_ILLUSTRATIVE_DATA_BODY"):
+        assert not hasattr(view_module, removed)
 
-def test_illustrative_data_disclosure_block_is_present_in_the_built_layout():
     controller = _FakeController()
     ui = DecisionCenterUI(controller, ["dec-001"])
-
     demo = ui.build()
-
     html_values = [
         block.value for block in demo.blocks.values()
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
-    assert _ILLUSTRATIVE_DATA_HTML in html_values
+    assert not any("Illustrative Data" in value for value in html_values)
 
 
 def test_timestamp_disclosure_clarifies_last_updated_may_be_governance_evaluation_time():
