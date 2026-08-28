@@ -96,6 +96,7 @@ from applications.trading_intelligence.ui.morning_brief.gradio_view import Morni
 from applications.trading_intelligence.ui.morning_brief.mock_data import (
     build_mock_screen as build_mock_morning_brief_screen,
 )
+from applications.trading_intelligence.ui.morning_brief.screen import MorningBriefScreen
 from applications.trading_intelligence.ui.performance_learning.gradio_view import (
     PerformanceLearningUI,
 )
@@ -541,8 +542,11 @@ def _format_overnight_holdings_news(
     )
 
 
-def _build_morning_brief_ui() -> MorningBriefUI:
-    """Real Portfolio Snapshot (reusing the exact same, unmodified
+def _build_morning_brief_screen() -> MorningBriefScreen:
+    """Assemble one real-or-unavailable MorningBriefScreen from the legacy
+    trades.db adapters plus the read-only AlpacaNewsSource.
+
+    Real Portfolio Snapshot (reusing the exact same, unmodified
     LegacyCapitalSource already wired for Portfolio Intelligence -- no
     second capital adapter), real Market Mood/Regime (via
     LegacyRegimeSource), and real Candidate Screening Summary (via
@@ -560,7 +564,12 @@ def _build_morning_brief_ui() -> MorningBriefUI:
     real-eligible section falls back to its own existing unavailable
     message independently when its adapter finds no real data -- expected
     in the deployed HF Space today, which has no mechanism yet to obtain
-    trades.db and no Alpaca credentials."""
+    trades.db and no Alpaca credentials.
+
+    This function is the `screen_provider` MorningBriefUI re-invokes on
+    every demo.load() and every Refresh click -- it is a fresh read each
+    call, holding no state and caching nothing, so the screen always
+    reflects the adapters' current answer."""
     illustrative_screen = build_mock_morning_brief_screen()
     portfolio_snapshot = illustrative_screen.portfolio_snapshot
     market_mood_regime = illustrative_screen.market_mood_regime
@@ -604,14 +613,21 @@ def _build_morning_brief_ui() -> MorningBriefUI:
                 ),
             )
 
-    screen = replace(
+    return replace(
         illustrative_screen,
         portfolio_snapshot=portfolio_snapshot,
         market_mood_regime=market_mood_regime,
         candidate_screening_summary=candidate_screening_summary,
         overnight_holdings_news=overnight_holdings_news,
     )
-    return MorningBriefUI(screen=screen)
+
+
+def _build_morning_brief_ui() -> MorningBriefUI:
+    """Wire Morning Brief to fetch its data at render time.
+    `_build_morning_brief_screen` is passed as the screen provider, so
+    MorningBriefUI calls it once now (for the build-time snapshot) and
+    again on every demo.load() / Refresh."""
+    return MorningBriefUI(screen_provider=_build_morning_brief_screen)
 
 
 def _build_portfolio_holdings(

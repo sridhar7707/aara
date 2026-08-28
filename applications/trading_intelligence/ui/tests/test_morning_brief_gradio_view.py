@@ -2,7 +2,10 @@ import gradio as gr
 
 from dataclasses import replace
 
-from applications.trading_intelligence.ui.morning_brief.gradio_view import MorningBriefUI
+from applications.trading_intelligence.ui.morning_brief.gradio_view import (
+    _AS_OF_PREFIX,
+    MorningBriefUI,
+)
 from applications.trading_intelligence.ui.morning_brief.mock_data import build_mock_screen
 from applications.trading_intelligence.ui.morning_brief.screen import (
     CANDIDATE_SCREENING_SUMMARY_TITLE,
@@ -189,3 +192,159 @@ def test_default_render_shows_no_available_summary_markup():
 
     assert "mb-available-summary" not in combined
     assert "mb-unavailable-message" in combined
+
+
+# --- Render-time fetch: Refresh button, demo.load, "as of" indicator ----
+
+
+_OUTPUT_COUNT = 5  # "As of" line + one body per MorningBriefScreen.sections (4)
+
+
+def _refresh_button(demo):
+    return next(
+        block for block in demo.blocks.values()
+        if isinstance(block, gr.Button) and "aara-refresh-button" in (block.elem_classes or [])
+    )
+
+
+def _counting_provider(*screens):
+    """Returns a provider yielding the given screens in order (repeating
+    the last), plus a mutable call-count list."""
+    calls = []
+    seq = list(screens)
+
+    def provider():
+        calls.append(True)
+        return seq[min(len(calls) - 1, len(seq) - 1)]
+
+    return provider, calls
+
+
+def _real_portfolio_screen(summary="Total value $1.00 ($1.00 cash, $0.00 invested)."):
+    base = build_mock_screen()
+    return replace(
+        base,
+        portfolio_snapshot=replace(base.portfolio_snapshot, available_summary=summary),
+    )
+
+
+def test_build_has_a_single_refresh_button_with_the_shared_class():
+    demo = MorningBriefUI().build()
+
+    buttons = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.Button) and "aara-refresh-button" in (b.elem_classes or [])
+    ]
+    assert len(buttons) == 1
+
+
+def test_disable_refresh_button_returns_a_not_interactive_update():
+    assert MorningBriefUI._disable_refresh_button() == {
+        "interactive": False, "__type__": "update",
+    }
+
+
+def test_enable_refresh_button_returns_an_interactive_update():
+    assert MorningBriefUI._enable_refresh_button() == {
+        "interactive": True, "__type__": "update",
+    }
+
+
+def test_refresh_click_chain_is_disable_then_render_then_enable():
+    """Same disable -> render -> enable double-submit guard chain as
+    Decision Center / Portfolio Intelligence: proves the click().then().
+    then() wiring in build(), not just that the helper methods exist."""
+    ui = MorningBriefUI()
+    demo = ui.build()
+
+    refresh_button = _refresh_button(demo)
+    refresh_button_id = next(
+        bid for bid, block in demo.blocks.items() if block is refresh_button
+    )
+    disable_dep = next(
+        dep for dep in demo.config["dependencies"]
+        if demo.fns[dep["id"]].fn is MorningBriefUI._disable_refresh_button
+    )
+    render_dep = next(
+        dep for dep in demo.config["dependencies"]
+        if dep.get("trigger_after") == disable_dep["id"]
+    )
+    enable_dep = next(
+        dep for dep in demo.config["dependencies"]
+        if demo.fns[dep["id"]].fn is MorningBriefUI._enable_refresh_button
+    )
+
+    assert disable_dep["targets"] == [(refresh_button_id, "click")]
+    assert refresh_button_id in disable_dep["outputs"]
+    assert demo.fns[render_dep["id"]].fn == ui._render
+    assert enable_dep["trigger_after"] == render_dep["id"]
+    assert refresh_button_id in enable_dep["outputs"]
+
+
+def test_demo_load_and_the_refresh_chain_both_call_render():
+    ui = MorningBriefUI()
+    demo = ui.build()
+
+    render_deps = [
+        dep for dep in demo.config["dependencies"]
+        if demo.fns[dep["id"]].fn == ui._render
+    ]
+    assert len(render_deps) == 2  # demo.load() + the Refresh .then() step
+
+
+def test_render_returns_one_update_per_dynamic_output():
+    updates = MorningBriefUI()._render()
+
+    assert len(updates) == _OUTPUT_COUNT
+    assert all(u.get("__type__") == "update" for u in updates)
+
+
+def test_render_reflects_a_fresh_screen_from_the_provider_each_call():
+    provider, calls = _counting_provider(
+        build_mock_screen(),          # __init__ snapshot (all unavailable)
+        _real_portfolio_screen(),     # 1st _render
+    )
+    ui = MorningBriefUI(screen_provider=provider)
+
+    first = ui._render()
+    # output index 1 == Portfolio Snapshot body (first section)
+    assert "Total value $1.00" in first[1]["value"]
+    assert "mb-available-summary" in first[1]["value"]
+
+    second = ui._render()  # provider repeats the last screen
+    assert "Total value $1.00" in second[1]["value"]
+    assert len(calls) == 3  # 1 in __init__ + 2 explicit _render calls
+
+
+def test_render_preserves_unavailable_states_with_no_mock_fallback():
+    """A provider that returns an all-unavailable screen collapses every
+    section body back to its explicit unavailable message -- never
+    fabricated content."""
+    ui = MorningBriefUI(screen_provider=build_mock_screen)
+    updates = ui._render()
+
+    baseline = build_mock_screen()
+    section_bodies = updates[1:]  # drop the "As of" update
+    assert len(section_bodies) == len(baseline.sections)
+    for update, section in zip(section_bodies, baseline.sections):
+        assert section.unavailable_message in update["value"]
+        assert "mb-available-summary" not in update["value"]
+
+
+def test_as_of_indicator_is_present_at_build_and_refreshed_by_render():
+    demo = MorningBriefUI().build()
+    assert any(_AS_OF_PREFIX in v for v in _html_values(demo))
+
+    as_of_update = MorningBriefUI()._render()[0]  # output index 0
+    assert _AS_OF_PREFIX in as_of_update["value"]
+    assert "CDT" in as_of_update["value"] or "CST" in as_of_update["value"]
+
+
+def test_no_screen_and_no_provider_uses_the_mock_unavailable_screen():
+    ui = MorningBriefUI()
+
+    assert ui._screen == build_mock_screen()
+    assert ui._screen.is_empty
+    body_updates = ui._render()[1:]
+    for update in body_updates:
+        assert "mb-unavailable-message" in update["value"]
