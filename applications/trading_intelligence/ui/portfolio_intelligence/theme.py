@@ -115,11 +115,15 @@ CSS = """
 .pi-allocation-legend .invested .swatch { background: var(--pi-color-navy); }
 .pi-allocation-legend .cash .swatch { background: var(--pi-color-gold); }
 
-.pi-holdings-table table tbody td:first-child {
+.pi-holdings-table table tbody td:first-child,
+.pi-alpaca-positions-table table tbody td:first-child,
+.pi-alpaca-orders-table table tbody td:first-child {
   font-weight: 600;
   color: var(--pi-color-navy);
 }
-.pi-holdings-table table tbody td {
+.pi-holdings-table table tbody td,
+.pi-alpaca-positions-table table tbody td,
+.pi-alpaca-orders-table table tbody td {
   font-family: Monaco, "Courier New", monospace;
   font-variant-numeric: tabular-nums;
 }
@@ -129,5 +133,38 @@ CSS = """
   font-style: italic;
   color: var(--pi-color-text-secondary);
   padding: 8px 0;
+}
+
+/* Alpaca Paper sections (broker-side observation, separate from the
+   bot's own capital/holdings). The badge must stay unmistakable as
+   paper/sandbox data; unavailable state must stay visually distinct
+   from any populated state. */
+.pi-alpaca-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--pi-color-gold);
+  color: var(--pi-color-navy);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.pi-unavailable,
+.pi-alpaca-unavailable {
+  font-size: 13px;
+  font-style: italic;
+  color: var(--pi-color-text-secondary);
+  border-left: 2px solid var(--pi-color-border);
+  padding: 8px 0 8px 12px;
+  margin: 4px 0;
+}
+.pi-alpaca-orders-truncation {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--pi-color-text-secondary);
+  padding: 4px 0;
 }
 """

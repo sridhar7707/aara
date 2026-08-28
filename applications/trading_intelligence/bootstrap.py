@@ -102,9 +102,6 @@ from applications.trading_intelligence.ui.performance_learning.gradio_view impor
 from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
     PortfolioIntelligenceUI,
 )
-from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import (
-    build_mock_screen as build_mock_portfolio_screen,
-)
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     PortfolioHolding,
     PortfolioScreen,
@@ -688,58 +685,43 @@ def _with_alpaca_orders_data(screen: PortfolioScreen) -> PortfolioScreen:
 
 def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
     """Real Capital Summary/Allocation when the legacy trades.db capital
-    pool is available (see adapters/legacy_capital_source.py). Holdings
-    additionally becomes real only when BOTH the real open positions
-    (adapters/legacy_position_source.py, a local trades.db read) AND real
-    current prices (adapters/live_price_source.py, a live network call)
-    are available -- an explicitly authorized live network dependency for
-    this UI (2026-08-26 decision). Any single failure anywhere in that
-    chain falls back to the existing illustrative screen at exactly the
-    point of failure: no capital -> fully illustrative; capital but no
-    positions or no prices -> real capital, illustrative Holdings; never
-    a partial/mixed Holdings table. Expected to stay on the illustrative
-    path in the deployed HF Space today, which has no mechanism yet to
-    obtain trades.db and may also lack outbound network access to the
-    price provider.
+    pool is available (adapters/legacy_capital_source.py); an explicit
+    UNAVAILABLE state (capital=None) otherwise -- never illustrative or
+    fabricated figures. Holdings becomes real only when BOTH the real open
+    positions (adapters/legacy_position_source.py, a local trades.db read)
+    AND real current prices (adapters/live_price_source.py, a live network
+    call) are available; a real open-position source reporting zero
+    positions is a genuine EMPTY state (holdings=()); any failure in that
+    chain leaves Holdings UNAVAILABLE (holdings=None), never a fabricated
+    table. In the deployed HF Space today -- no mechanism yet to obtain
+    trades.db, and possibly no outbound network to the price provider --
+    every section renders its explicit unavailable state.
 
-    Alpaca Paper Account/Positions (2026-08-27 unit, via
-    adapters/alpaca_paper_source.py) are attached independently of the
-    above via _with_alpaca_paper_data() on every return path -- a second,
-    explicitly authorized live network dependency, entirely separate from
-    the legacy trades.db-based Capital Summary/Holdings this function
-    already builds. See that adapter's own docstring for the paper-only
-    safety guarantees.
-
-    Alpaca Paper recent orders (2026-08-27 unit, via
-    adapters/alpaca_paper_orders_source.py) are likewise attached on every
-    return path via _with_alpaca_orders_data(), independently of both the
-    legacy chain above and the Alpaca account/positions attachment -- a
-    read-only observation of Alpaca's own broker-side order history, never
-    merged with Holdings and carrying no Decision Center linkage."""
+    Alpaca Paper Account/Positions and recent orders (2026-08-27 units)
+    are attached independently on the single return path via
+    _with_alpaca_paper_data() and _with_alpaca_orders_data() -- unchanged,
+    and entirely separate from the legacy trades.db-based Capital Summary/
+    Holdings this function builds. See those adapters' own docstrings for
+    the paper-only safety guarantees."""
     real_capital = LegacyCapitalSource().get_capital_summary()
-    if real_capital is None:
-        screen = _with_alpaca_orders_data(
-            _with_alpaca_paper_data(build_mock_portfolio_screen())
-        )
-        return PortfolioIntelligenceUI(screen=screen)
-    illustrative_screen = build_mock_portfolio_screen()
-    screen = replace(illustrative_screen, capital=real_capital)
 
     real_positions = LegacyPositionSource().get_open_positions()
     if real_positions is None:
-        screen = _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
-        return PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
+        real_holdings = None
+    elif len(real_positions) == 0:
+        real_holdings = ()
+    else:
+        symbols = tuple(position.symbol for position in real_positions)
+        real_prices = LivePriceSource().get_current_prices(symbols)
+        real_holdings = (
+            _build_portfolio_holdings(real_positions, real_prices)
+            if real_prices is not None
+            else None
+        )
 
-    symbols = tuple(position.symbol for position in real_positions)
-    real_prices = LivePriceSource().get_current_prices(symbols)
-    if real_prices is None:
-        screen = _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
-        return PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
-
-    real_holdings = _build_portfolio_holdings(real_positions, real_prices)
-    screen = replace(screen, holdings=real_holdings)
+    screen = PortfolioScreen(capital=real_capital, holdings=real_holdings)
     screen = _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
-    return PortfolioIntelligenceUI(screen=screen, capital_is_real=True, holdings_is_real=True)
+    return PortfolioIntelligenceUI(screen=screen)
 
 
 def build_trading_intelligence_app() -> gr.Blocks:

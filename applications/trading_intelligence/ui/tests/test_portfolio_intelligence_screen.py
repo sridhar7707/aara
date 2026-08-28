@@ -50,8 +50,8 @@ def test_weight_pct_is_zero_when_total_value_is_zero():
     assert capital.invested_weight_pct == 0.0
 
 
-def test_portfolio_screen_is_empty_with_no_holdings():
-    screen = PortfolioScreen(capital=_make_capital())
+def test_portfolio_screen_is_empty_only_when_holdings_is_an_empty_tuple():
+    screen = PortfolioScreen(capital=_make_capital(), holdings=())
 
     assert screen.is_empty
     assert screen.empty_state_message == "No holdings recorded yet."
@@ -64,3 +64,35 @@ def test_portfolio_screen_is_not_empty_with_holdings():
     screen = PortfolioScreen(capital=_make_capital(), holdings=(holding,))
 
     assert not screen.is_empty
+
+
+def test_default_screen_is_fully_unavailable_not_empty():
+    screen = PortfolioScreen()
+
+    assert screen.capital is None
+    assert screen.holdings is None
+    assert screen.capital_is_available is False
+    assert screen.holdings_is_available is False
+    assert screen.is_empty is False  # unavailable, not "connected with zero holdings"
+
+
+def test_capital_is_available_reflects_whether_capital_was_supplied():
+    assert PortfolioScreen(capital=_make_capital()).capital_is_available is True
+    assert PortfolioScreen(capital=None).capital_is_available is False
+
+
+def test_holdings_is_available_true_for_empty_tuple_false_for_none():
+    assert PortfolioScreen(capital=_make_capital(), holdings=()).holdings_is_available is True
+    assert PortfolioScreen(capital=_make_capital(), holdings=None).holdings_is_available is False
+    holding = PortfolioHolding(
+        symbol="AAPL", quantity=1, price=1.0, market_value=1.0, weight_pct=100.0,
+    )
+    assert PortfolioScreen(
+        capital=_make_capital(), holdings=(holding,)
+    ).holdings_is_available is True
+
+
+def test_is_empty_is_false_when_holdings_is_none():
+    screen = PortfolioScreen(capital=_make_capital(), holdings=None)
+
+    assert screen.is_empty is False

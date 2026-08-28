@@ -44,6 +44,18 @@ def test_build_mock_screen_gives_every_section_a_non_empty_unavailable_message()
         assert section.unavailable_message.strip() != ""
 
 
+def test_build_mock_screen_carries_no_available_summary_on_any_section():
+    """Production guardrail: every section's available_summary is None, so
+    is_available is False everywhere and the mock screen can only render
+    honest unavailable messages -- never a fabricated summary. Only
+    bootstrap.py's real adapters may set available_summary."""
+    screen = build_mock_screen()
+
+    for section in screen.sections:
+        assert section.available_summary is None
+        assert section.is_available is False
+
+
 def test_build_mock_screen_contains_no_fabricated_numeric_looking_data():
     """No dollar amounts, percentages, or other numeric-looking figures --
     unlike ui/portfolio_intelligence/mock_data.py and

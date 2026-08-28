@@ -1,4 +1,5 @@
-"""Portfolio Intelligence screen structure -- illustrative MVP.
+"""Portfolio Intelligence screen structure -- real data or an explicit
+unavailable state; never fabricated/illustrative portfolio figures.
 
 Framework-independent dataclasses (no gradio import), mirroring
 ui/decision_center/screen.py's pattern. Field names on CapitalSummary
@@ -126,15 +127,36 @@ class AlpacaOrdersSnapshot:
 
 @dataclass(frozen=True)
 class PortfolioScreen:
-    capital: CapitalSummary
-    holdings: Tuple[PortfolioHolding, ...] = field(default=())
+    capital: Optional[CapitalSummary] = None
+    holdings: Optional[Tuple[PortfolioHolding, ...]] = None
     alpaca_account: Optional[AlpacaAccountSnapshot] = None
     alpaca_positions: Tuple[AlpacaPosition, ...] = field(default=())
     alpaca_orders: Optional[AlpacaOrdersSnapshot] = None
 
     @property
+    def capital_is_available(self) -> bool:
+        """True only once a real CapitalSummary has been supplied (see
+        bootstrap.py's _build_portfolio_intelligence_ui) -- default None
+        means the managed capital pool could not be read in this
+        environment, matching every other real/unavailable convention in
+        this product. The production UI must render an explicit
+        unavailable state when this is False, never fabricated figures."""
+        return self.capital is not None
+
+    @property
+    def holdings_is_available(self) -> bool:
+        """True once a real holdings tuple has been supplied. An empty
+        tuple is a real "no open positions" result (see is_empty), which
+        is distinct from None -- None means the open-position source or
+        the live-price source was unavailable."""
+        return self.holdings is not None
+
+    @property
     def is_empty(self) -> bool:
-        return len(self.holdings) == 0
+        """True ONLY when holdings is explicitly available (not None) and
+        equals () -- a genuine "connected, zero open positions" state.
+        When holdings is None the section is unavailable, not empty."""
+        return self.holdings is not None and len(self.holdings) == 0
 
     @property
     def empty_state_message(self) -> str:

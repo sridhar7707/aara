@@ -52,4 +52,15 @@ CSS = """
   border-left: 2px solid var(--mb-color-border);
   margin-bottom: 4px;
 }
+
+/* A section's real, adapter-sourced summary. Deliberately distinct from
+   .mb-unavailable-message: solid primary text (not muted italic) and a
+   gold accent border, so a populated section reads as real content. */
+.mb-available-summary {
+  font-size: 13px;
+  color: var(--mb-color-text);
+  padding: 8px 0 8px 12px;
+  border-left: 2px solid var(--mb-color-gold);
+  margin-bottom: 4px;
+}
 """

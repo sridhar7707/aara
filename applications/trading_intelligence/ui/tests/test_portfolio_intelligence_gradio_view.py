@@ -8,11 +8,15 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
     _ALPACA_ORDERS_WORKING_MARKER,
     _ALPACA_PAPER_BADGE_TEXT,
     _ALPACA_UNAVAILABLE_MESSAGE,
-    _ILLUSTRATIVE_DATA_BODY,
-    _ILLUSTRATIVE_DATA_HTML,
-    _ILLUSTRATIVE_DATA_TITLE,
-    _PARTIAL_ILLUSTRATIVE_DATA_HTML,
+    _CAPITAL_UNAVAILABLE_MESSAGE,
+    _HOLDINGS_UNAVAILABLE_MESSAGE,
+    _PARTIAL_DATA_BODY,
+    _PARTIAL_DATA_HTML,
+    _PARTIAL_DATA_TITLE,
     _REAL_DATA_HTML,
+    _UNAVAILABLE_DATA_BODY,
+    _UNAVAILABLE_DATA_HTML,
+    _UNAVAILABLE_DATA_TITLE,
     PortfolioIntelligenceUI,
 )
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
@@ -45,67 +49,151 @@ def _make_alpaca_account(**overrides):
     return AlpacaAccountSnapshot(**defaults)
 
 
-def test_ui_can_be_constructed_with_default_mock_screen():
+def _make_holding(**overrides):
+    defaults = dict(symbol="ZZZZ", quantity=1.0, price=1.0, market_value=1.0, weight_pct=100.0)
+    defaults.update(overrides)
+    return PortfolioHolding(**defaults)
+
+
+def _html_values(demo):
+    return [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+
+
+def _rendered_surfaces(ui):
+    """Returns (html_text, table_cells) for one build() -- html_text is the
+    concatenated gr.HTML block values (capital summary, disclosure banner,
+    labels, unavailable messages); table_cells is every gr.Dataframe cell
+    string (Holdings / Alpaca positions / Alpaca orders rows)."""
+    demo = ui.build()
+    html_text = "\n".join(_html_values(demo))
+    table_cells = []
+    for block in demo.blocks.values():
+        if isinstance(block, gr.Dataframe):
+            val = getattr(block, "value", None)
+            if isinstance(val, dict) and isinstance(val.get("data"), list):
+                for row in val["data"]:
+                    table_cells.extend(str(cell) for cell in row)
+    return html_text, table_cells
+
+
+# --- Default = explicit UNAVAILABLE state, never a mock screen --------
+
+
+def test_ui_defaults_to_an_all_unavailable_screen():
     ui = PortfolioIntelligenceUI()
 
-    assert not ui._screen.is_empty
+    assert ui._screen.capital is None
+    assert ui._screen.holdings is None
+    assert ui._screen.capital_is_available is False
+    assert ui._screen.holdings_is_available is False
 
 
 def test_build_returns_a_gradio_blocks_instance():
-    ui = PortfolioIntelligenceUI()
-
-    demo = ui.build()
+    demo = PortfolioIntelligenceUI().build()
 
     assert isinstance(demo, gr.Blocks)
 
 
-def test_illustrative_data_disclosure_is_the_exact_fixed_text():
-    assert _ILLUSTRATIVE_DATA_TITLE == "Illustrative Data"
-    assert _ILLUSTRATIVE_DATA_HTML == (
+def test_unavailable_data_disclosure_is_the_exact_fixed_text():
+    assert _UNAVAILABLE_DATA_TITLE == "Data Unavailable"
+    assert _UNAVAILABLE_DATA_HTML == (
         '<div class="pi-disclosure">'
-        f'<div class="pi-disclosure-title">{_ILLUSTRATIVE_DATA_TITLE}</div>'
-        f'<div class="pi-disclosure-body">{_ILLUSTRATIVE_DATA_BODY}</div>'
+        f'<div class="pi-disclosure-title">{_UNAVAILABLE_DATA_TITLE}</div>'
+        f'<div class="pi-disclosure-body">{_UNAVAILABLE_DATA_BODY}</div>'
         "</div>"
     )
+    assert "illustrative" not in _UNAVAILABLE_DATA_BODY.lower()
 
 
-def test_illustrative_data_disclosure_block_is_present_in_the_built_layout():
-    ui = PortfolioIntelligenceUI()
+def test_partial_disclosure_never_says_illustrative():
+    assert _PARTIAL_DATA_TITLE == "Partial Data"
+    assert "illustrative" not in _PARTIAL_DATA_BODY.lower()
+    assert "unavailable" in _PARTIAL_DATA_BODY.lower()
 
-    demo = ui.build()
 
-    html_values = [
-        block.value for block in demo.blocks.values()
-        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
-    ]
-    assert _ILLUSTRATIVE_DATA_HTML in html_values
+def test_default_render_is_the_unavailable_state_with_no_dataframe():
+    demo = PortfolioIntelligenceUI().build()
+    html_text = "\n".join(_html_values(demo))
+
+    assert _UNAVAILABLE_DATA_HTML in html_text
+    assert _CAPITAL_UNAVAILABLE_MESSAGE in html_text
+    assert _HOLDINGS_UNAVAILABLE_MESSAGE in html_text
+    assert [b for b in demo.blocks.values() if isinstance(b, gr.Dataframe)] == []
+
+
+def test_no_fabricated_capital_or_holdings_marker_reaches_any_rendered_state():
+    """Production guarantee: the fabricated figures/symbols in
+    portfolio_intelligence/mock_data.py never appear in any rendered
+    PortfolioIntelligenceUI state -- UNAVAILABLE, PARTIAL, EMPTY, or REAL.
+    mock_data.py itself is untouched and kept only for isolated unit
+    tests; it must never reach a rendered screen."""
+    from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import (
+        build_mock_screen,
+    )
+
+    mock = build_mock_screen()
+    mock_symbols = {h.symbol for h in mock.holdings}
+    mock_capital_markers = (
+        f"${mock.capital.allocated_amount:,.2f}",   # $50,000.00
+        f"${mock.capital.realized_profit:,.2f}",    # $3,450.20
+        f"${mock.capital.available_cash:,.2f}",     # $12,270.85
+    )
+    real_capital = _make_capital(allocated_amount=1234.0)
+
+    states = {
+        "UNAVAILABLE": PortfolioIntelligenceUI(),
+        "PARTIAL": PortfolioIntelligenceUI(
+            PortfolioScreen(capital=real_capital, holdings=None)
+        ),
+        "EMPTY": PortfolioIntelligenceUI(
+            PortfolioScreen(capital=real_capital, holdings=())
+        ),
+        "REAL": PortfolioIntelligenceUI(
+            PortfolioScreen(capital=real_capital, holdings=(_make_holding(),))
+        ),
+    }
+    for name, ui in states.items():
+        html_text, table_cells = _rendered_surfaces(ui)
+        for marker in mock_capital_markers:
+            assert marker not in html_text, f"{name}: fabricated capital {marker} rendered"
+        assert not mock_symbols.issubset(set(table_cells)), (
+            f"{name}: fabricated holdings symbols rendered"
+        )
+
+
+def test_alpaca_sections_render_only_unavailable_text_with_no_alpaca_data():
+    """Units 1 & 3: a PortfolioScreen with no Alpaca account and no Alpaca
+    orders renders the fixed unavailable message for both Alpaca blocks --
+    there is no illustrative Alpaca fallback (real / unavailable / empty
+    only)."""
+    screen = PortfolioScreen(capital=_make_capital(), alpaca_account=None, alpaca_orders=None)
+    html_text, table_cells = _rendered_surfaces(PortfolioIntelligenceUI(screen=screen))
+
+    assert _ALPACA_UNAVAILABLE_MESSAGE in html_text
+    assert _ALPACA_ORDERS_UNAVAILABLE_MESSAGE in html_text
+    assert table_cells == []
 
 
 def test_shell_header_and_nav_are_present_in_the_built_layout():
-    """AARA shell consistency pass: Portfolio Intelligence now renders the
-    same shell header/nav Decision Center does, reused via ui/shell.py --
-    see that module's docstring for why it isn't imported from
-    ui/decision_center/ directly."""
-    ui = PortfolioIntelligenceUI()
+    demo = PortfolioIntelligenceUI().build()
 
-    demo = ui.build()
-
-    html_values = [
-        block.value for block in demo.blocks.values()
-        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
-    ]
+    html_values = _html_values(demo)
     assert SHELL_IDENTITY_HTML in html_values
     assert build_shell_nav_html("Portfolio Intelligence") in html_values
 
 
 def test_shell_header_and_nav_blocks_carry_the_expected_elem_classes():
-    ui = PortfolioIntelligenceUI()
-
-    demo = ui.build()
+    demo = PortfolioIntelligenceUI().build()
 
     html_blocks = [block for block in demo.blocks.values() if isinstance(block, gr.HTML)]
     assert any("aara-shell-header" in (block.elem_classes or []) for block in html_blocks)
     assert any("aara-shell-nav" in (block.elem_classes or []) for block in html_blocks)
+
+
+# --- Formatters (called directly, real inputs) ----------------------
 
 
 def test_capital_summary_html_includes_every_metric():
@@ -162,137 +250,70 @@ def test_format_holdings_rows_handles_multiple_holdings_in_order():
     assert [row[0] for row in rows] == ["AAPL", "MSFT"]
 
 
-def test_empty_message_html_renders_the_screens_own_message():
-    screen = PortfolioScreen(capital=_make_capital())
+def test_unavailable_html_helper_uses_the_pi_unavailable_class():
+    out = PortfolioIntelligenceUI._format_unavailable_html("nope")
 
-    empty_html = PortfolioIntelligenceUI._format_empty_message_html(screen)
-
-    assert 'class="pi-empty-message"' in empty_html
-    assert "No holdings recorded yet." in empty_html
+    assert out == '<div class="pi-unavailable">nope</div>'
 
 
-def test_build_renders_empty_message_instead_of_a_table_when_no_holdings():
-    empty_screen = PortfolioScreen(capital=_make_capital())
-    ui = PortfolioIntelligenceUI(screen=empty_screen)
-
-    demo = ui.build()
-
-    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
-    html_values = [
-        block.value for block in demo.blocks.values()
-        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
-    ]
-    assert dataframes == []
-    assert any("No holdings recorded yet." in value for value in html_values)
+# --- UNAVAILABLE state (capital source returned None) ---------------
 
 
-def test_build_renders_a_dataframe_when_holdings_exist():
-    ui = PortfolioIntelligenceUI()
+def test_capital_unavailable_renders_the_message_not_a_summary_or_allocation_bar():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=None, holdings=None))
+
+    html_text, _ = _rendered_surfaces(ui)
+
+    assert html_text.count(_CAPITAL_UNAVAILABLE_MESSAGE) == 2  # Summary + Allocation
+    assert "pi-allocation-bar" not in html_text
+    assert "pi-capital-summary" not in html_text
+    assert _UNAVAILABLE_DATA_HTML in html_text
+
+
+def test_holdings_unavailable_renders_the_message_and_no_table():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=_make_capital(), holdings=None))
 
     demo = ui.build()
+    html_values = _html_values(demo)
+    dataframes = [b for b in demo.blocks.values() if isinstance(b, gr.Dataframe)]
 
-    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
-    assert len(dataframes) == 1
-    assert "pi-holdings-table" in dataframes[0].elem_classes
-
-
-# --- Real Capital Summary/Allocation (legacy_capital_source) pass ------
+    assert any(_HOLDINGS_UNAVAILABLE_MESSAGE in v for v in html_values)
+    assert not any(d for d in dataframes if "pi-holdings-table" in (d.elem_classes or []))
 
 
-def _html_values(demo):
-    return [
-        block.value for block in demo.blocks.values()
-        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
-    ]
+# --- PARTIAL state (real capital, holdings unavailable) ------------
 
 
-def test_real_supplied_capital_renders_real_values_when_capital_is_real():
+def test_partial_state_renders_real_capital_and_holdings_unavailable_and_partial_banner():
     real_capital = _make_capital(
         allocated_amount=96933.32, available_cash=38850.78,
         invested_amount=58082.54, reserve=0.0, realized_profit=0.0,
     )
-    screen = PortfolioScreen(capital=real_capital)
-    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=real_capital, holdings=None))
 
     demo = ui.build()
-
     combined = "\n".join(_html_values(demo))
+
     assert "$96,933.32" in combined
     assert "$38,850.78" in combined
-    assert "$58,082.54" in combined
+    assert _HOLDINGS_UNAVAILABLE_MESSAGE in combined
+    assert _PARTIAL_DATA_HTML in combined
+    assert _REAL_DATA_HTML not in combined
+    assert _UNAVAILABLE_DATA_HTML not in combined
+    assert [b for b in demo.blocks.values() if isinstance(b, gr.Dataframe)] == []
 
 
-def test_derived_allocation_values_render_correctly_for_a_real_screen():
+def test_derived_allocation_values_render_correctly_for_a_real_capital_screen():
     real_capital = _make_capital(available_cash=250.0, invested_amount=750.0)
-    screen = PortfolioScreen(capital=real_capital)
-    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=real_capital, holdings=None))
 
-    demo = ui.build()
+    combined = "\n".join(_html_values(ui.build()))
 
-    combined = "\n".join(_html_values(demo))
     assert "Invested 75.0%" in combined
     assert "Cash 25.0%" in combined
 
 
-def test_disclosure_is_the_partial_variant_when_capital_is_real():
-    ui = PortfolioIntelligenceUI(screen=PortfolioScreen(capital=_make_capital()), capital_is_real=True)
-
-    demo = ui.build()
-
-    html_values = _html_values(demo)
-    assert _PARTIAL_ILLUSTRATIVE_DATA_HTML in html_values
-    assert _ILLUSTRATIVE_DATA_HTML not in html_values
-
-
-def test_disclosure_stays_the_original_fully_illustrative_variant_by_default():
-    """Regression lock: constructing PortfolioIntelligenceUI exactly as
-    every existing call site already does (no capital_is_real argument)
-    must render byte-identical disclosure HTML to before this unit."""
-    ui = PortfolioIntelligenceUI()
-
-    demo = ui.build()
-
-    html_values = _html_values(demo)
-    assert _ILLUSTRATIVE_DATA_HTML in html_values
-    assert _PARTIAL_ILLUSTRATIVE_DATA_HTML not in html_values
-
-
-def test_illustrative_fallback_still_works_when_no_real_screen_is_supplied():
-    """Mirrors what bootstrap.py does when LegacyCapitalSource returns
-    None -- constructing PortfolioIntelligenceUI() with no args at all
-    must still render the full illustrative mock screen unchanged."""
-    ui = PortfolioIntelligenceUI()
-
-    demo = ui.build()
-
-    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
-    assert len(dataframes) == 1
-    assert _ILLUSTRATIVE_DATA_HTML in _html_values(demo)
-
-
-def test_holdings_remains_illustrative_and_unaffected_when_capital_is_real():
-    """The one thing this unit must never do: make Holdings look real just
-    because Capital Summary/Allocation are. Supplying a real capital value
-    alongside the mock screen's own illustrative holdings must render
-    those exact same illustrative holdings, unchanged."""
-    from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import (
-        build_mock_screen,
-    )
-    from dataclasses import replace
-
-    illustrative_screen = build_mock_screen()
-    real_capital = _make_capital(allocated_amount=96933.32)
-    screen = replace(illustrative_screen, capital=real_capital)
-    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=True)
-
-    demo = ui.build()
-
-    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
-    assert len(dataframes) == 1
-    assert dataframes[0].value["data"] == ui._format_holdings_rows(illustrative_screen.holdings)
-
-
-# --- Real Holdings (legacy_position_source + live_price_source) pass ---
+# --- REAL and EMPTY states -----------------------------------------
 
 
 def test_disclosure_is_the_real_data_variant_when_capital_and_holdings_are_both_real():
@@ -300,28 +321,13 @@ def test_disclosure_is_the_real_data_variant_when_capital_and_holdings_are_both_
     holding = PortfolioHolding(
         symbol="AAPL", quantity=19.11, price=334.67, market_value=6396.0, weight_pct=100.0,
     )
-    screen = PortfolioScreen(capital=real_capital, holdings=(holding,))
-    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=True, holdings_is_real=True)
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=real_capital, holdings=(holding,)))
 
-    demo = ui.build()
+    html_values = _html_values(ui.build())
 
-    html_values = _html_values(demo)
     assert _REAL_DATA_HTML in html_values
-    assert _PARTIAL_ILLUSTRATIVE_DATA_HTML not in html_values
-    assert _ILLUSTRATIVE_DATA_HTML not in html_values
-
-
-def test_disclosure_stays_partial_when_capital_is_real_but_holdings_is_not():
-    """Regression lock: holdings_is_real defaults to False, so every
-    existing capital_is_real=True call site (before this unit) keeps
-    rendering the exact same partial-illustrative disclosure."""
-    ui = PortfolioIntelligenceUI(screen=PortfolioScreen(capital=_make_capital()), capital_is_real=True)
-
-    demo = ui.build()
-
-    html_values = _html_values(demo)
-    assert _PARTIAL_ILLUSTRATIVE_DATA_HTML in html_values
-    assert _REAL_DATA_HTML not in html_values
+    assert _PARTIAL_DATA_HTML not in html_values
+    assert _UNAVAILABLE_DATA_HTML not in html_values
 
 
 def test_real_holdings_render_the_real_price_and_market_value_not_entry_price():
@@ -329,43 +335,49 @@ def test_real_holdings_render_the_real_price_and_market_value_not_entry_price():
     holding = PortfolioHolding(
         symbol="AAPL", quantity=19.11, price=334.67, market_value=6396.0359, weight_pct=100.0,
     )
-    screen = PortfolioScreen(capital=real_capital, holdings=(holding,))
-    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=True, holdings_is_real=True)
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=real_capital, holdings=(holding,)))
 
     demo = ui.build()
-
-    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
-    assert len(dataframes) == 1
-    assert dataframes[0].value["data"] == [["AAPL", "19.11", "$334.67", "$6,396.04", "100.0%"]]
+    holdings_tables = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.Dataframe) and "pi-holdings-table" in (b.elem_classes or [])
+    ]
+    assert len(holdings_tables) == 1
+    assert holdings_tables[0].value["data"] == [["AAPL", "19.11", "$334.67", "$6,396.04", "100.0%"]]
 
 
 def test_real_holdings_can_be_empty_with_the_real_data_disclosure():
-    """A real position source reporting zero open positions is a genuine
-    real state (not illustrative) -- the empty-state message still
-    renders, but under the real-data disclosure rather than the
-    illustrative one."""
-    real_capital = _make_capital()
-    screen = PortfolioScreen(capital=real_capital, holdings=())
-    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=True, holdings_is_real=True)
+    """A real open-position source reporting zero positions is a genuine
+    EMPTY state -- the empty-state message renders under the real-data
+    disclosure, never a table and never the unavailable state."""
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=_make_capital(), holdings=()))
 
     demo = ui.build()
-
     html_values = _html_values(demo)
-    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
+    dataframes = [b for b in demo.blocks.values() if isinstance(b, gr.Dataframe)]
+
     assert dataframes == []
     assert _REAL_DATA_HTML in html_values
     assert any("No holdings recorded yet." in value for value in html_values)
+    assert not any(_HOLDINGS_UNAVAILABLE_MESSAGE in value for value in html_values)
+
+
+def test_empty_state_message_helper_still_reads_the_screens_own_message():
+    screen = PortfolioScreen(capital=_make_capital(), holdings=())
+
+    empty_html = PortfolioIntelligenceUI._format_empty_message_html(screen)
+
+    assert 'class="pi-empty-message"' in empty_html
+    assert "No holdings recorded yet." in empty_html
 
 
 # --- Alpaca Paper Account (alpaca_paper_source) pass -----------------
 
 
 def test_alpaca_section_shows_unavailable_message_by_default():
-    ui = PortfolioIntelligenceUI(screen=PortfolioScreen(capital=_make_capital()))
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=_make_capital()))
 
-    demo = ui.build()
-
-    html_values = _html_values(demo)
+    html_values = _html_values(ui.build())
     assert any(_ALPACA_UNAVAILABLE_MESSAGE in value for value in html_values)
 
 
@@ -373,11 +385,9 @@ def test_alpaca_badge_is_always_present_regardless_of_availability():
     """Phase 4 safety requirement: the 'ALPACA PAPER' label must always be
     visible in the section header, whether or not real data is available,
     so the section can never be mistaken for anything else."""
-    ui = PortfolioIntelligenceUI(screen=PortfolioScreen(capital=_make_capital()))
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=_make_capital()))
 
-    demo = ui.build()
-
-    html_values = _html_values(demo)
+    html_values = _html_values(ui.build())
     assert any(_ALPACA_PAPER_BADGE_TEXT in value for value in html_values)
 
 
@@ -390,9 +400,7 @@ def test_alpaca_account_and_positions_render_when_available():
     screen = PortfolioScreen(
         capital=_make_capital(), alpaca_account=account, alpaca_positions=(position,),
     )
-    ui = PortfolioIntelligenceUI(screen=screen)
-
-    demo = ui.build()
+    demo = PortfolioIntelligenceUI(screen=screen).build()
 
     html_values = _html_values(demo)
     combined = "\n".join(html_values)
@@ -410,16 +418,10 @@ def test_alpaca_account_and_positions_render_when_available():
 
 
 def test_alpaca_section_shows_empty_message_when_connected_with_zero_positions():
-    """A real, connected Alpaca account with zero open positions is a
-    legitimate real state -- must render the Alpaca-specific empty
-    message, never the unavailable message, and never a Holdings-style
-    table."""
     screen = PortfolioScreen(
         capital=_make_capital(), alpaca_account=_make_alpaca_account(), alpaca_positions=(),
     )
-    ui = PortfolioIntelligenceUI(screen=screen)
-
-    demo = ui.build()
+    demo = PortfolioIntelligenceUI(screen=screen).build()
 
     html_values = _html_values(demo)
     dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
@@ -429,20 +431,18 @@ def test_alpaca_section_shows_empty_message_when_connected_with_zero_positions()
     assert not any(_ALPACA_UNAVAILABLE_MESSAGE in v for v in html_values)
 
 
-def test_alpaca_section_is_independent_of_capital_and_holdings_reality():
-    """The Alpaca section's availability must never be coupled to
-    capital_is_real/holdings_is_real -- it can be real while Capital
-    Summary/Holdings stay fully illustrative, and the illustrative
-    disclosure must still read exactly as it always has."""
+def test_alpaca_section_is_independent_of_the_capital_holdings_disclosure_state():
+    """The Alpaca section renders on its own availability regardless of
+    the Capital Summary/Holdings disclosure state -- here the page is
+    PARTIAL (real capital, holdings unavailable) and the Alpaca account
+    section still renders its own empty state."""
     screen = PortfolioScreen(
-        capital=_make_capital(), alpaca_account=_make_alpaca_account(), alpaca_positions=(),
+        capital=_make_capital(), holdings=None,
+        alpaca_account=_make_alpaca_account(), alpaca_positions=(),
     )
-    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=False, holdings_is_real=False)
+    html_values = _html_values(PortfolioIntelligenceUI(screen=screen).build())
 
-    demo = ui.build()
-
-    html_values = _html_values(demo)
-    assert _ILLUSTRATIVE_DATA_HTML in html_values
+    assert _PARTIAL_DATA_HTML in html_values
     assert any(_ALPACA_PAPER_BADGE_TEXT in v for v in html_values)
     assert any("Alpaca Paper account has no open positions." in v for v in html_values)
 
@@ -477,9 +477,7 @@ def _orders_dataframe(demo):
 
 
 def test_orders_section_shows_unavailable_message_by_default():
-    ui = PortfolioIntelligenceUI(screen=PortfolioScreen(capital=_make_capital()))
-
-    demo = ui.build()
+    demo = PortfolioIntelligenceUI(PortfolioScreen(capital=_make_capital())).build()
 
     html_values = _html_values(demo)
     assert any(_ALPACA_ORDERS_UNAVAILABLE_MESSAGE in v for v in html_values)
@@ -487,13 +485,10 @@ def test_orders_section_shows_unavailable_message_by_default():
 
 
 def test_orders_section_header_always_carries_the_alpaca_paper_badge():
-    ui = PortfolioIntelligenceUI(screen=PortfolioScreen(capital=_make_capital()))
-
-    demo = ui.build()
+    demo = PortfolioIntelligenceUI(PortfolioScreen(capital=_make_capital())).build()
 
     combined = "\n".join(_html_values(demo))
     assert "Recent Orders" in combined
-    # the badge span appears for both Alpaca sub-sections
     assert combined.count(f">{_ALPACA_PAPER_BADGE_TEXT}<") >= 2
 
 
@@ -501,9 +496,7 @@ def test_orders_section_shows_empty_message_when_connected_with_zero_orders():
     screen = PortfolioScreen(
         capital=_make_capital(), alpaca_orders=AlpacaOrdersSnapshot(orders=(), truncated=False),
     )
-    ui = PortfolioIntelligenceUI(screen=screen)
-
-    demo = ui.build()
+    demo = PortfolioIntelligenceUI(screen=screen).build()
 
     html_values = _html_values(demo)
     assert any("Alpaca Paper account has no recent orders." in v for v in html_values)
@@ -517,14 +510,11 @@ def test_orders_render_in_a_dataframe_with_verbatim_side_and_status():
         capital=_make_capital(),
         alpaca_orders=AlpacaOrdersSnapshot(orders=(order,), truncated=False),
     )
-    ui = PortfolioIntelligenceUI(screen=screen)
-
-    demo = ui.build()
+    demo = PortfolioIntelligenceUI(screen=screen).build()
 
     tables = _orders_dataframe(demo)
     assert len(tables) == 1
     row = tables[0].value["data"][0]
-    # Submitted, Symbol, Side, Type, Quantity, Filled Qty, Limit Price, Status, Working, Filled At
     assert row[1] == "AAPL"
     assert row[2] == "sell"                       # broker-verbatim
     assert row[3] == "limit"
@@ -585,30 +575,26 @@ def test_truncation_note_is_shown_only_when_snapshot_is_truncated():
 
 def test_orders_section_is_independent_of_account_and_disclosure_state():
     """Orders can be available while the Alpaca account section is
-    unavailable and the whole page is illustrative -- and the illustrative
-    disclosure must still read exactly as always."""
+    unavailable and the Capital/Holdings page state is PARTIAL."""
     screen = PortfolioScreen(
         capital=_make_capital(),
+        holdings=None,
         alpaca_account=None,
         alpaca_orders=AlpacaOrdersSnapshot(orders=(_make_order(),), truncated=False),
     )
-    ui = PortfolioIntelligenceUI(screen=screen, capital_is_real=False, holdings_is_real=False)
-
-    demo = ui.build()
+    demo = PortfolioIntelligenceUI(screen=screen).build()
 
     html_values = _html_values(demo)
-    assert _ILLUSTRATIVE_DATA_HTML in html_values
+    assert _PARTIAL_DATA_HTML in html_values
     assert any(_ALPACA_UNAVAILABLE_MESSAGE in v for v in html_values)   # account section
     assert len(_orders_dataframe(demo)) == 1                            # orders section
     assert not any(_ALPACA_ORDERS_UNAVAILABLE_MESSAGE in v for v in html_values)
 
 
-def test_default_screen_still_has_exactly_one_holdings_dataframe():
-    """Regression lock: the orders section adds no Dataframe when orders
-    are unavailable (the default), so existing Dataframe-count assertions
-    elsewhere in this file stay valid."""
+def test_default_screen_renders_zero_dataframes():
+    """The default (no screen) is fully unavailable: no Holdings table, no
+    Alpaca positions table, no Alpaca orders table."""
     demo = PortfolioIntelligenceUI().build()
 
     all_dataframes = [b for b in demo.blocks.values() if isinstance(b, gr.Dataframe)]
-    assert len(all_dataframes) == 1
-    assert "pi-holdings-table" in all_dataframes[0].elem_classes
+    assert all_dataframes == []

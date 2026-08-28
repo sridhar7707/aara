@@ -10,10 +10,15 @@ not violate).
 import ast
 import importlib
 import pathlib
+import re
 
 import pytest
 
+from applications.trading_intelligence.ui.morning_brief.theme import CSS
+
 _PACKAGE_ROOT = pathlib.Path(__file__).resolve().parent.parent / "morning_brief"
+
+_GRADIO_VIEW = _PACKAGE_ROOT / "gradio_view.py"
 
 _MODULES = [
     "applications.trading_intelligence.ui.morning_brief",
@@ -33,6 +38,24 @@ _FORBIDDEN_SIBLING_PACKAGES = (
 @pytest.mark.parametrize("module_name", _MODULES)
 def test_morning_brief_package_imports_cleanly(module_name):
     importlib.import_module(module_name)
+
+
+def test_available_summary_selector_is_defined_in_theme():
+    assert ".mb-available-summary " in CSS or ".mb-available-summary{" in CSS, (
+        ".mb-available-summary is referenced by gradio_view.py but has no rule in theme.py"
+    )
+
+
+def test_no_mb_css_class_in_the_view_markup_is_left_unstyled():
+    """Every `mb-*` class name that appears in gradio_view.py's rendered
+    markup must have a matching rule in this package's own theme.py.
+    `.mb-available-summary` shipped referenced but unstyled; this lock
+    prevents that class of regression recurring."""
+    source = _GRADIO_VIEW.read_text(encoding="utf-8")
+    referenced = set(re.findall(r"mb-[a-z0-9-]+", source))
+    assert referenced, "expected mb-* class references in gradio_view.py"
+    missing = sorted(cls for cls in referenced if f".{cls}" not in CSS)
+    assert not missing, f"mb-* classes referenced but not styled in theme.py: {missing}"
 
 
 def test_morning_brief_does_not_import_any_sibling_screen_package():

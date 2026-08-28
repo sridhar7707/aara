@@ -2,13 +2,16 @@
 
 Self-contained: does not import ui/decision_center/ (no gradio_view.py,
 theme.py, screen.py, or mock_data.py cross-import). Renders whatever
-PortfolioScreen it is given -- mock_data.py's illustrative screen by
-default, or a real one bootstrap.py assembles from
+PortfolioScreen it is given. The production path (bootstrap.py's
+_build_portfolio_intelligence_ui) assembles the screen from
 adapters.legacy_capital_source.LegacyCapitalSource,
 adapters.legacy_position_source.LegacyPositionSource, and
-adapters.live_price_source.LivePriceSource when all three are available.
-No controller, no service, no sentinel_engine/bot import. Wired into
-main.py/bootstrap.py as the 2nd Trading Intelligence tab.
+adapters.live_price_source.LivePriceSource; any section whose real source
+is unavailable renders an explicit unavailable state -- this module never
+imports mock_data.py and the default (no `screen` supplied) is an
+all-unavailable PortfolioScreen(), never a fabricated one. No controller,
+no service, no sentinel_engine/bot import. Wired into main.py/bootstrap.py
+as the 2nd Trading Intelligence tab.
 
 Alpaca Paper Account section (2026-08-27 unit): a separate, always
 distinctly-labeled "ALPACA PAPER" block rendered below Holdings, sourced
@@ -16,10 +19,10 @@ from adapters.alpaca_paper_source.AlpacaPaperSource -- Alpaca's own
 broker-side paper account, not the bot's internal capital_pools/
 position_state bookkeeping Capital Summary/Holdings reflect. The two are
 never merged: this section has its own independent available/unavailable
-state (screen.alpaca_is_available), never influenced by capital_is_real/
-holdings_is_real, and is never counted toward the "Real Data"/partial/
-illustrative disclosure above, which describes Capital Summary/Allocation/
-Holdings only.
+state (screen.alpaca_is_available), never influenced by the Capital
+Summary/Holdings availability, and is never counted toward the "Real
+Data"/partial/unavailable disclosure above, which describes Capital
+Summary/Allocation/Holdings only.
 
 AARA shell consistency pass: renders the same AARA logo header + inter-screen
 nav Decision Center shows, via `ui/shell.py` (a sibling of all three screen
@@ -36,7 +39,6 @@ from zoneinfo import ZoneInfo
 
 import gradio as gr
 
-from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import build_mock_screen
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     AlpacaAccountSnapshot,
     AlpacaOrder,
@@ -81,8 +83,8 @@ _ALPACA_UNAVAILABLE_MESSAGE = (
 # adapters/alpaca_paper_orders_source.py -- a read-only observation of
 # Alpaca's own broker-side order history. Its own independent
 # available/unavailable state (screen.alpaca_orders_available), never
-# coupled to screen.alpaca_is_available, capital_is_real, or
-# holdings_is_real, and never counted toward the disclosure above.
+# coupled to screen.alpaca_is_available or the Capital Summary/Holdings
+# availability, and never counted toward the disclosure above.
 _ALPACA_ORDERS_HEADERS = [
     "Submitted", "Symbol", "Side", "Type", "Quantity", "Filled Qty",
     "Limit Price", "Status", "Working", "Filled At",
@@ -124,42 +126,59 @@ def _format_order_timestamp(moment: Optional[datetime]) -> str:
     return aware.astimezone(_ORDERS_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
 
 
-_ILLUSTRATIVE_DATA_TITLE = "Illustrative Data"
-_ILLUSTRATIVE_DATA_BODY = (
-    "The holdings and capital figures shown here are illustrative and are "
-    "not real trading activity or a real account balance."
+# Shown when the managed capital pool could not be read in this
+# environment (LegacyCapitalSource returned None). The production UI never
+# substitutes fabricated/illustrative figures -- every affected section
+# renders its explicit unavailable state and this page-level banner says
+# so plainly.
+_UNAVAILABLE_DATA_TITLE = "Data Unavailable"
+_UNAVAILABLE_DATA_BODY = (
+    "Portfolio data is not available in this environment -- the managed "
+    "capital pool could not be read. No capital or holdings figures are "
+    "shown."
 )
-_ILLUSTRATIVE_DATA_HTML = (
+_UNAVAILABLE_DATA_HTML = (
     '<div class="pi-disclosure">'
-    f'<div class="pi-disclosure-title">{html.escape(_ILLUSTRATIVE_DATA_TITLE)}</div>'
-    f'<div class="pi-disclosure-body">{html.escape(_ILLUSTRATIVE_DATA_BODY)}</div>'
+    f'<div class="pi-disclosure-title">{html.escape(_UNAVAILABLE_DATA_TITLE)}</div>'
+    f'<div class="pi-disclosure-body">{html.escape(_UNAVAILABLE_DATA_BODY)}</div>'
     "</div>"
 )
 
-# Used only when a real Capital Summary/Allocation was supplied (see
-# PortfolioIntelligenceUI's capital_is_real param) but Holdings could not
-# be -- Capital Summary and Allocation are real managed-capital-pool
-# figures at that point, only Holdings remains illustrative. Same title
-# (still accurate -- part of the page is still illustrative), corrected
-# body only.
-_PARTIAL_ILLUSTRATIVE_DATA_BODY = (
+# Used only when a real Capital Summary/Allocation was supplied but real
+# Holdings could not be (open-position source or live-price source
+# unavailable). Capital Summary and Allocation are real managed-capital-
+# pool figures at that point; Holdings renders its own unavailable state,
+# never a fabricated table.
+_PARTIAL_DATA_TITLE = "Partial Data"
+_PARTIAL_DATA_BODY = (
     "Capital Summary and Allocation reflect the real managed capital "
-    "pool. Holdings shown below is illustrative and is not real trading "
-    "activity."
+    "pool. Holdings data is currently unavailable."
 )
-_PARTIAL_ILLUSTRATIVE_DATA_HTML = (
+_PARTIAL_DATA_HTML = (
     '<div class="pi-disclosure">'
-    f'<div class="pi-disclosure-title">{html.escape(_ILLUSTRATIVE_DATA_TITLE)}</div>'
-    f'<div class="pi-disclosure-body">{html.escape(_PARTIAL_ILLUSTRATIVE_DATA_BODY)}</div>'
+    f'<div class="pi-disclosure-title">{html.escape(_PARTIAL_DATA_TITLE)}</div>'
+    f'<div class="pi-disclosure-body">{html.escape(_PARTIAL_DATA_BODY)}</div>'
     "</div>"
+)
+
+# Per-section unavailable notes (rendered in place of the Capital Summary
+# metrics / Allocation bar / Holdings table when their real source is not
+# available). Styled with .pi-unavailable -- the same look the Alpaca
+# sections' own unavailable state already uses.
+_CAPITAL_UNAVAILABLE_MESSAGE = (
+    "Capital Summary is not available -- the managed capital pool could "
+    "not be read in this environment."
+)
+_HOLDINGS_UNAVAILABLE_MESSAGE = (
+    "Holdings are not available -- open-position data or live prices "
+    "could not be read in this environment."
 )
 
 # Used only when both Capital Summary/Allocation AND Holdings were
-# supplied from real sources (see PortfolioIntelligenceUI's capital_is_real
-# and holdings_is_real params) -- nothing on the page is illustrative at
-# that point. Holdings' current price/market value are fetched live (see
-# adapters/live_price_source.py); the disclosure says so rather than
-# implying a static, always-fresh figure.
+# supplied from real sources (screen.capital_is_available and
+# screen.holdings_is_available both True). Holdings' current price/market
+# value are fetched live (see adapters/live_price_source.py); the
+# disclosure says so rather than implying a static, always-fresh figure.
 _REAL_DATA_TITLE = "Real Data"
 _REAL_DATA_BODY = (
     "Capital Summary, Allocation, and Holdings reflect the real managed "
@@ -182,26 +201,16 @@ _PAGE_HEADER_HTML = (
 
 
 class PortfolioIntelligenceUI:
-    def __init__(
-        self,
-        screen: PortfolioScreen = None,
-        capital_is_real: bool = False,
-        holdings_is_real: bool = False,
-    ):
-        """capital_is_real: True only when `screen.capital` was supplied
-        from a real source (see bootstrap.py's use of
-        adapters.legacy_capital_source.LegacyCapitalSource).
-        holdings_is_real: True only when `screen.holdings` was supplied
-        from real sources (see bootstrap.py's use of
-        adapters.legacy_position_source.LegacyPositionSource and
-        adapters.live_price_source.LivePriceSource) -- both must succeed
-        together, since a real quantity next to an illustrative price
-        would misrepresent market value. Both flags together only control
-        disclosure wording below; the table/summary rendering itself
-        renders whatever `screen` already contains either way."""
-        self._screen = screen if screen is not None else build_mock_screen()
-        self._capital_is_real = capital_is_real
-        self._holdings_is_real = holdings_is_real
+    def __init__(self, screen: PortfolioScreen = None):
+        """The default screen (no `screen` supplied) is an explicit
+        all-unavailable `PortfolioScreen()` -- never a mock/illustrative
+        screen. `_capital_is_real` / `_holdings_is_real` are derived
+        solely from the screen's own availability (`capital_is_available`
+        / `holdings_is_available`), so the disclosure banner can never
+        contradict what the sections actually render."""
+        self._screen = screen if screen is not None else PortfolioScreen()
+        self._capital_is_real = self._screen.capital_is_available
+        self._holdings_is_real = self._screen.holdings_is_available
 
     def build(self) -> gr.Blocks:
         with gr.Blocks(
@@ -214,13 +223,21 @@ class PortfolioIntelligenceUI:
             gr.HTML(self._format_disclosure_html())
 
             gr.HTML('<div class="pi-section-label">Capital Summary</div>')
-            gr.HTML(self._format_capital_summary_html(self._screen.capital))
+            if self._screen.capital_is_available:
+                gr.HTML(self._format_capital_summary_html(self._screen.capital))
+            else:
+                gr.HTML(self._format_unavailable_html(_CAPITAL_UNAVAILABLE_MESSAGE))
 
             gr.HTML('<div class="pi-section-label">Capital Allocation</div>')
-            gr.HTML(self._format_allocation_html(self._screen.capital))
+            if self._screen.capital_is_available:
+                gr.HTML(self._format_allocation_html(self._screen.capital))
+            else:
+                gr.HTML(self._format_unavailable_html(_CAPITAL_UNAVAILABLE_MESSAGE))
 
             gr.HTML('<div class="pi-section-label">Holdings</div>')
-            if self._screen.is_empty:
+            if not self._screen.holdings_is_available:
+                gr.HTML(self._format_unavailable_html(_HOLDINGS_UNAVAILABLE_MESSAGE))
+            elif self._screen.is_empty:
                 gr.HTML(self._format_empty_message_html(self._screen))
             else:
                 gr.Dataframe(
@@ -296,8 +313,12 @@ class PortfolioIntelligenceUI:
         if self._capital_is_real and self._holdings_is_real:
             return _REAL_DATA_HTML
         if self._capital_is_real:
-            return _PARTIAL_ILLUSTRATIVE_DATA_HTML
-        return _ILLUSTRATIVE_DATA_HTML
+            return _PARTIAL_DATA_HTML
+        return _UNAVAILABLE_DATA_HTML
+
+    @staticmethod
+    def _format_unavailable_html(message: str) -> str:
+        return f'<div class="pi-unavailable">{html.escape(message)}</div>'
 
     @staticmethod
     def _format_capital_summary_html(capital: CapitalSummary) -> str:

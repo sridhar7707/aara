@@ -177,3 +177,15 @@ def test_fallback_remains_fully_unavailable_when_no_real_screen_is_supplied():
         assert section.unavailable_message in combined
     dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
     assert dataframes == []
+
+
+def test_default_render_shows_no_available_summary_markup():
+    """Production guardrail: with no real screen supplied, every section
+    is unavailable, so the rendered page contains zero
+    '.mb-available-summary' blocks -- only '.mb-unavailable-message' ones.
+    A section can only render an available summary from a real,
+    adapter-sourced value (see bootstrap.py)."""
+    combined = "\n".join(_html_values(MorningBriefUI().build()))
+
+    assert "mb-available-summary" not in combined
+    assert "mb-unavailable-message" in combined

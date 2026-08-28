@@ -203,11 +203,11 @@ def test_orders_unavailable_leaves_every_return_path_on_none(
 
 
 def test_disclosure_semantics_are_unchanged_by_the_orders_attachment(monkeypatch, _no_alpaca_account):
-    """Orders are never counted toward Real/Partial/Illustrative -- a fully
-    illustrative screen with a real orders snapshot still renders the exact
-    illustrative disclosure."""
+    """Orders are never counted toward Real/Partial/Unavailable -- a fully
+    unavailable screen (no capital) with a real orders snapshot still
+    renders the exact unavailable disclosure."""
     from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
-        _ILLUSTRATIVE_DATA_HTML,
+        _UNAVAILABLE_DATA_HTML,
     )
 
     _patch_legacy(monkeypatch, capital=None, positions=None, prices=None)
@@ -222,4 +222,4 @@ def test_disclosure_semantics_are_unchanged_by_the_orders_attachment(monkeypatch
         if hasattr(block, "value") and isinstance(getattr(block, "value", None), str)
     ]
 
-    assert _ILLUSTRATIVE_DATA_HTML in html_values
+    assert _UNAVAILABLE_DATA_HTML in html_values
