@@ -1,17 +1,23 @@
 """Gradio shell for Portfolio Intelligence.
 
 Self-contained: does not import ui/decision_center/ (no gradio_view.py,
-theme.py, screen.py, or mock_data.py cross-import). Renders whatever
-PortfolioScreen it is given. The production path (bootstrap.py's
-_build_portfolio_intelligence_ui) assembles the screen from
-adapters.legacy_capital_source.LegacyCapitalSource,
-adapters.legacy_position_source.LegacyPositionSource, and
-adapters.live_price_source.LivePriceSource; any section whose real source
-is unavailable renders an explicit unavailable state -- this module never
-imports mock_data.py and the default (no `screen` supplied) is an
-all-unavailable PortfolioScreen(), never a fabricated one. No controller,
-no service, no sentinel_engine/bot import. Wired into main.py/bootstrap.py
-as the 2nd Trading Intelligence tab.
+theme.py, screen.py, or mock_data.py cross-import). Data is fetched at
+render time, not build time: the UI takes a `screen_provider` callable
+(bootstrap.py's `_build_portfolio_intelligence_screen`, which assembles a
+PortfolioScreen from adapters.legacy_capital_source.LegacyCapitalSource,
+adapters.legacy_position_source.LegacyPositionSource,
+adapters.live_price_source.LivePriceSource and the three read-only Alpaca
+paper adapters) and re-invokes it on every `demo.load()` and every
+Refresh click, so a long-running Space shows data as of page load rather
+than app start. An "As of {timestamp}" line reflects the last fetch. The
+Refresh button reuses ui/decision_center/gradio_view.py's disable ->
+render -> enable double-submit guard. Any section whose real source is
+unavailable renders an explicit unavailable state -- this module never
+imports mock_data.py and the default provider (no `screen` /
+`screen_provider` supplied) is `PortfolioScreen` itself, the
+all-unavailable state, never a fabricated one. No controller, no service,
+no sentinel_engine/bot import. Wired into main.py/bootstrap.py as the 2nd
+Trading Intelligence tab.
 
 Alpaca Paper Account section (2026-08-27 unit): a separate, always
 distinctly-labeled "ALPACA PAPER" block rendered below Holdings, sourced
@@ -34,7 +40,7 @@ composed app's single stylesheet by `bootstrap.py`.
 """
 import html
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import gradio as gr
@@ -209,19 +215,66 @@ _PAGE_HEADER_HTML = (
 )
 
 
+_AS_OF_PREFIX = "As of "
+
+
+def _format_as_of_html(moment: datetime) -> str:
+    """Render-time "as of" stamp for the whole screen. America/Chicago in
+    the same "%Y-%m-%d %H:%M %Z" format the order timestamps already use
+    (see `_format_order_timestamp`), so the two never disagree on
+    wall-clock convention. Reuses the existing `.pi-subtitle` treatment
+    (muted secondary text, already defined in this package's theme.py and
+    used by `_PAGE_HEADER_HTML`) rather than introducing a new styled
+    class."""
+    stamp = moment.astimezone(_ORDERS_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
+    return f'<div class="pi-subtitle">{html.escape(_AS_OF_PREFIX + stamp)}</div>'
+
+
+def _html_update(state: Tuple[str, bool]) -> Dict[str, Any]:
+    value, visible = state
+    return gr.update(value=value, visible=visible)
+
+
+def _table_update(state: Tuple[List[List[str]], bool]) -> Dict[str, Any]:
+    rows, visible = state
+    return gr.update(value=rows, visible=visible)
+
+
 class PortfolioIntelligenceUI:
-    def __init__(self, screen: PortfolioScreen = None):
-        """The default screen (no `screen` supplied) is an explicit
-        all-unavailable `PortfolioScreen()` -- never a mock/illustrative
-        screen. `_capital_is_real` / `_holdings_is_real` are derived
-        solely from the screen's own availability (`capital_is_available`
-        / `holdings_is_available`), so the disclosure banner can never
-        contradict what the sections actually render."""
-        self._screen = screen if screen is not None else PortfolioScreen()
+    def __init__(
+        self,
+        screen: Optional[PortfolioScreen] = None,
+        *,
+        screen_provider: Optional[Callable[[], PortfolioScreen]] = None,
+    ):
+        """Render-time data model. `screen_provider` (bootstrap.py's
+        `_build_portfolio_intelligence_screen`) is re-invoked on every
+        `demo.load()` and every Refresh click, so a long-running Space
+        shows data as of page load, not app start. A fixed `screen`
+        (tests) is wrapped in a constant provider. When neither is
+        supplied the provider is `PortfolioScreen` itself -- the explicit
+        all-unavailable state, never a mock/illustrative screen.
+
+        The provider is also called once here so `self._screen` /
+        `self._capital_is_real` / `self._holdings_is_real` describe the
+        build-time snapshot -- the same values bootstrap.py computed
+        eagerly before this slice. `build()` renders from that snapshot and
+        wires `demo.load()` to refresh it immediately on page load.
+        `_capital_is_real` / `_holdings_is_real` are derived solely from
+        the screen's own availability, so the disclosure banner can never
+        contradict what the sections render."""
+        if screen_provider is not None:
+            self._screen_provider = screen_provider
+        elif screen is not None:
+            self._screen_provider = lambda: screen
+        else:
+            self._screen_provider = PortfolioScreen
+        self._screen = self._screen_provider()
         self._capital_is_real = self._screen.capital_is_available
         self._holdings_is_real = self._screen.holdings_is_available
 
     def build(self) -> gr.Blocks:
+        initial = self._screen
         with gr.Blocks(
             title="AARA Trading Intelligence — Portfolio Intelligence", css=CSS,
         ) as demo:
@@ -229,61 +282,60 @@ class PortfolioIntelligenceUI:
             gr.HTML(build_shell_nav_html("Portfolio Intelligence"), elem_classes=["aara-shell-nav"])
 
             gr.HTML(_PAGE_HEADER_HTML)
-            gr.HTML(self._format_disclosure_html())
+            refresh_button = gr.Button(
+                "↻ Refresh", size="sm", scale=0, elem_classes=["aara-refresh-button"],
+            )
+            as_of_output = gr.HTML(_format_as_of_html(self._now()))
+
+            disclosure_output = gr.HTML(self._format_disclosure_html(initial))
 
             gr.HTML('<div class="pi-section-label">Capital Summary</div>')
-            if self._screen.capital_is_available:
-                gr.HTML(self._format_capital_summary_html(self._screen.capital))
-            else:
-                gr.HTML(self._format_unavailable_html(_CAPITAL_UNAVAILABLE_MESSAGE))
+            capital_summary_output = gr.HTML(self._capital_summary_state(initial)[0])
 
             gr.HTML('<div class="pi-section-label">Capital Allocation</div>')
-            if self._screen.capital_is_available:
-                gr.HTML(self._format_allocation_html(self._screen.capital))
-            else:
-                gr.HTML(self._format_unavailable_html(_CAPITAL_UNAVAILABLE_MESSAGE))
+            allocation_output = gr.HTML(self._allocation_state(initial)[0])
 
             gr.HTML('<div class="pi-section-label">Holdings</div>')
-            if not self._screen.holdings_is_available:
-                gr.HTML(self._format_unavailable_html(_HOLDINGS_UNAVAILABLE_MESSAGE))
-            elif self._screen.is_empty:
-                gr.HTML(self._format_empty_message_html(self._screen))
-            else:
-                gr.Dataframe(
-                    headers=_HOLDINGS_HEADERS,
-                    value=self._format_holdings_rows(self._screen.holdings),
-                    datatype=["str", "str", "str", "str", "str"],
-                    interactive=False,
-                    label="Holdings",
-                    show_label=False,
-                    elem_classes=["pi-holdings-table"],
-                    **{_DATAFRAME_HEIGHT_KWARG: 320},
-                )
+            holdings_message_value, holdings_message_visible = self._holdings_message_state(initial)
+            holdings_message_output = gr.HTML(
+                holdings_message_value, visible=holdings_message_visible,
+            )
+            holdings_rows, holdings_visible = self._holdings_table_state(initial)
+            holdings_table = gr.Dataframe(
+                headers=_HOLDINGS_HEADERS,
+                value=holdings_rows,
+                datatype=["str", "str", "str", "str", "str"],
+                interactive=False,
+                label="Holdings",
+                show_label=False,
+                elem_classes=["pi-holdings-table"],
+                visible=holdings_visible,
+                **{_DATAFRAME_HEIGHT_KWARG: 320},
+            )
 
             gr.HTML(
                 f'<div class="pi-section-label">Alpaca Paper Account '
                 f'<span class="pi-alpaca-badge">{html.escape(_ALPACA_PAPER_BADGE_TEXT)}</span></div>'
             )
-            if not self._screen.alpaca_is_available:
-                gr.HTML(f'<div class="pi-alpaca-unavailable">{html.escape(_ALPACA_UNAVAILABLE_MESSAGE)}</div>')
-            else:
-                gr.HTML(self._format_alpaca_account_html(self._screen.alpaca_account))
-                if len(self._screen.alpaca_positions) == 0:
-                    gr.HTML(
-                        f'<div class="pi-empty-message">'
-                        f'{html.escape(self._screen.alpaca_empty_state_message)}</div>'
-                    )
-                else:
-                    gr.Dataframe(
-                        headers=_ALPACA_POSITIONS_HEADERS,
-                        value=self._format_alpaca_positions_rows(self._screen.alpaca_positions),
-                        datatype=["str"] * len(_ALPACA_POSITIONS_HEADERS),
-                        interactive=False,
-                        label="Alpaca Paper Positions",
-                        show_label=False,
-                        elem_classes=["pi-alpaca-positions-table"],
-                        **{_DATAFRAME_HEIGHT_KWARG: 320},
-                    )
+            alpaca_account_output = gr.HTML(self._alpaca_account_state(initial)[0])
+            positions_message_value, positions_message_visible = (
+                self._alpaca_positions_message_state(initial)
+            )
+            alpaca_positions_message_output = gr.HTML(
+                positions_message_value, visible=positions_message_visible,
+            )
+            positions_rows, positions_visible = self._alpaca_positions_table_state(initial)
+            alpaca_positions_table = gr.Dataframe(
+                headers=_ALPACA_POSITIONS_HEADERS,
+                value=positions_rows,
+                datatype=["str"] * len(_ALPACA_POSITIONS_HEADERS),
+                interactive=False,
+                label="Alpaca Paper Positions",
+                show_label=False,
+                elem_classes=["pi-alpaca-positions-table"],
+                visible=positions_visible,
+                **{_DATAFRAME_HEIGHT_KWARG: 320},
+            )
 
             gr.HTML(
                 f'<div class="pi-section-label">Alpaca Paper &mdash; Recent Orders '
@@ -293,39 +345,185 @@ class PortfolioIntelligenceUI:
                 f'<div class="pi-alpaca-orders-caption">'
                 f'{html.escape(_ALPACA_ORDERS_SCOPE_CAPTION)}</div>'
             )
-            if not self._screen.alpaca_orders_available:
-                gr.HTML(
-                    f'<div class="pi-alpaca-unavailable">'
-                    f'{html.escape(_ALPACA_ORDERS_UNAVAILABLE_MESSAGE)}</div>'
-                )
-            elif self._screen.alpaca_orders.is_empty:
-                gr.HTML(
-                    f'<div class="pi-empty-message">'
-                    f'{html.escape(self._screen.alpaca_orders_empty_state_message)}</div>'
-                )
-            else:
-                if self._screen.alpaca_orders.truncated:
-                    gr.HTML(
-                        f'<div class="pi-alpaca-orders-truncation">'
-                        f'{html.escape(_ALPACA_ORDERS_TRUNCATION_NOTE)}</div>'
-                    )
-                gr.Dataframe(
-                    headers=_ALPACA_ORDERS_HEADERS,
-                    value=self._format_alpaca_orders_rows(self._screen.alpaca_orders.orders),
-                    datatype=["str"] * len(_ALPACA_ORDERS_HEADERS),
-                    interactive=False,
-                    label="Alpaca Paper Recent Orders",
-                    show_label=False,
-                    elem_classes=["pi-alpaca-orders-table"],
-                    **{_DATAFRAME_HEIGHT_KWARG: 320},
-                )
+            truncation_value, truncation_visible = self._alpaca_orders_truncation_state(initial)
+            alpaca_orders_truncation_output = gr.HTML(
+                truncation_value, visible=truncation_visible,
+            )
+            orders_message_value, orders_message_visible = (
+                self._alpaca_orders_message_state(initial)
+            )
+            alpaca_orders_message_output = gr.HTML(
+                orders_message_value, visible=orders_message_visible,
+            )
+            orders_rows, orders_visible = self._alpaca_orders_table_state(initial)
+            alpaca_orders_table = gr.Dataframe(
+                headers=_ALPACA_ORDERS_HEADERS,
+                value=orders_rows,
+                datatype=["str"] * len(_ALPACA_ORDERS_HEADERS),
+                interactive=False,
+                label="Alpaca Paper Recent Orders",
+                show_label=False,
+                elem_classes=["pi-alpaca-orders-table"],
+                visible=orders_visible,
+                **{_DATAFRAME_HEIGHT_KWARG: 320},
+            )
+
+            outputs = [
+                as_of_output, disclosure_output, capital_summary_output, allocation_output,
+                holdings_message_output, holdings_table,
+                alpaca_account_output, alpaca_positions_message_output, alpaca_positions_table,
+                alpaca_orders_truncation_output, alpaca_orders_message_output,
+                alpaca_orders_table,
+            ]
+
+            # Same disable -> render -> enable double-submit guard chain as
+            # ui/decision_center/gradio_view.py's Refresh: a second click
+            # while a render is in flight cannot dispatch a second
+            # concurrent fetch. _render is wired identically to demo.load()
+            # (same fn, same inputs=None, same outputs) -- only wrapped in
+            # the .then() chain here.
+            refresh_button.click(
+                fn=self._disable_refresh_button, inputs=None, outputs=[refresh_button],
+            ).then(
+                fn=self._render, inputs=None, outputs=outputs,
+            ).then(
+                fn=self._enable_refresh_button, inputs=None, outputs=[refresh_button],
+            )
+            demo.load(fn=self._render, inputs=None, outputs=outputs)
 
         return demo
 
-    def _format_disclosure_html(self) -> str:
-        if self._capital_is_real and self._holdings_is_real:
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _disable_refresh_button() -> Dict[str, Any]:
+        """First link in the Refresh double-submit guard chain (see
+        build()) -- disables the button the instant it is clicked, before
+        _render runs. Mirrors ui/decision_center/gradio_view.py."""
+        return gr.update(interactive=False)
+
+    @staticmethod
+    def _enable_refresh_button() -> Dict[str, Any]:
+        """Last link in the Refresh double-submit guard chain (see
+        build()) -- re-enables the button once _render has returned,
+        success or not."""
+        return gr.update(interactive=True)
+
+    def _render(self) -> Tuple[Dict[str, Any], ...]:
+        """Re-fetch through the provider and return one Gradio update per
+        dynamic output, in build()'s `outputs` order. Called by
+        demo.load() on page load and by the Refresh chain. An unchanged
+        provider result yields an unchanged screen; a provider that now
+        returns an all-unavailable PortfolioScreen collapses every section
+        back to its own explicit unavailable state -- there is no mock
+        fallback anywhere in this path."""
+        screen = self._screen_provider()
+        return (
+            gr.update(value=_format_as_of_html(self._now())),
+            gr.update(value=self._format_disclosure_html(screen)),
+            gr.update(value=self._capital_summary_state(screen)[0]),
+            gr.update(value=self._allocation_state(screen)[0]),
+            _html_update(self._holdings_message_state(screen)),
+            _table_update(self._holdings_table_state(screen)),
+            gr.update(value=self._alpaca_account_state(screen)[0]),
+            _html_update(self._alpaca_positions_message_state(screen)),
+            _table_update(self._alpaca_positions_table_state(screen)),
+            _html_update(self._alpaca_orders_truncation_state(screen)),
+            _html_update(self._alpaca_orders_message_state(screen)),
+            _table_update(self._alpaca_orders_table_state(screen)),
+        )
+
+    # --- per-section state (value, visible), shared by build() and _render() ---
+
+    def _capital_summary_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
+        if screen.capital_is_available:
+            return (self._format_capital_summary_html(screen.capital), True)
+        return (self._format_unavailable_html(_CAPITAL_UNAVAILABLE_MESSAGE), True)
+
+    def _allocation_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
+        if screen.capital_is_available:
+            return (self._format_allocation_html(screen.capital), True)
+        return (self._format_unavailable_html(_CAPITAL_UNAVAILABLE_MESSAGE), True)
+
+    def _holdings_message_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
+        if not screen.holdings_is_available:
+            return (self._format_unavailable_html(_HOLDINGS_UNAVAILABLE_MESSAGE), True)
+        if screen.is_empty:
+            return (self._format_empty_message_html(screen), True)
+        return ("", False)
+
+    def _holdings_table_state(self, screen: PortfolioScreen) -> Tuple[List[List[str]], bool]:
+        if screen.holdings_is_available and not screen.is_empty:
+            return (self._format_holdings_rows(screen.holdings), True)
+        return ([], False)
+
+    def _alpaca_account_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
+        if screen.alpaca_is_available:
+            return (self._format_alpaca_account_html(screen.alpaca_account), True)
+        return (
+            f'<div class="pi-alpaca-unavailable">'
+            f'{html.escape(_ALPACA_UNAVAILABLE_MESSAGE)}</div>',
+            True,
+        )
+
+    def _alpaca_positions_message_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
+        if screen.alpaca_is_available and len(screen.alpaca_positions) == 0:
+            return (
+                f'<div class="pi-empty-message">'
+                f'{html.escape(screen.alpaca_empty_state_message)}</div>',
+                True,
+            )
+        return ("", False)
+
+    def _alpaca_positions_table_state(
+        self, screen: PortfolioScreen,
+    ) -> Tuple[List[List[str]], bool]:
+        if screen.alpaca_is_available and len(screen.alpaca_positions) > 0:
+            return (self._format_alpaca_positions_rows(screen.alpaca_positions), True)
+        return ([], False)
+
+    def _alpaca_orders_truncation_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
+        if (
+            screen.alpaca_orders_available
+            and not screen.alpaca_orders.is_empty
+            and screen.alpaca_orders.truncated
+        ):
+            return (
+                f'<div class="pi-alpaca-orders-truncation">'
+                f'{html.escape(_ALPACA_ORDERS_TRUNCATION_NOTE)}</div>',
+                True,
+            )
+        return ("", False)
+
+    def _alpaca_orders_message_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
+        if not screen.alpaca_orders_available:
+            return (
+                f'<div class="pi-alpaca-unavailable">'
+                f'{html.escape(_ALPACA_ORDERS_UNAVAILABLE_MESSAGE)}</div>',
+                True,
+            )
+        if screen.alpaca_orders.is_empty:
+            return (
+                f'<div class="pi-empty-message">'
+                f'{html.escape(screen.alpaca_orders_empty_state_message)}</div>',
+                True,
+            )
+        return ("", False)
+
+    def _alpaca_orders_table_state(
+        self, screen: PortfolioScreen,
+    ) -> Tuple[List[List[str]], bool]:
+        if screen.alpaca_orders_available and not screen.alpaca_orders.is_empty:
+            return (self._format_alpaca_orders_rows(screen.alpaca_orders.orders), True)
+        return ([], False)
+
+    @staticmethod
+    def _format_disclosure_html(screen: PortfolioScreen) -> str:
+        if screen.capital_is_available and screen.holdings_is_available:
             return _REAL_DATA_HTML
-        if self._capital_is_real:
+        if screen.capital_is_available:
             return _PARTIAL_DATA_HTML
         return _UNAVAILABLE_DATA_HTML
 

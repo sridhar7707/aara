@@ -683,8 +683,11 @@ def _with_alpaca_orders_data(screen: PortfolioScreen) -> PortfolioScreen:
     return replace(screen, alpaca_orders=orders)
 
 
-def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
-    """Real Capital Summary/Allocation when the legacy trades.db capital
+def _build_portfolio_intelligence_screen() -> PortfolioScreen:
+    """Assemble one real-or-unavailable PortfolioScreen from the legacy
+    trades.db adapters plus the three read-only Alpaca paper adapters.
+
+    Real Capital Summary/Allocation when the legacy trades.db capital
     pool is available (adapters/legacy_capital_source.py); an explicit
     UNAVAILABLE state (capital=None) otherwise -- never illustrative or
     fabricated figures. Holdings becomes real only when BOTH the real open
@@ -702,7 +705,12 @@ def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
     _with_alpaca_paper_data() and _with_alpaca_orders_data() -- unchanged,
     and entirely separate from the legacy trades.db-based Capital Summary/
     Holdings this function builds. See those adapters' own docstrings for
-    the paper-only safety guarantees."""
+    the paper-only safety guarantees.
+
+    This function is the `screen_provider` PortfolioIntelligenceUI
+    re-invokes on every demo.load() and every Refresh click -- it is a
+    fresh read each call, holding no state and caching nothing, so the
+    screen always reflects the adapters' current answer."""
     real_capital = LegacyCapitalSource().get_capital_summary()
 
     real_positions = LegacyPositionSource().get_open_positions()
@@ -720,8 +728,15 @@ def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
         )
 
     screen = PortfolioScreen(capital=real_capital, holdings=real_holdings)
-    screen = _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
-    return PortfolioIntelligenceUI(screen=screen)
+    return _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
+
+
+def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
+    """Wire Portfolio Intelligence to fetch its data at render time.
+    `_build_portfolio_intelligence_screen` is passed as the screen
+    provider, so PortfolioIntelligenceUI calls it once now (for the
+    build-time snapshot) and again on every demo.load() / Refresh."""
+    return PortfolioIntelligenceUI(screen_provider=_build_portfolio_intelligence_screen)
 
 
 def build_trading_intelligence_app() -> gr.Blocks:

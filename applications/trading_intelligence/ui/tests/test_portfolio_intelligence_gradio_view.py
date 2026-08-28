@@ -9,6 +9,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
     _ALPACA_ORDERS_WORKING_MARKER,
     _ALPACA_PAPER_BADGE_TEXT,
     _ALPACA_UNAVAILABLE_MESSAGE,
+    _AS_OF_PREFIX,
     _CAPITAL_UNAVAILABLE_MESSAGE,
     _HOLDINGS_UNAVAILABLE_MESSAGE,
     _PARTIAL_DATA_BODY,
@@ -60,6 +61,18 @@ def _html_values(demo):
     return [
         block.value for block in demo.blocks.values()
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+
+
+def _visible_dataframes(demo):
+    """Data is fetched at render time now, so every dynamic gr.Dataframe
+    is always present in the layout -- hidden (visible=False) when its
+    section is unavailable/empty, shown when it has real rows. The old
+    "no gr.Dataframe exists" assertions become "no gr.Dataframe is
+    visible"."""
+    return [
+        block for block in demo.blocks.values()
+        if isinstance(block, gr.Dataframe) and getattr(block, "visible", True)
     ]
 
 
@@ -122,7 +135,7 @@ def test_default_render_is_the_unavailable_state_with_no_dataframe():
     assert _UNAVAILABLE_DATA_HTML in html_text
     assert _CAPITAL_UNAVAILABLE_MESSAGE in html_text
     assert _HOLDINGS_UNAVAILABLE_MESSAGE in html_text
-    assert [b for b in demo.blocks.values() if isinstance(b, gr.Dataframe)] == []
+    assert _visible_dataframes(demo) == []
 
 
 def test_no_fabricated_capital_or_holdings_marker_reaches_any_rendered_state():
@@ -276,7 +289,7 @@ def test_holdings_unavailable_renders_the_message_and_no_table():
 
     demo = ui.build()
     html_values = _html_values(demo)
-    dataframes = [b for b in demo.blocks.values() if isinstance(b, gr.Dataframe)]
+    dataframes = _visible_dataframes(demo)
 
     assert any(_HOLDINGS_UNAVAILABLE_MESSAGE in v for v in html_values)
     assert not any(d for d in dataframes if "pi-holdings-table" in (d.elem_classes or []))
@@ -301,7 +314,7 @@ def test_partial_state_renders_real_capital_and_holdings_unavailable_and_partial
     assert _PARTIAL_DATA_HTML in combined
     assert _REAL_DATA_HTML not in combined
     assert _UNAVAILABLE_DATA_HTML not in combined
-    assert [b for b in demo.blocks.values() if isinstance(b, gr.Dataframe)] == []
+    assert _visible_dataframes(demo) == []
 
 
 def test_derived_allocation_values_render_correctly_for_a_real_capital_screen():
@@ -355,9 +368,8 @@ def test_real_holdings_can_be_empty_with_the_real_data_disclosure():
 
     demo = ui.build()
     html_values = _html_values(demo)
-    dataframes = [b for b in demo.blocks.values() if isinstance(b, gr.Dataframe)]
 
-    assert dataframes == []
+    assert _visible_dataframes(demo) == []
     assert _REAL_DATA_HTML in html_values
     assert any("No holdings recorded yet." in value for value in html_values)
     assert not any(_HOLDINGS_UNAVAILABLE_MESSAGE in value for value in html_values)
@@ -425,7 +437,7 @@ def test_alpaca_section_shows_empty_message_when_connected_with_zero_positions()
     demo = PortfolioIntelligenceUI(screen=screen).build()
 
     html_values = _html_values(demo)
-    dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
+    dataframes = _visible_dataframes(demo)
     alpaca_tables = [d for d in dataframes if "pi-alpaca-positions-table" in d.elem_classes]
     assert alpaca_tables == []
     assert any("Alpaca Paper account has no open positions." in v for v in html_values)
@@ -473,7 +485,9 @@ def _orders_dataframe(demo):
     return [
         block
         for block in demo.blocks.values()
-        if isinstance(block, gr.Dataframe) and "pi-alpaca-orders-table" in (block.elem_classes or [])
+        if isinstance(block, gr.Dataframe)
+        and "pi-alpaca-orders-table" in (block.elem_classes or [])
+        and getattr(block, "visible", True)
     ]
 
 
@@ -618,10 +632,172 @@ def test_orders_section_is_independent_of_account_and_disclosure_state():
     assert not any(_ALPACA_ORDERS_UNAVAILABLE_MESSAGE in v for v in html_values)
 
 
-def test_default_screen_renders_zero_dataframes():
-    """The default (no screen) is fully unavailable: no Holdings table, no
-    Alpaca positions table, no Alpaca orders table."""
+def test_default_screen_renders_zero_visible_dataframes():
+    """The default (no screen) is fully unavailable: the Holdings, Alpaca
+    positions, and Alpaca orders tables are all present in the layout (so
+    Refresh can populate them) but hidden -- none is visible."""
     demo = PortfolioIntelligenceUI().build()
 
-    all_dataframes = [b for b in demo.blocks.values() if isinstance(b, gr.Dataframe)]
-    assert all_dataframes == []
+    assert _visible_dataframes(demo) == []
+
+
+# --- Render-time fetch: Refresh button, demo.load, "as of" indicator ----
+
+
+_OUTPUT_COUNT = 12  # see PortfolioIntelligenceUI.build()'s `outputs` list
+
+
+def _refresh_button(demo):
+    return next(
+        block for block in demo.blocks.values()
+        if isinstance(block, gr.Button) and "aara-refresh-button" in (block.elem_classes or [])
+    )
+
+
+def _counting_provider(*screens):
+    """Returns a provider that yields the given screens in order (repeating
+    the last one), plus a mutable call-count list."""
+    calls = []
+    seq = list(screens)
+
+    def provider():
+        calls.append(True)
+        idx = min(len(calls) - 1, len(seq) - 1)
+        return seq[idx]
+
+    return provider, calls
+
+
+def test_build_has_a_single_refresh_button_with_the_shared_class():
+    demo = PortfolioIntelligenceUI().build()
+
+    buttons = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.Button) and "aara-refresh-button" in (b.elem_classes or [])
+    ]
+    assert len(buttons) == 1
+
+
+def test_disable_refresh_button_returns_a_not_interactive_update():
+    assert PortfolioIntelligenceUI._disable_refresh_button() == {
+        "interactive": False, "__type__": "update",
+    }
+
+
+def test_enable_refresh_button_returns_an_interactive_update():
+    assert PortfolioIntelligenceUI._enable_refresh_button() == {
+        "interactive": True, "__type__": "update",
+    }
+
+
+def test_refresh_click_chain_is_disable_then_render_then_enable():
+    """Same disable -> render -> enable double-submit guard chain as
+    Decision Center: proves the click().then().then() wiring in build(),
+    not just that the helper methods exist."""
+    ui = PortfolioIntelligenceUI()
+    demo = ui.build()
+
+    refresh_button = _refresh_button(demo)
+    refresh_button_id = next(
+        bid for bid, block in demo.blocks.items() if block is refresh_button
+    )
+    disable_dep = next(
+        dep for dep in demo.config["dependencies"]
+        if demo.fns[dep["id"]].fn is PortfolioIntelligenceUI._disable_refresh_button
+    )
+    render_dep = next(
+        dep for dep in demo.config["dependencies"]
+        if dep.get("trigger_after") == disable_dep["id"]
+    )
+    enable_dep = next(
+        dep for dep in demo.config["dependencies"]
+        if demo.fns[dep["id"]].fn is PortfolioIntelligenceUI._enable_refresh_button
+    )
+
+    assert disable_dep["targets"] == [(refresh_button_id, "click")]
+    assert refresh_button_id in disable_dep["outputs"]
+    assert demo.fns[render_dep["id"]].fn == ui._render
+    assert enable_dep["trigger_after"] == render_dep["id"]
+    assert refresh_button_id in enable_dep["outputs"]
+
+
+def test_demo_load_and_the_refresh_chain_both_call_render():
+    ui = PortfolioIntelligenceUI()
+    demo = ui.build()
+
+    render_deps = [
+        dep for dep in demo.config["dependencies"]
+        if demo.fns[dep["id"]].fn == ui._render
+    ]
+    assert len(render_deps) == 2  # demo.load() + the Refresh .then() step
+
+
+def test_render_returns_one_update_per_dynamic_output():
+    updates = PortfolioIntelligenceUI()._render()
+
+    assert len(updates) == _OUTPUT_COUNT
+    assert all(u.get("__type__") == "update" for u in updates)
+
+
+def test_render_reflects_a_fresh_screen_from_the_provider_each_call():
+    real = _make_capital(allocated_amount=4321.0)
+    provider, calls = _counting_provider(
+        PortfolioScreen(),                                   # __init__ snapshot
+        PortfolioScreen(capital=real, holdings=(_make_holding(),)),  # 1st _render
+    )
+    ui = PortfolioIntelligenceUI(screen_provider=provider)
+
+    first = ui._render()
+    # disclosure is output index 1
+    assert first[1]["value"] == _REAL_DATA_HTML
+
+    second = ui._render()  # provider now repeats the last screen
+    assert second[1]["value"] == _REAL_DATA_HTML
+    assert len(calls) == 3  # 1 in __init__ + 2 explicit _render calls
+
+
+def test_render_preserves_unavailable_states_with_no_mock_fallback():
+    """A provider that returns an all-unavailable screen collapses every
+    section back to its explicit unavailable state -- never mock data."""
+    from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import (
+        build_mock_screen,
+    )
+
+    ui = PortfolioIntelligenceUI(screen_provider=PortfolioScreen)
+    updates = ui._render()
+
+    as_of, disclosure, capital_summary, allocation, holdings_msg, holdings_tbl, \
+        alpaca_acct, alpaca_pos_msg, alpaca_pos_tbl, orders_trunc, orders_msg, \
+        orders_tbl = updates
+
+    assert disclosure["value"] == _UNAVAILABLE_DATA_HTML
+    assert _CAPITAL_UNAVAILABLE_MESSAGE in capital_summary["value"]
+    assert _CAPITAL_UNAVAILABLE_MESSAGE in allocation["value"]
+    assert _HOLDINGS_UNAVAILABLE_MESSAGE in holdings_msg["value"]
+    assert _ALPACA_UNAVAILABLE_MESSAGE in alpaca_acct["value"]
+    assert _ALPACA_ORDERS_UNAVAILABLE_MESSAGE in orders_msg["value"]
+    # every table hidden and empty
+    for tbl in (holdings_tbl, alpaca_pos_tbl, orders_tbl):
+        assert tbl["visible"] is False
+        assert tbl["value"] == []
+    # no fabricated markers from mock_data.py
+    mock = build_mock_screen()
+    rendered = "\n".join(str(u.get("value")) for u in updates)
+    assert f"${mock.capital.allocated_amount:,.2f}" not in rendered
+
+
+def test_as_of_indicator_is_present_at_build_and_refreshed_by_render():
+    demo = PortfolioIntelligenceUI().build()
+    assert any(_AS_OF_PREFIX in v for v in _html_values(demo))
+
+    as_of_update = PortfolioIntelligenceUI()._render()[0]  # output index 0
+    assert _AS_OF_PREFIX in as_of_update["value"]
+    assert "CDT" in as_of_update["value"] or "CST" in as_of_update["value"]
+
+
+def test_no_screen_and_no_provider_uses_the_all_unavailable_screen():
+    ui = PortfolioIntelligenceUI()
+
+    assert ui._screen.capital is None
+    assert ui._screen.holdings is None
+    assert ui._render()[1]["value"] == _UNAVAILABLE_DATA_HTML
