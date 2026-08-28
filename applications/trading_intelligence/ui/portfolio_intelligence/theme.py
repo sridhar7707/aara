@@ -161,7 +161,8 @@ CSS = """
   padding: 8px 0 8px 12px;
   margin: 4px 0;
 }
-.pi-alpaca-orders-truncation {
+.pi-alpaca-orders-truncation,
+.pi-alpaca-orders-caption {
   font-size: 11px;
   font-style: italic;
   color: var(--pi-color-text-secondary);

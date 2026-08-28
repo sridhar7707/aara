@@ -39,6 +39,8 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _RISK_REFERENCE_NAV_LINK_HTML,
     _RISK_REFERENCE_NAV_LINK_JS,
     _RISK_REFERENCE_NAV_LINK_LABEL,
+    _SCOPE_NOTE_BODY,
+    _SCOPE_NOTE_HTML,
     _SELECT_DECISION_HTML,
     _SELECT_DECISION_MESSAGE,
     _SELECTION_ARIA_SYNC_JS,
@@ -429,7 +431,13 @@ def test_render_detail_maps_fields_from_the_returned_decision():
     assert audit_html == '<div class="aara-empty-message">No audit events recorded.</div>'
 
 
-def test_render_detail_header_shows_raw_evidence_and_risk_reference():
+def test_render_detail_header_omits_raw_evidence_and_risk_reference():
+    """UI hardening pass: evidence_reference/risk_reference are opaque
+    internal DecisionContract pointers -- their raw values must never
+    appear in the normal user-facing header. The plumbing still passes
+    them through (a future admin/debug surface may use them), but the
+    rendered header shows neither value nor the old "raw, unresolved"
+    labels."""
     view = _make_view()
     controller = _FakeController(
         detail_area=DecisionDetailArea(
@@ -440,20 +448,20 @@ def test_render_detail_header_shows_raw_evidence_and_risk_reference():
 
     header = ui._render_detail("dec-001")[0]
 
-    assert "evidence-001" in header
-    assert "risk-001" in header
-    assert "raw" in header.lower()
-    assert "unresolved" in header.lower()
+    assert "evidence-001" not in header
+    assert "risk-001" not in header
+    assert "Evidence Reference" not in header
+    assert "Risk Reference" not in header
+    assert "unresolved" not in header.lower()
 
 
-def test_render_detail_header_clarifies_risk_reference_is_not_resolved_risk_intelligence():
-    """P1 (Decision Center UI audit): "Risk Reference (raw, unresolved)"
-    is an opaque DecisionContract pointer, not resolved risk analysis --
-    the Risk section separately states Risk Intelligence is not currently
-    implemented. Without an explicit connection, the header field could be
-    read as if some risk analysis already exists. Assert the header carries
-    wording that ties the two together, without asserting on exact markup
-    (see module docstring)."""
+def test_render_detail_header_clarifies_risk_is_not_resolved_when_risk_reference_present():
+    """UI hardening pass: the raw risk_reference value is no longer shown,
+    but when a decision carries one the header still emits the
+    opaque-pointer clarification so the accompanying Risk Intelligence
+    navigation cannot be read as resolved risk analysis (Risk Intelligence
+    is not implemented for this workspace). Asserts wording only, not
+    exact markup."""
     view = _make_view()
     controller = _FakeController(
         detail_area=DecisionDetailArea(
@@ -464,17 +472,15 @@ def test_render_detail_header_clarifies_risk_reference_is_not_resolved_risk_inte
 
     header = ui._render_detail("dec-001")[0]
 
-    assert "risk-001" in header
-    assert "raw" in header.lower()
-    assert "unresolved" in header.lower()
+    assert "risk-001" not in header
     assert "opaque pointer" in header.lower()
     assert "not currently implemented" in header.lower()
 
 
 def test_render_detail_header_omits_risk_clarification_when_no_risk_reference():
-    """The clarification note is tied to the Risk Reference field existing
-    -- an Evidence-only decision must not carry Risk wording in its header,
-    keeping Evidence Reference's existing behavior unchanged."""
+    """The clarification note and Risk Intelligence nav link are tied to
+    risk_reference existing -- an Evidence-only decision must not carry any
+    Risk wording in its header."""
     view = _make_view()
     controller = _FakeController(
         detail_area=DecisionDetailArea(
@@ -485,7 +491,7 @@ def test_render_detail_header_omits_risk_clarification_when_no_risk_reference():
 
     header = ui._render_detail("dec-001")[0]
 
-    assert "evidence-001" in header
+    assert "aara-decision-header" in header
     assert "opaque pointer" not in header.lower()
     assert "Risk" not in header
 
@@ -589,13 +595,18 @@ def test_risk_reference_nav_link_script_targets_the_documented_dom_contract():
     assert "EXPECTED_NAV_LISTS" not in _RISK_REFERENCE_NAV_LINK_JS
 
 
-def test_render_detail_header_escapes_raw_reference_values():
+def test_render_detail_header_never_leaks_raw_reference_values_even_hostile_ones():
+    """UI hardening pass: raw evidence_reference/risk_reference values are
+    not rendered at all, so a hostile pointer string can appear neither
+    verbatim nor as an escaped fragment in the header. The static Risk
+    clarification + nav link (no value interpolation) still render because
+    risk_reference is present."""
     view = _make_view()
     controller = _FakeController(
         detail_area=DecisionDetailArea(
             decision=view,
             evidence_reference="<script>alert(1)</script>",
-            risk_reference="risk-001",
+            risk_reference="<script>alert(2)</script>",
         )
     )
     ui = DecisionCenterUI(controller, ["dec-001"])
@@ -603,7 +614,10 @@ def test_render_detail_header_escapes_raw_reference_values():
     header = ui._render_detail("dec-001")[0]
 
     assert "<script>" not in header
-    assert "&lt;script&gt;" in header
+    assert "&lt;script&gt;" not in header
+    assert "alert(1)" not in header
+    assert "alert(2)" not in header
+    assert "opaque pointer" in header.lower()
 
 
 def test_render_detail_returns_blank_state_for_blank_decision_id():
@@ -1589,9 +1603,30 @@ def test_audit_card_renders_an_expandable_payload_disclosure():
 
     assert '<details class="aara-payload-disclosure">' in audit_html
     assert "<summary>Details</summary>" in audit_html
-    assert "evt-001" in audit_html
+    # UI hardening pass: the internal event_id is never rendered.
+    assert "evt-001" not in audit_html
     assert "AAPL" in audit_html
     assert "BUY" in audit_html
+
+
+def test_audit_card_has_no_disclosure_when_payload_has_no_authorized_keys():
+    """UI hardening pass: with event_id no longer seeded into the audit
+    disclosure, an event whose payload carries only non-authorized keys
+    (e.g. just decision_id) must render no <details> block at all, not an
+    empty one."""
+    view = _make_view()
+    entry = _make_audit_entry(
+        event_id="evt-002", event_type="DECISION_CREATED",
+        payload={"decision_id": "dec-001"},
+    )
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view, audit_trail=(entry,)))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    audit_html = ui._render_detail("dec-001")[9]
+
+    assert "aara-payload-disclosure" not in audit_html
+    assert "evt-002" not in audit_html
+    assert "dec-001" not in audit_html
 
 
 def test_audit_payload_disclosure_escapes_html_in_values():
@@ -1928,7 +1963,7 @@ def test_timestamp_disclosure_clarifies_last_updated_may_be_governance_evaluatio
     Decisions list must disclose that explicitly."""
     assert _TIMESTAMP_DISCLOSURE_TITLE == "About Last Updated"
     assert "governance evaluation time" in _TIMESTAMP_DISCLOSURE_BODY
-    assert "latest lifecycle event" in _TIMESTAMP_DISCLOSURE_BODY
+    assert "latest governance workflow event" in _TIMESTAMP_DISCLOSURE_BODY
     assert _TIMESTAMP_DISCLOSURE_HTML == (
         '<div class="aara-disclosure-message">'
         '<div class="aara-disclosure-title">About Last Updated</div>'
@@ -1948,6 +1983,27 @@ def test_timestamp_disclosure_block_is_present_in_the_built_layout():
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
     assert _TIMESTAMP_DISCLOSURE_HTML in html_values
+
+
+def test_scope_note_states_decision_center_is_not_order_or_execution_state():
+    """UI hardening pass: a static, decision-independent note making explicit
+    that Decision Center is an intelligence/governance view only and carries
+    no order-submission / execution / settlement state."""
+    assert "intelligence and governance only" in _SCOPE_NOTE_BODY
+    assert "does not represent order submission, execution, or settlement" in _SCOPE_NOTE_BODY
+
+
+def test_scope_note_block_is_present_in_the_built_layout():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    assert _SCOPE_NOTE_HTML in html_values
 
 
 def test_announce_screen_wording_for_zero_decisions():

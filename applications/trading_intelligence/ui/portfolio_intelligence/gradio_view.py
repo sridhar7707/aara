@@ -95,6 +95,15 @@ _ALPACA_ORDERS_UNAVAILABLE_MESSAGE = (
     "network access are not configured for this environment."
 )
 
+# Shown unconditionally under the Recent Orders heading, in every state
+# (unavailable / empty / populated). This section is a broker-side
+# observation of the paper account only -- there is no decision->order
+# linkage anywhere in this product, so it must never read as connected to
+# Decision Center.
+_ALPACA_ORDERS_SCOPE_CAPTION = (
+    "Broker-side observation of the paper account. Not linked to Decision Center."
+)
+
 # Shown only when an underlying API call hit its defensive per-call cap
 # (screen.alpaca_orders.truncated) -- makes the truncation explicit rather
 # than silently showing a clipped list.
@@ -279,6 +288,10 @@ class PortfolioIntelligenceUI:
             gr.HTML(
                 f'<div class="pi-section-label">Alpaca Paper &mdash; Recent Orders '
                 f'<span class="pi-alpaca-badge">{html.escape(_ALPACA_PAPER_BADGE_TEXT)}</span></div>'
+            )
+            gr.HTML(
+                f'<div class="pi-alpaca-orders-caption">'
+                f'{html.escape(_ALPACA_ORDERS_SCOPE_CAPTION)}</div>'
             )
             if not self._screen.alpaca_orders_available:
                 gr.HTML(

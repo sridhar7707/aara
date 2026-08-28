@@ -205,21 +205,22 @@ no new repository/query contract (per the preceding read-only audit):
   no evidence to summarize (including the evidence-read-error case, which
   already surfaces its own message in the Evidence section itself). No
   thesis/rationale field is read or invented.
-- Audit Trail payload: each audit card now carries an expandable
-  <details>/<summary> disclosure (_format_audit_detail_html) showing the
-  event's restored event_id plus every key already present on
-  Event.payload, exactly as DecisionQuery.get_decision_timeline() returns
-  it -- no field invented or transformed beyond str()/escaping for
-  display. Uses the same aara-record-field/record-label/record-value
+- Audit Trail payload: each audit card carries an expandable
+  <details>/<summary> disclosure (_format_audit_detail_html) showing every
+  _AUDIT_PAYLOAD_ALLOWED_KEYS key present on Event.payload, exactly as
+  DecisionQuery.get_decision_timeline() returns it -- no field invented or
+  transformed beyond str()/escaping for display. The internal event_id is
+  not shown. Uses the same aara-record-field/record-label/record-value
   classes the record cards already use, so no new theme.py class is
   needed for it.
-- Restored identifiers: EvidenceEntry.evidence_id, ApprovalEntry.
-  approval_id, and AuditEntry.event_id (see their own projection modules)
-  are mapped straight through from the sentinel_engine summary/event
-  objects that already carried them -- decision_id remains excluded from
-  every rendered fragment, unchanged from the 2026-08-10 UX correction.
-- Decision Journey navigation: _lifecycle_track_html's four stage labels
-  are now <a href="#..."> anchors to elem_ids already placed on
+- Internal identifiers not shown (UI hardening pass): EvidenceEntry.
+  evidence_id, ApprovalEntry.approval_id, AuditEntry.event_id, decision_id,
+  and the raw evidence_reference/risk_reference pointer strings are all
+  excluded from every rendered fragment in the normal user-facing view.
+  They remain on the projection/contract objects for any future
+  admin/debug surface.
+- Governance Workflow Stage navigation: _lifecycle_track_html's four stage
+  labels are <a href="#..."> anchors to elem_ids already placed on
   header_output ("decision-created-section"), evidence_output
   ("evidence-section"), governance_output ("governance-section"), and
   approval_output ("approval-section") -- native in-page anchor jumps, no
@@ -891,13 +892,31 @@ _RISK_REFERENCE_NAV_LINK_JS = f"""
 # "Last Updated" column.
 _TIMESTAMP_DISCLOSURE_TITLE = "About Last Updated"
 _TIMESTAMP_DISCLOSURE_BODY = (
-    '"Last Updated" may represent the latest lifecycle event recorded '
-    "for a decision, including governance evaluation time."
+    '"Last Updated" may represent the latest governance workflow event '
+    "recorded for a decision, including governance evaluation time."
 )
 _TIMESTAMP_DISCLOSURE_HTML = (
     '<div class="aara-disclosure-message">'
     f'<div class="aara-disclosure-title">{html.escape(_TIMESTAMP_DISCLOSURE_TITLE)}</div>'
     f'<div class="aara-disclosure-body">{html.escape(_TIMESTAMP_DISCLOSURE_BODY)}</div>'
+    "</div>"
+)
+
+# UI hardening pass: static, decision-independent scope note. Built once at
+# build() time like _TIMESTAMP_DISCLOSURE_HTML, never wired into
+# detail_outputs/_DetailValues. States plainly that this screen is an
+# intelligence/governance view only -- it carries no order, execution, or
+# settlement state, and nothing here is linked to a broker order (there is
+# no decision->order linkage anywhere in this product).
+_SCOPE_NOTE_TITLE = "Scope"
+_SCOPE_NOTE_BODY = (
+    "Decision Center reflects investment intelligence and governance only. "
+    "It does not represent order submission, execution, or settlement state."
+)
+_SCOPE_NOTE_HTML = (
+    '<div class="aara-disclosure-message">'
+    f'<div class="aara-disclosure-title">{html.escape(_SCOPE_NOTE_TITLE)}</div>'
+    f'<div class="aara-disclosure-body">{html.escape(_SCOPE_NOTE_BODY)}</div>'
     "</div>"
 )
 
@@ -959,6 +978,7 @@ class DecisionCenterUI:
             gr.HTML(_SHELL_NAV_HTML, elem_classes=["aara-shell-nav"])
 
             gr.HTML(_PAGE_HEADER_HTML, elem_classes=["aara-page-header"])
+            gr.HTML(_SCOPE_NOTE_HTML, elem_classes=["aara-scope-note"])
             # P1 accessibility slice: visually hidden, screen-reader-only
             # live region -- see _LIVE_REGION_SETUP_JS above for how
             # aria-live/aria-atomic/role get attached to this element's
@@ -1048,7 +1068,7 @@ class DecisionCenterUI:
                     )
                     why_output = gr.HTML()
                     gr.Markdown(
-                        '<h3 class="aara-eyebrow">Decision Journey</h3>',
+                        '<h3 class="aara-eyebrow">Governance Workflow Stage</h3>',
                         elem_classes=["aara-section-label"],
                     )
                     lifecycle_output = gr.HTML()
@@ -1633,30 +1653,33 @@ class DecisionCenterUI:
                 "Recorded",
                 [("Recorded At", format_display_timestamp(entry.created_at), True)],
                 "neutral",
-                DecisionCenterUI._format_audit_detail_html(entry.event_id, entry.payload),
+                DecisionCenterUI._format_audit_detail_html(entry.payload),
             )
             for entry in detail_area.audit_trail
         ]
         return DecisionCenterUI._record_list_html(cards, _AUDIT_EMPTY_MESSAGE, "audit")
 
     @staticmethod
-    def _format_audit_detail_html(event_id: str, payload: Dict[str, Any]) -> str:
+    def _format_audit_detail_html(payload: Dict[str, Any]) -> str:
         """Expandable, structured presentation of what
         DecisionQuery.get_decision_timeline() already returns on the
-        underlying Event -- event_id plus every _AUDIT_PAYLOAD_ALLOWED_KEYS
-        payload key, as-is, nothing invented or transformed beyond
-        str()/html.escape() for display. Any other payload key -- most
-        notably decision_id, which every real Event.payload carries -- is
-        silently dropped; see _AUDIT_PAYLOAD_ALLOWED_KEYS's own comment for
-        why. Native <details>/<summary> disclosure, no JS. Reuses the record
+        underlying Event -- every _AUDIT_PAYLOAD_ALLOWED_KEYS payload key,
+        as-is, nothing invented or transformed beyond str()/html.escape()
+        for display. The internal event_id is not shown (UI hardening
+        pass). Any other payload key -- most notably decision_id, which
+        every real Event.payload carries -- is silently dropped; see
+        _AUDIT_PAYLOAD_ALLOWED_KEYS's own comment for why. Returns "" when
+        no authorized key is present, so no empty disclosure renders.
+        Native <details>/<summary> disclosure, no JS. Reuses the record
         card's own aara-record-card-fields/aara-record-field/record-label/
         record-value classes rather than introducing new, unstyled ones."""
-        rows = [("Event ID", event_id)]
-        rows.extend(
+        rows = [
             (str(key), str(value))
             for key, value in payload.items()
             if key in _AUDIT_PAYLOAD_ALLOWED_KEYS
-        )
+        ]
+        if not rows:
+            return ""
         field_html = "".join(
             '<div class="aara-record-field">'
             f'<span class="record-label">{html.escape(label)}</span>'
@@ -1694,45 +1717,20 @@ class DecisionCenterUI:
     ) -> str:
         """evidence_reference/risk_reference are opaque DecisionContract
         pointer strings (see decision_query_service.py's
-        get_decision_references()) -- displayed verbatim, labeled explicitly
-        as raw/unresolved, never interpreted, resolved, or validated here,
-        per the read-only audit that scoped this P0 change. Reuses the
-        existing aara-record-card-fields/aara-record-field/record-label/
-        record-value classes (theme.py) the Evidence/Governance/Approval/
-        Audit record cards already use, so this reads as the same visual
-        language rather than a new component. None means the caller has no
-        reference data (e.g. the blank/not-found/error detail states, which
-        never construct a decision header with references at all) -- no
-        field is rendered for a None value. When risk_reference is present,
-        appends _RISK_REFERENCE_CLARIFICATION_HTML (P1, Decision Center UI
-        audit) so the raw pointer can't be mistaken for resolved Risk
-        Intelligence, followed by _RISK_REFERENCE_NAV_LINK_HTML (DC-01) --
-        a navigational element to the Risk Intelligence screen, not a
-        resolution of the pointer itself. Evidence Reference is unaffected
-        by either addition, since only the Risk field carries that
-        ambiguity."""
-        fields = [
-            (label, value)
-            for label, value in (
-                ("Evidence Reference (raw, unresolved)", evidence_reference),
-                ("Risk Reference (raw, unresolved)", risk_reference),
-            )
-            if value is not None
-        ]
-        if not fields:
+        get_decision_references()) -- internal identifiers, so their raw
+        values are NOT rendered in the normal user-facing view (UI
+        hardening pass). Both are still accepted here (the caller/plumbing
+        is unchanged) so a future admin/debug surface can reuse this
+        without touching the controller/screen. When risk_reference is
+        present this still emits _RISK_REFERENCE_CLARIFICATION_HTML
+        followed by _RISK_REFERENCE_NAV_LINK_HTML (DC-01) -- a navigational
+        element to the Risk Intelligence screen, gated exactly as before on
+        the pointer's presence, never a resolution of the pointer itself.
+        Returns "" otherwise; evidence_reference alone now contributes
+        nothing to render."""
+        if risk_reference is None:
             return ""
-        field_html = "".join(
-            '<div class="aara-record-field">'
-            f'<span class="record-label">{html.escape(label)}</span>'
-            f'<span class="record-value">{html.escape(value)}</span>'
-            "</div>"
-            for label, value in fields
-        )
-        clarification_html = (
-            _RISK_REFERENCE_CLARIFICATION_HTML + _RISK_REFERENCE_NAV_LINK_HTML
-            if risk_reference is not None else ""
-        )
-        return f'<div class="aara-record-card-fields">{field_html}</div>{clarification_html}'
+        return _RISK_REFERENCE_CLARIFICATION_HTML + _RISK_REFERENCE_NAV_LINK_HTML
 
     @staticmethod
     def _missing_decision_header_html() -> str:

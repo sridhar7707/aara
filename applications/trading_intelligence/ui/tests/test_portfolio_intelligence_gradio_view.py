@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import gradio as gr
 
 from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
+    _ALPACA_ORDERS_SCOPE_CAPTION,
     _ALPACA_ORDERS_TRUNCATION_NOTE,
     _ALPACA_ORDERS_UNAVAILABLE_MESSAGE,
     _ALPACA_ORDERS_WORKING_MARKER,
@@ -490,6 +491,32 @@ def test_orders_section_header_always_carries_the_alpaca_paper_badge():
     combined = "\n".join(_html_values(demo))
     assert "Recent Orders" in combined
     assert combined.count(f">{_ALPACA_PAPER_BADGE_TEXT}<") >= 2
+
+
+def test_orders_section_carries_the_not_linked_to_decision_center_caption_in_every_state():
+    """UI hardening pass: the Recent Orders section is a broker-side
+    observation only -- there is no decision->order linkage anywhere in
+    this product -- so the caption must render unconditionally, in the
+    unavailable / empty / populated states alike."""
+    unavailable = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital())
+    ).build()
+    empty = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(),
+            alpaca_orders=AlpacaOrdersSnapshot(orders=(), truncated=False),
+        )
+    ).build()
+    populated = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(),
+            alpaca_orders=AlpacaOrdersSnapshot(orders=(_make_order(),), truncated=False),
+        )
+    ).build()
+
+    for demo in (unavailable, empty, populated):
+        assert any(_ALPACA_ORDERS_SCOPE_CAPTION in v for v in _html_values(demo))
+    assert "Not linked to Decision Center." in _ALPACA_ORDERS_SCOPE_CAPTION
 
 
 def test_orders_section_shows_empty_message_when_connected_with_zero_orders():
