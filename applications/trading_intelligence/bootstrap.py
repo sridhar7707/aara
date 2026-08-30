@@ -26,6 +26,7 @@ drives them now that seeding is removed.
 """
 from dataclasses import replace
 from datetime import datetime, timezone
+from functools import partial
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -80,6 +81,7 @@ from applications.trading_intelligence.adapters.sentinel_governance_source impor
 from applications.trading_intelligence.adapters.sentinel_projection_decision_source import (
     SentinelProjectionDecisionSource,
 )
+from applications.trading_intelligence.adapters.trades_db_snapshot import fetch_trades_db_snapshot
 from applications.trading_intelligence.entitlements import TradingIntelligenceEntitlementChecker
 from applications.trading_intelligence.product import (
     DECISION_CENTER_WORKSPACE,
@@ -545,7 +547,20 @@ def _format_overnight_holdings_news(
     )
 
 
-def _build_morning_brief_screen() -> MorningBriefScreen:
+def _legacy_source_kwargs(db_path: Optional[str]) -> Dict[str, str]:
+    """Constructor kwargs for the five ``legacy_*_source.py`` adapters.
+
+    When ``db_path`` is a real string (the runtime ``trades.db`` snapshot
+    fetched per ADR-055), the adapters read that product-owned copy; when
+    it is ``None`` (no snapshot -- the deployed Space with no ``HF_TOKEN``,
+    or local dev), the adapters keep their own ``"trades.db"`` default, so
+    a developer machine that already has ``trades.db`` is unaffected and
+    the deployed Space falls back to its existing honest-unavailable
+    states."""
+    return {"db_path": db_path} if db_path else {}
+
+
+def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefScreen:
     """Assemble one real-or-unavailable MorningBriefScreen from the legacy
     trades.db adapters plus the read-only AlpacaNewsSource.
 
@@ -579,7 +594,9 @@ def _build_morning_brief_screen() -> MorningBriefScreen:
     candidate_screening_summary = illustrative_screen.candidate_screening_summary
     overnight_holdings_news = illustrative_screen.overnight_holdings_news
 
-    real_capital = LegacyCapitalSource().get_capital_summary()
+    legacy_kwargs = _legacy_source_kwargs(db_path)
+
+    real_capital = LegacyCapitalSource(**legacy_kwargs).get_capital_summary()
     if real_capital is not None:
         portfolio_snapshot = replace(
             portfolio_snapshot,
@@ -590,21 +607,21 @@ def _build_morning_brief_screen() -> MorningBriefScreen:
             ),
         )
 
-    real_regime = LegacyRegimeSource().get_latest_regime()
+    real_regime = LegacyRegimeSource(**legacy_kwargs).get_latest_regime()
     if real_regime is not None:
         market_mood_regime = replace(
             market_mood_regime,
             available_summary=f"Current market regime: {real_regime}.",
         )
 
-    real_screening = LegacyCandidateScreeningSource().get_latest_screening()
+    real_screening = LegacyCandidateScreeningSource(**legacy_kwargs).get_latest_screening()
     if real_screening is not None:
         candidate_screening_summary = replace(
             candidate_screening_summary,
             available_summary=_format_candidate_screening_summary(real_screening),
         )
 
-    real_positions = LegacyPositionSource().get_open_positions()
+    real_positions = LegacyPositionSource(**legacy_kwargs).get_open_positions()
     if real_positions is not None:
         holdings_symbols = tuple(position.symbol for position in real_positions)
         real_news = AlpacaNewsSource().get_overnight_holdings_news(holdings_symbols)
@@ -625,12 +642,14 @@ def _build_morning_brief_screen() -> MorningBriefScreen:
     )
 
 
-def _build_morning_brief_ui() -> MorningBriefUI:
+def _build_morning_brief_ui(db_path: Optional[str] = None) -> MorningBriefUI:
     """Wire Morning Brief to fetch its data at render time.
-    `_build_morning_brief_screen` is passed as the screen provider, so
-    MorningBriefUI calls it once now (for the build-time snapshot) and
-    again on every demo.load() / Refresh."""
-    return MorningBriefUI(screen_provider=_build_morning_brief_screen)
+    `_build_morning_brief_screen` (bound to the runtime `db_path` snapshot,
+    if any) is passed as the screen provider, so MorningBriefUI calls it
+    once now (for the build-time snapshot) and again on every demo.load()
+    / Refresh -- each call re-reads the already-fetched snapshot file, so
+    the snapshot is pulled once per process, not once per refresh."""
+    return MorningBriefUI(screen_provider=partial(_build_morning_brief_screen, db_path))
 
 
 def _build_portfolio_holdings(
@@ -702,7 +721,7 @@ def _with_alpaca_orders_data(screen: PortfolioScreen) -> PortfolioScreen:
     return replace(screen, alpaca_orders=orders)
 
 
-def _build_portfolio_intelligence_screen() -> PortfolioScreen:
+def _build_portfolio_intelligence_screen(db_path: Optional[str] = None) -> PortfolioScreen:
     """Assemble one real-or-unavailable PortfolioScreen from the legacy
     trades.db adapters plus the three read-only Alpaca paper adapters.
 
@@ -730,9 +749,11 @@ def _build_portfolio_intelligence_screen() -> PortfolioScreen:
     re-invokes on every demo.load() and every Refresh click -- it is a
     fresh read each call, holding no state and caching nothing, so the
     screen always reflects the adapters' current answer."""
-    real_capital = LegacyCapitalSource().get_capital_summary()
+    legacy_kwargs = _legacy_source_kwargs(db_path)
 
-    real_positions = LegacyPositionSource().get_open_positions()
+    real_capital = LegacyCapitalSource(**legacy_kwargs).get_capital_summary()
+
+    real_positions = LegacyPositionSource(**legacy_kwargs).get_open_positions()
     if real_positions is None:
         real_holdings = None
     elif len(real_positions) == 0:
@@ -750,12 +771,15 @@ def _build_portfolio_intelligence_screen() -> PortfolioScreen:
     return _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
 
 
-def _build_portfolio_intelligence_ui() -> PortfolioIntelligenceUI:
+def _build_portfolio_intelligence_ui(db_path: Optional[str] = None) -> PortfolioIntelligenceUI:
     """Wire Portfolio Intelligence to fetch its data at render time.
-    `_build_portfolio_intelligence_screen` is passed as the screen
-    provider, so PortfolioIntelligenceUI calls it once now (for the
-    build-time snapshot) and again on every demo.load() / Refresh."""
-    return PortfolioIntelligenceUI(screen_provider=_build_portfolio_intelligence_screen)
+    `_build_portfolio_intelligence_screen` (bound to the runtime `db_path`
+    snapshot, if any) is passed as the screen provider, so
+    PortfolioIntelligenceUI calls it once now (for the build-time
+    snapshot) and again on every demo.load() / Refresh."""
+    return PortfolioIntelligenceUI(
+        screen_provider=partial(_build_portfolio_intelligence_screen, db_path)
+    )
 
 
 _RISK_STATE_DISPLAY_TIMEZONE = ZoneInfo("America/Chicago")
@@ -777,7 +801,7 @@ def _format_risk_state_as_of(raw: str) -> str:
     return parsed.astimezone(_RISK_STATE_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
 
 
-def _build_risk_intelligence_screen() -> RiskScreen:
+def _build_risk_intelligence_screen(db_path: Optional[str] = None) -> RiskScreen:
     """Assemble one real-or-unavailable RiskScreen from the operational
     `risk_state` table (Group C, mutable) via the read-only
     LegacyRiskStateSource.
@@ -800,7 +824,7 @@ def _build_risk_intelligence_screen() -> RiskScreen:
     This is the `screen_provider` RiskIntelligenceUI re-invokes on every
     demo.load() and every Refresh click -- a fresh read each call, holding
     no state and caching nothing."""
-    real_state = LegacyRiskStateSource().get_risk_state()
+    real_state = LegacyRiskStateSource(**_legacy_source_kwargs(db_path)).get_risk_state()
     if real_state is None:
         return RiskScreen()
     return RiskScreen(
@@ -811,12 +835,15 @@ def _build_risk_intelligence_screen() -> RiskScreen:
     )
 
 
-def _build_risk_intelligence_ui() -> RiskIntelligenceUI:
+def _build_risk_intelligence_ui(db_path: Optional[str] = None) -> RiskIntelligenceUI:
     """Wire Risk Intelligence to fetch its data at render time.
-    `_build_risk_intelligence_screen` is passed as the screen provider, so
+    `_build_risk_intelligence_screen` (bound to the runtime `db_path`
+    snapshot, if any) is passed as the screen provider, so
     RiskIntelligenceUI calls it once now (for the build-time snapshot) and
     again on every demo.load() / Refresh."""
-    return RiskIntelligenceUI(screen_provider=_build_risk_intelligence_screen)
+    return RiskIntelligenceUI(
+        screen_provider=partial(_build_risk_intelligence_screen, db_path)
+    )
 
 
 def build_trading_intelligence_app() -> gr.Blocks:
@@ -844,10 +871,19 @@ def build_trading_intelligence_app() -> gr.Blocks:
     Learning, and Settings -- each Blocks object unmodified from its own
     build(). This is the complete, frozen six-screen set per
     docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md Section 1."""
-    morning_brief_blocks = _build_morning_brief_ui().build()
+    # ADR-055 Section 2: obtain a read-only, ephemeral local snapshot of the
+    # bot's published `trades.db` dataset once per process. `None` on any
+    # failure (no HF_TOKEN, no network, 404, malformed file) -- the legacy
+    # adapters then keep their `"trades.db"` default and every section stays
+    # on its existing honest-unavailable / illustrative fallback. Only the
+    # three legacy-trades.db-backed screens receive it; Decision Center
+    # (build_application()) reads no trades.db and is untouched.
+    snapshot_db_path = fetch_trades_db_snapshot()
+
+    morning_brief_blocks = _build_morning_brief_ui(snapshot_db_path).build()
     decision_blocks = build_application().build()
-    portfolio_blocks = _build_portfolio_intelligence_ui().build()
-    risk_blocks = _build_risk_intelligence_ui().build()
+    portfolio_blocks = _build_portfolio_intelligence_ui(snapshot_db_path).build()
+    risk_blocks = _build_risk_intelligence_ui(snapshot_db_path).build()
     performance_learning_blocks = PerformanceLearningUI().build()
     settings_blocks = SettingsUI().build()
 
