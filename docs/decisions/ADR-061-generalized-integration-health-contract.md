@@ -462,6 +462,76 @@ not register this contract in `docs/DOCUMENT_INDEX.md` /
 
 ---
 
+## Amendment 1 (2026-08-31): Category A Composition-Root Wiring for the Adapter → Screen Integration Path
+
+### Trigger
+
+Post-acceptance implementation of §3 Category A established that A3 (Trading
+Intelligence adapters now return `ReadResult` / `IntegrationHealth`) and A4
+(screen dataclasses gain a per-section `IntegrationHealth` field, rendered
+through one shared mechanism) cannot be connected without editing the
+Trading Intelligence composition root:
+`applications/trading_intelligence/bootstrap.py` and its extracted
+snapshot-wiring helper
+`applications/trading_intelligence/bootstrap_trades_db_snapshot.py`. That
+composition root is the sole place every affected screen dataclass is
+constructed, and the sole caller of `fetch_trades_db_snapshot()`. §3
+Category A's enumeration names only "adapters" (A3) and "screen dataclasses
+and their rendering" (A4) and, by its own closing sentence, "prescribes no
+module names beyond the ownership statement in §2.1"; it therefore neither
+names nor defers this composition-root seam. This repository's drafting
+convention (ADR-013, ADR-016, ADR-028, ADR-029) is to name
+`applications/*/bootstrap.py` explicitly when authorizing changes to it.
+This amendment supplies that explicit naming on the narrowest terms. It
+does not broaden §3 Category A.
+
+### Authorized scope
+
+§3 Category A (A3 + A4) authorizes editing
+`applications/trading_intelligence/bootstrap.py` and
+`applications/trading_intelligence/bootstrap_trades_db_snapshot.py` **solely**
+to:
+
+1. unwrap adapter `ReadResult` values;
+2. propagate the underlying value to the existing consumer;
+3. populate the new per-section `IntegrationHealth` fields on the affected
+   Trading Intelligence screen dataclasses;
+4. make the minimum construction-site / call-site wiring changes required to
+   connect the A3 adapter contract to the A4 screen contract.
+
+`bootstrap_trades_db_snapshot.py` is covered **only** insofar as it is the
+extracted composition-root / snapshot wiring for this same A3 → A4
+integration path (its own module docstring records it as carved out of
+`bootstrap.py`'s composition root to keep that file from growing).
+
+### Not authorized by this amendment
+
+- Any unrelated `bootstrap.py` refactoring.
+- Any new provider, endpoint, credential, retry, backoff, circuit breaker,
+  health probe, or failover.
+- Any capability gating, blocking, veto, or enforcement — §2.7 and §2.8
+  stand unchanged.
+- Any Risk Governor, `RiskManager`, Constitution, execution-mode,
+  `EXECUTION_BACKEND`, paper/live, or trade-gating change.
+- Any `data_quality_events` wiring — §3 Category B item 9 stands.
+- Any `.github/workflows/*.yml` change — §3 Category B item 1 stands.
+  Staging `applications/platform/integrations/` into the deployed Space
+  remains a separate future ADR-002 governance item (see §9).
+- Any ADR-002 protected-path change of any kind.
+
+### Relationship to the rest of ADR-061
+
+This amendment alters no numbered section of ADR-061. §2.1–§2.9, §3
+Category A items 1–7, §3 Category B items 1–10, §4–§10, §8 Acceptance
+Criteria, and the `## Acceptance` block are unchanged. §3 Category A is not
+broadened: the amendment authorizes only the mechanical seam already
+entailed by A3 (accepted, implemented) plus A4, and every §2.7 / §2.8 /
+Category B limit remains binding on that seam. ADR-061's `Status:` remains
+`Accepted`. Per ADR-058 D2, this amendment is a proposal until the amended
+file is landed on the authoritative default branch.
+
+---
+
 ## Acceptance
 
 *(Completed only when this ADR is landed under ADR-058 D2. Left as a stub while `Proposed`.
