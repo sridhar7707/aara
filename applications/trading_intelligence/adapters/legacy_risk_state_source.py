@@ -29,16 +29,31 @@ classifier, which has "zero enforcement authority (FR-1.10a)". Callers
 must present it as an *observed governor classification*, never as proof
 that the system enforced a risk state or blocked execution.
 
+Health contract (ADR-061 Category A): get_risk_state() returns
+ReadResult[LegacyRiskState]. A HEALTHY result carries a real
+LegacyRiskState OR, when the table exists but has no `risk_governor_state`
+row, a HEALTHY result with value=None (a genuine "nothing recorded"
+state). A non-HEALTHY result carries value=None plus an IntegrationHealth
+naming the reason: UNAVAILABLE (the trades.db file is not present, or is
+locked), API_ERROR (the risk_state table is missing, the persisted value
+is not one of NORMAL/WARNING/DEFENSIVE, or the row is otherwise
+malformed).
+
 Production note: identical limitation to legacy_regime_source.py -- the
 deployed Trading Intelligence HF Space has no mechanism today to obtain
-trades.db, so `get_risk_state()` consistently returns None there and the
-UI renders its existing UNAVAILABLE state. Locally, where trades.db
+trades.db, so get_risk_state() consistently reports UNAVAILABLE there and
+the UI renders its existing UNAVAILABLE state. Locally, where trades.db
 already exists from prior bot runs, this adapter reads the real value
-immediately. None is the safe, expected fallback, never an error.
+immediately. A non-HEALTHY result is the safe, expected fallback, never
+an error.
 """
+import os
 import sqlite3
 from dataclasses import dataclass
-from typing import Optional
+
+from applications.platform.integrations import IntegrationHealth, ReadResult
+
+_PROVIDER = "trades_db_risk_state"
 
 _DB_PATH = "trades.db"
 
@@ -66,32 +81,57 @@ class LegacyRiskState:
     as_of: str
 
 
+def _sqlite_health(exc: sqlite3.Error) -> IntegrationHealth:
+    """A trades.db file that exists but could not be read. "locked" /
+    "unable to open" is a transient availability problem (UNAVAILABLE);
+    every other sqlite error is API_ERROR. Only the exception's class name
+    is recorded as detail -- never its message (ADR-061 Section 2.9)."""
+    message = str(exc).lower()
+    if "locked" in message or "unable to open" in message or "disk i/o" in message:
+        return IntegrationHealth.unavailable(_PROVIDER, detail=type(exc).__name__)
+    return IntegrationHealth.api_error(_PROVIDER, detail=type(exc).__name__)
+
+
 class LegacyRiskStateSource:
     def __init__(self, db_path: str = _DB_PATH):
         self._db_path = db_path
 
-    def get_risk_state(self) -> Optional[LegacyRiskState]:
-        """Return the real observed governor classification
-        (NORMAL/WARNING/DEFENSIVE) and its `updated_at`, or None if the
-        database file, the `risk_state` table, the `risk_governor_state`
-        row, a non-empty value, a recognised state literal, or a
-        non-empty `updated_at` are missing. Callers must treat None as
-        "render the existing UNAVAILABLE state", never as an error."""
+    def get_risk_state(self) -> "ReadResult[LegacyRiskState]":
+        """Returns a ReadResult over the real observed governor
+        classification (NORMAL/WARNING/DEFENSIVE) and its `updated_at`.
+        HEALTHY with a real LegacyRiskState on success; HEALTHY with
+        value=None when the table exists but has no `risk_governor_state`
+        row (a genuine "nothing recorded" state); UNAVAILABLE when the
+        database file is absent or locked; API_ERROR when the risk_state
+        table is missing, the persisted value is not a recognised state
+        literal, or the row is otherwise malformed."""
+        if not os.path.exists(self._db_path):
+            return ReadResult.failed(
+                IntegrationHealth.unavailable(_PROVIDER, detail="trades.db is not present")
+            )
         try:
             conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        except sqlite3.Error:
-            return None
+        except sqlite3.Error as exc:
+            return ReadResult.failed(_sqlite_health(exc))
         try:
             row = conn.execute(_SELECT_RISK_GOVERNOR_STATE, (_STATE_KEY,)).fetchone()
-        except sqlite3.Error:
-            return None
+        except sqlite3.Error as exc:
+            return ReadResult.failed(_sqlite_health(exc))
         finally:
             conn.close()
         if row is None:
-            return None
+            return ReadResult.empty(_PROVIDER)
         value, updated_at = row
         if not value or value not in _VALID_STATES:
-            return None
+            return ReadResult.failed(
+                IntegrationHealth.api_error(
+                    _PROVIDER, detail="persisted risk-governor value is not a recognised state"
+                )
+            )
         if not updated_at:
-            return None
-        return LegacyRiskState(state=value, as_of=updated_at)
+            return ReadResult.failed(
+                IntegrationHealth.api_error(
+                    _PROVIDER, detail="risk-governor row is missing its updated_at timestamp"
+                )
+            )
+        return ReadResult.healthy(LegacyRiskState(state=value, as_of=updated_at), _PROVIDER)

@@ -30,23 +30,27 @@ headlines to the current holdings symbols; it never scores an article,
 ranks by conviction, infers an action, or produces anything a decision
 path consumes as authority. It is not a second decision authority.
 
-Never fabricates. On missing credentials, a network/API error, or a
-malformed provider response, get_overnight_holdings_news() returns None
-and the caller falls back to the existing honest unavailable message
-("No Evidence/news producer exists yet -- ..."). An empty holdings list,
-or a successful fetch that matched no article, returns an empty
-OvernightHoldingsNews -- a real "nothing to report" result, distinct
-from None.
+Health contract (ADR-061 Category A): get_overnight_holdings_news()
+returns ReadResult[OvernightHoldingsNews]. A HEALTHY result carries a
+real OvernightHoldingsNews -- an empty one (no holdings, or a successful
+fetch that matched no article) is a legitimate "nothing to report"
+HEALTHY result. An empty holdings list is answered HEALTHY + empty
+WITHOUT any network call. A non-HEALTHY result carries value=None plus an
+IntegrationHealth naming the reason: NOT_CONFIGURED (missing credentials /
+SDK not importable), AUTH_FAILED (401/403), RATE_LIMITED (429),
+UNAVAILABLE (network/timeout/5xx), API_ERROR (malformed provider
+response). Credential values are never placed in IntegrationHealth.detail
+(ADR-061 Section 2.9).
 
 Production note: identical limitation to adapters/alpaca_paper_source.py
 -- the deployed Trading Intelligence HF Space has no Alpaca credentials
-or outbound network configured today, so this returns None there and the
-section stays unavailable. Locally, with ALPACA_KEY/ALPACA_SECRET present
-via .env, it reads real Alpaca news immediately.
+or outbound network configured today, so this reports NOT_CONFIGURED
+there and the section stays unavailable. Locally, with ALPACA_KEY/
+ALPACA_SECRET present via .env, it reads real Alpaca news immediately.
 """
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Sequence, Tuple
+from typing import Sequence, Tuple
 
 try:
     from config import ALPACA_KEY, ALPACA_SECRET
@@ -55,10 +59,18 @@ except ImportError:
     # deployed Trading Intelligence HF Space -- see
     # adapters/alpaca_paper_source.py's own note on the same fallback.
     # Falling back to empty credentials keeps the Space from crashing at
-    # import time; get_overnight_holdings_news() then returns None (the
-    # expected, documented unavailable path) rather than raising.
+    # import time; get_overnight_holdings_news() then reports NOT_CONFIGURED
+    # (the expected, documented unavailable path) rather than raising.
     ALPACA_KEY = ""
     ALPACA_SECRET = ""
+
+from applications.platform.integrations import (
+    IntegrationHealth,
+    ReadResult,
+    classify_exception,
+)
+
+_PROVIDER = "alpaca_news"
 
 _DEFAULT_LOOKBACK_HOURS = 24
 _DEFAULT_MAX_ITEMS = 20
@@ -100,39 +112,49 @@ class AlpacaNewsSource:
         self._lookback_hours = lookback_hours
         self._max_items = max_items
 
-    def _build_client(self):
-        """Returns an alpaca-py NewsClient, or None if credentials are
-        missing or the SDK import fails -- never raises."""
+    def _client_or_health(self):
+        """Returns ``(client, None)`` on success, or ``(None, IntegrationHealth)``
+        describing why a NewsClient could not be built -- never raises."""
         creds = self._credentials
         if not creds.key or not creds.secret:
-            return None
+            return None, IntegrationHealth.not_configured(
+                _PROVIDER, detail="ALPACA_KEY / ALPACA_SECRET not set"
+            )
         try:
             from alpaca.data.historical.news import NewsClient
-            return NewsClient(creds.key, creds.secret)
         except Exception:
-            return None
+            return None, IntegrationHealth.not_configured(
+                _PROVIDER, detail="alpaca-py SDK is not importable"
+            )
+        try:
+            return NewsClient(creds.key, creds.secret), None
+        except ImportError:
+            return None, IntegrationHealth.not_configured(
+                _PROVIDER, detail="alpaca-py SDK is not importable"
+            )
+        except Exception as exc:
+            return None, classify_exception(_PROVIDER, exc)
 
     def get_overnight_holdings_news(
         self, symbols: Sequence[str]
-    ) -> Optional[OvernightHoldingsNews]:
-        """Returns recent Alpaca news filtered to `symbols` (the account's
-        current holdings), newest first. Returns None only when
-        credentials are missing, the network call fails, or the response
-        is malformed -- callers must treat None as "fall back to the
-        existing unavailable section," never as an error.
+    ) -> "ReadResult[OvernightHoldingsNews]":
+        """Returns a ReadResult over recent Alpaca news filtered to
+        `symbols` (the account's current holdings), newest first.
 
-        An empty `symbols` returns an empty OvernightHoldingsNews without
-        any network call (no holdings -> nothing to report). A successful
-        fetch that matches no article also returns an empty
-        OvernightHoldingsNews. Neither is an error, and neither is None.
+        An empty `symbols` returns a HEALTHY result wrapping an empty
+        OvernightHoldingsNews without any network call. A successful fetch
+        that matches no article also returns a HEALTHY empty result.
+        Neither is a failure. A non-HEALTHY result carries value=None plus
+        an IntegrationHealth naming the reason -- callers must treat it as
+        "fall back to the existing unavailable section," never as an error.
         """
         wanted = tuple(dict.fromkeys(str(s).upper() for s in symbols if s))
         if not wanted:
-            return OvernightHoldingsNews(items=())
+            return ReadResult.healthy(OvernightHoldingsNews(items=()), _PROVIDER)
 
-        client = self._build_client()
+        client, health = self._client_or_health()
         if client is None:
-            return None
+            return ReadResult.failed(health)
 
         try:
             from alpaca.data.requests import NewsRequest
@@ -147,19 +169,25 @@ class AlpacaNewsSource:
             response = client.get_news(request)
             articles = self._extract_articles(response)
             if articles is None:
-                return None
+                return ReadResult.failed(
+                    IntegrationHealth.api_error(
+                        _PROVIDER, detail="unrecognised news response shape"
+                    )
+                )
             items = self._to_items(articles, set(wanted))
-        except Exception:
-            return None
+        except Exception as exc:
+            return ReadResult.failed(classify_exception(_PROVIDER, exc))
 
-        return OvernightHoldingsNews(items=items[: self._max_items])
+        return ReadResult.healthy(
+            OvernightHoldingsNews(items=items[: self._max_items]), _PROVIDER
+        )
 
     @staticmethod
     def _extract_articles(response):
         """Pulls the raw article list out of whatever get_news() returned
         (an alpaca-py NewsSet, a raw dict, or a bare list). Returns None
         -- signalling a malformed response the caller must treat as
-        unavailable -- when the shape is unrecognised."""
+        API_ERROR -- when the shape is unrecognised."""
         data = getattr(response, "data", None)
         if isinstance(data, dict):
             articles = data.get("news")

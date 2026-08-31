@@ -14,6 +14,7 @@ import tempfile
 
 import pytest
 
+from applications.platform.integrations import IntegrationStatus, ReadResult
 from applications.trading_intelligence.adapters.legacy_risk_state_source import (
     LegacyRiskState,
     LegacyRiskStateSource,
@@ -43,13 +44,22 @@ def _make_db(rows=None, *, create_table=True):
     return path
 
 
+# Post-ADR-061 (Category A): get_risk_state() returns ReadResult[LegacyRiskState].
+# HEALTHY + value = a real observed state; HEALTHY + value=None = table
+# present but no risk_governor_state row (genuine "nothing recorded");
+# UNAVAILABLE = trades.db file absent / locked; API_ERROR = table missing,
+# or a row present with an unusable value / missing timestamp.
+
+
 @pytest.mark.parametrize("state", ["NORMAL", "WARNING", "DEFENSIVE"])
 def test_returns_each_valid_observed_state(state):
     path = _make_db([("risk_governor_state", state, "2026-08-20T15:03:38.405502+00:00")])
     try:
         result = LegacyRiskStateSource(db_path=path).get_risk_state()
-        assert isinstance(result, LegacyRiskState)
-        assert result.state == state
+        assert isinstance(result, ReadResult)
+        assert result.health.status is IntegrationStatus.HEALTHY
+        assert isinstance(result.value, LegacyRiskState)
+        assert result.value.state == state
     finally:
         os.remove(path)
 
@@ -59,7 +69,7 @@ def test_returns_the_updated_at_verbatim():
     path = _make_db([("risk_governor_state", "NORMAL", stamp)])
     try:
         result = LegacyRiskStateSource(db_path=path).get_risk_state()
-        assert result.as_of == stamp
+        assert result.value.as_of == stamp
     finally:
         os.remove(path)
 
@@ -72,61 +82,75 @@ def test_reads_only_the_risk_governor_state_row_ignoring_other_keys():
     ])
     try:
         result = LegacyRiskStateSource(db_path=path).get_risk_state()
-        assert result == LegacyRiskState(state="WARNING", as_of="2026-08-20T15:03:38+00:00")
+        assert result.value == LegacyRiskState(state="WARNING", as_of="2026-08-20T15:03:38+00:00")
     finally:
         os.remove(path)
 
 
-def test_returns_none_when_the_database_file_is_missing():
+def test_unavailable_when_the_database_file_is_missing():
     source = LegacyRiskStateSource(db_path="this_file_does_not_exist_ri_98765.db")
 
-    assert source.get_risk_state() is None
+    result = source.get_risk_state()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.UNAVAILABLE
 
 
-def test_returns_none_when_the_risk_state_table_is_missing():
+def test_api_error_when_the_risk_state_table_is_missing():
     path = _make_db(create_table=False)
     try:
-        assert LegacyRiskStateSource(db_path=path).get_risk_state() is None
+        result = LegacyRiskStateSource(db_path=path).get_risk_state()
+        assert result.value is None
+        assert result.health.status is IntegrationStatus.API_ERROR
     finally:
         os.remove(path)
 
 
-def test_returns_none_when_the_risk_governor_state_row_is_absent():
+def test_healthy_empty_when_the_risk_governor_state_row_is_absent():
     path = _make_db([("daily_start_value", "101409.34", "2026-08-20T15:03:35+00:00")])
     try:
-        assert LegacyRiskStateSource(db_path=path).get_risk_state() is None
+        result = LegacyRiskStateSource(db_path=path).get_risk_state()
+        assert result.value is None
+        assert result.health.status is IntegrationStatus.HEALTHY
     finally:
         os.remove(path)
 
 
-def test_returns_none_when_the_value_is_empty_string():
+def test_api_error_when_the_value_is_empty_string():
     path = _make_db([("risk_governor_state", "", "2026-08-20T15:03:38+00:00")])
     try:
-        assert LegacyRiskStateSource(db_path=path).get_risk_state() is None
+        result = LegacyRiskStateSource(db_path=path).get_risk_state()
+        assert result.value is None
+        assert result.health.status is IntegrationStatus.API_ERROR
     finally:
         os.remove(path)
 
 
-def test_returns_none_when_the_value_is_null():
+def test_api_error_when_the_value_is_null():
     path = _make_db([("risk_governor_state", None, "2026-08-20T15:03:38+00:00")])
     try:
-        assert LegacyRiskStateSource(db_path=path).get_risk_state() is None
+        result = LegacyRiskStateSource(db_path=path).get_risk_state()
+        assert result.value is None
+        assert result.health.status is IntegrationStatus.API_ERROR
     finally:
         os.remove(path)
 
 
-def test_returns_none_when_the_state_is_not_a_recognised_literal():
+def test_api_error_when_the_state_is_not_a_recognised_literal():
     path = _make_db([("risk_governor_state", "CRITICAL", "2026-08-20T15:03:38+00:00")])
     try:
-        assert LegacyRiskStateSource(db_path=path).get_risk_state() is None
+        result = LegacyRiskStateSource(db_path=path).get_risk_state()
+        assert result.value is None
+        assert result.health.status is IntegrationStatus.API_ERROR
     finally:
         os.remove(path)
 
 
-def test_returns_none_when_updated_at_is_empty():
+def test_api_error_when_updated_at_is_empty():
     path = _make_db([("risk_governor_state", "NORMAL", "")])
     try:
-        assert LegacyRiskStateSource(db_path=path).get_risk_state() is None
+        result = LegacyRiskStateSource(db_path=path).get_risk_state()
+        assert result.value is None
+        assert result.health.status is IntegrationStatus.API_ERROR
     finally:
         os.remove(path)
 

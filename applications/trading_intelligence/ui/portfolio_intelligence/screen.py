@@ -25,6 +25,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, Tuple
 
+from applications.platform.integrations import IntegrationHealth
+
 
 @dataclass(frozen=True)
 class PortfolioHolding:
@@ -132,6 +134,14 @@ class PortfolioScreen:
     alpaca_account: Optional[AlpacaAccountSnapshot] = None
     alpaca_positions: Tuple[AlpacaPosition, ...] = field(default=())
     alpaca_orders: Optional[AlpacaOrdersSnapshot] = None
+    # ADR-061 Category A (A4): per-section integration health, populated by
+    # the composition root (bootstrap.py) from each adapter's ReadResult.
+    # Carries the reason a section is unavailable; consumed by rendering in
+    # a later phase. `None` only when no adapter read backed the section.
+    capital_health: Optional[IntegrationHealth] = None
+    holdings_health: Optional[IntegrationHealth] = None
+    alpaca_health: Optional[IntegrationHealth] = None
+    alpaca_orders_health: Optional[IntegrationHealth] = None
 
     @property
     def capital_is_available(self) -> bool:

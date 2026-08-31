@@ -2,10 +2,17 @@
 
 alpaca.data.historical.news.NewsClient is monkeypatched everywhere here --
 these tests must never make a real network call to Alpaca.
+
+Post-ADR-061: get_overnight_holdings_news() returns
+ReadResult[OvernightHoldingsNews]. A HEALTHY result carries a real
+OvernightHoldingsNews (an empty one -- no holdings, or a fetch that
+matched nothing -- is a legitimate HEALTHY result); a non-HEALTHY result
+carries value=None plus an IntegrationHealth naming the reason.
 """
 import ast
 import inspect
 
+from applications.platform.integrations import IntegrationStatus, ReadResult
 from applications.trading_intelligence.adapters.alpaca_news_source import (
     AlpacaNewsSource,
     HoldingsNewsItem,
@@ -61,6 +68,14 @@ def _source(**kwargs):
     return AlpacaNewsSource(**kwargs)
 
 
+def _news(result):
+    assert isinstance(result, ReadResult)
+    assert result.health.status is IntegrationStatus.HEALTHY
+    return result.value
+
+
+# --- happy path -------------------------------------------------------
+
 def test_returns_items_for_valid_news_filtered_to_current_holdings(monkeypatch):
     response = _FakeNewsSet([
         _FakeArticle("Apple ships a thing", ["AAPL"], created_at="2026-08-27T05:00:00+00:00"),
@@ -69,29 +84,29 @@ def test_returns_items_for_valid_news_filtered_to_current_holdings(monkeypatch):
     ])
     _patch_client(monkeypatch, response=response)
 
-    result = _source().get_overnight_holdings_news(("AAPL", "MSFT"))
+    news = _news(_source().get_overnight_holdings_news(("AAPL", "MSFT")))
 
-    assert isinstance(result, OvernightHoldingsNews)
-    headlines = [item.headline for item in result.items]
+    assert isinstance(news, OvernightHoldingsNews)
+    headlines = [item.headline for item in news.items]
     assert headlines == ["Microsoft cloud update", "Apple ships a thing"]  # newest first
-    assert all(isinstance(item, HoldingsNewsItem) for item in result.items)
-    # only the holdings symbols are retained on each item
-    assert result.items[0].symbols == ("MSFT",)
-    assert result.items[1].symbols == ("AAPL",)
+    assert all(isinstance(item, HoldingsNewsItem) for item in news.items)
+    assert news.items[0].symbols == ("MSFT",)
+    assert news.items[1].symbols == ("AAPL",)
     assert "TSLA" not in headlines[0] and "Tesla" not in " ".join(headlines)
 
 
-def test_articles_with_no_overlap_with_holdings_are_filtered_out(monkeypatch):
+def test_articles_with_no_overlap_with_holdings_are_a_healthy_empty_result(monkeypatch):
     response = _FakeNewsSet([_FakeArticle("Tesla only", ["TSLA"])])
     _patch_client(monkeypatch, response=response)
 
     result = _source().get_overnight_holdings_news(("AAPL",))
 
-    assert result == OvernightHoldingsNews(items=())
-    assert result.is_empty
+    assert result.health.status is IntegrationStatus.HEALTHY
+    assert result.value == OvernightHoldingsNews(items=())
+    assert result.value.is_empty
 
 
-def test_empty_holdings_returns_empty_result_and_makes_no_network_call(monkeypatch):
+def test_empty_holdings_is_a_healthy_empty_result_and_makes_no_network_call(monkeypatch):
     def _explode(key, secret):
         raise AssertionError("client must not be built when there are no holdings")
 
@@ -99,51 +114,64 @@ def test_empty_holdings_returns_empty_result_and_makes_no_network_call(monkeypat
 
     result = _source().get_overnight_holdings_news(())
 
-    assert result == OvernightHoldingsNews(items=())
-    assert result.is_empty
+    assert result.health.status is IntegrationStatus.HEALTHY
+    assert result.value == OvernightHoldingsNews(items=())
+    assert result.value.is_empty
 
 
-def test_successful_fetch_with_no_matching_article_returns_empty_not_none(monkeypatch):
+def test_successful_fetch_with_no_matching_article_is_healthy_empty_not_unavailable(monkeypatch):
     _patch_client(monkeypatch, response=_FakeNewsSet([]))
 
     result = _source().get_overnight_holdings_news(("AAPL", "MSFT"))
 
-    assert result == OvernightHoldingsNews(items=())
-    assert result is not None
+    assert result.health.status is IntegrationStatus.HEALTHY
+    assert result.value == OvernightHoldingsNews(items=())
 
 
-def test_returns_none_on_malformed_provider_response_shape(monkeypatch):
+# --- API_ERROR / NOT_CONFIGURED / UNAVAILABLE ----------------------
+
+def test_api_error_on_malformed_provider_response_shape(monkeypatch):
     class _Garbage:
         data = "not-a-dict"
 
     _patch_client(monkeypatch, response=_Garbage())
 
-    assert _source().get_overnight_holdings_news(("AAPL",)) is None
+    result = _source().get_overnight_holdings_news(("AAPL",))
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.API_ERROR
 
 
-def test_returns_none_when_news_key_is_not_a_list(monkeypatch):
+def test_api_error_when_news_key_is_not_a_list(monkeypatch):
     class _Weird:
         data = {"news": "should-be-a-list"}
 
     _patch_client(monkeypatch, response=_Weird())
 
-    assert _source().get_overnight_holdings_news(("AAPL",)) is None
+    result = _source().get_overnight_holdings_news(("AAPL",))
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.API_ERROR
 
 
-def test_returns_none_when_credentials_are_missing(monkeypatch):
+def test_not_configured_when_credentials_are_missing(monkeypatch):
     def _explode(key, secret):
         raise AssertionError("client must not be built without credentials")
 
     monkeypatch.setattr("alpaca.data.historical.news.NewsClient", _explode)
 
-    assert AlpacaNewsSource(api_key="", api_secret="").get_overnight_holdings_news(("AAPL",)) is None
+    result = AlpacaNewsSource(api_key="", api_secret="").get_overnight_holdings_news(("AAPL",))
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.NOT_CONFIGURED
 
 
-def test_returns_none_on_network_or_api_failure(monkeypatch):
+def test_unavailable_on_network_or_api_failure(monkeypatch):
     _patch_client(monkeypatch, raise_on_get=True)
 
-    assert _source().get_overnight_holdings_news(("AAPL",)) is None
+    result = _source().get_overnight_holdings_news(("AAPL",))
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.UNAVAILABLE
 
+
+# --- request / filtering behavior --------------------------------
 
 def test_request_is_built_with_the_holdings_symbols(monkeypatch):
     created = _patch_client(monkeypatch, response=_FakeNewsSet([]))
@@ -160,12 +188,12 @@ def test_holdings_symbols_are_deduped_and_uppercased(monkeypatch):
         _FakeArticle("Apple headline", ["AAPL"]),
     ]))
 
-    result = _source().get_overnight_holdings_news(("aapl", "AAPL", "msft"))
+    news = _news(_source().get_overnight_holdings_news(("aapl", "AAPL", "msft")))
 
     request = created["client"].last_request
     assert request.symbols.count("AAPL") == 1
     assert "MSFT" in request.symbols
-    assert [item.headline for item in result.items] == ["Apple headline"]
+    assert [item.headline for item in news.items] == ["Apple headline"]
 
 
 def test_headline_text_is_passed_through_unmodified(monkeypatch):
@@ -173,9 +201,9 @@ def test_headline_text_is_passed_through_unmodified(monkeypatch):
         _FakeArticle("  Verbatim provider headline  ", ["AAPL"]),
     ]))
 
-    result = _source().get_overnight_holdings_news(("AAPL",))
+    news = _news(_source().get_overnight_holdings_news(("AAPL",)))
 
-    assert result.items[0].headline == "Verbatim provider headline"
+    assert news.items[0].headline == "Verbatim provider headline"
 
 
 def test_articles_missing_a_headline_are_skipped_not_fatal(monkeypatch):
@@ -184,9 +212,9 @@ def test_articles_missing_a_headline_are_skipped_not_fatal(monkeypatch):
         _FakeArticle("Real one", ["AAPL"]),
     ]))
 
-    result = _source().get_overnight_holdings_news(("AAPL",))
+    news = _news(_source().get_overnight_holdings_news(("AAPL",)))
 
-    assert [item.headline for item in result.items] == ["Real one"]
+    assert [item.headline for item in news.items] == ["Real one"]
 
 
 def test_raw_dict_response_is_also_accepted(monkeypatch):
@@ -195,9 +223,9 @@ def test_raw_dict_response_is_also_accepted(monkeypatch):
          "url": "u", "created_at": "2026-08-27T01:00:00+00:00"},
     ]})
 
-    result = _source().get_overnight_holdings_news(("AAPL",))
+    news = _news(_source().get_overnight_holdings_news(("AAPL",)))
 
-    assert [item.headline for item in result.items] == ["Dict-shaped article"]
+    assert [item.headline for item in news.items] == ["Dict-shaped article"]
 
 
 def test_result_is_capped_at_max_items(monkeypatch):
@@ -205,10 +233,12 @@ def test_result_is_capped_at_max_items(monkeypatch):
                for i in range(1, 6)]
     _patch_client(monkeypatch, response=_FakeNewsSet(articles))
 
-    result = _source(max_items=2).get_overnight_holdings_news(("AAPL",))
+    news = _news(_source(max_items=2).get_overnight_holdings_news(("AAPL",)))
 
-    assert len(result.items) == 2
+    assert len(news.items) == 2
 
+
+# --- regression locks (unchanged) ------------------------------
 
 def test_module_imports_no_protected_package():
     """AST-level regression lock: this adapter must never import bot,
@@ -268,12 +298,14 @@ def test_module_imports_cleanly_when_top_level_config_is_unavailable():
         "        raise ImportError('simulated: config not staged in HF Space')\n"
         "    return _orig(name, globals, locals, fromlist, level)\n"
         "builtins.__import__ = _blocked\n"
+        "from applications.platform.integrations import IntegrationStatus\n"
         "from applications.trading_intelligence.adapters.alpaca_news_source import (\n"
         "    ALPACA_KEY, ALPACA_SECRET, AlpacaNewsSource,\n"
         ")\n"
         "assert ALPACA_KEY == ''\n"
         "assert ALPACA_SECRET == ''\n"
-        "assert AlpacaNewsSource().get_overnight_holdings_news(('AAPL',)) is None\n"
+        "r = AlpacaNewsSource().get_overnight_holdings_news(('AAPL',))\n"
+        "assert r.value is None and r.health.status is IntegrationStatus.NOT_CONFIGURED\n"
         "print('OK')\n"
     )
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=30)

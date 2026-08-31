@@ -586,8 +586,13 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
 
     legacy_kwargs = legacy_source_kwargs(db_path)
 
-    real_capital = LegacyCapitalSource(**legacy_kwargs).get_capital_summary()
-    if real_capital is not None:
+    # ADR-061 Category A / Amendment 1: adapters return ReadResult; unwrap
+    # the underlying value for the existing "only replace the illustrative
+    # summary when real data is present" logic, and record the section's
+    # IntegrationHealth on the same real-data path.
+    capital_result = LegacyCapitalSource(**legacy_kwargs).get_capital_summary()
+    if capital_result.value is not None:
+        real_capital = capital_result.value
         portfolio_snapshot = replace(
             portfolio_snapshot,
             available_summary=(
@@ -595,32 +600,36 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
                 f"(${real_capital.available_cash:,.2f} cash, "
                 f"${real_capital.invested_amount:,.2f} invested)."
             ),
+            health=capital_result.health,
         )
 
-    real_regime = LegacyRegimeSource(**legacy_kwargs).get_latest_regime()
-    if real_regime is not None:
+    regime_result = LegacyRegimeSource(**legacy_kwargs).get_latest_regime()
+    if regime_result.value is not None:
         market_mood_regime = replace(
             market_mood_regime,
-            available_summary=f"Current market regime: {real_regime}.",
+            available_summary=f"Current market regime: {regime_result.value}.",
+            health=regime_result.health,
         )
 
-    real_screening = LegacyCandidateScreeningSource(**legacy_kwargs).get_latest_screening()
-    if real_screening is not None:
+    screening_result = LegacyCandidateScreeningSource(**legacy_kwargs).get_latest_screening()
+    if screening_result.value is not None:
         candidate_screening_summary = replace(
             candidate_screening_summary,
-            available_summary=_format_candidate_screening_summary(real_screening),
+            available_summary=_format_candidate_screening_summary(screening_result.value),
+            health=screening_result.health,
         )
 
-    real_positions = LegacyPositionSource(**legacy_kwargs).get_open_positions()
-    if real_positions is not None:
-        holdings_symbols = tuple(position.symbol for position in real_positions)
-        real_news = AlpacaNewsSource().get_overnight_holdings_news(holdings_symbols)
-        if real_news is not None:
+    positions_result = LegacyPositionSource(**legacy_kwargs).get_open_positions()
+    if positions_result.value is not None:
+        holdings_symbols = tuple(position.symbol for position in positions_result.value)
+        news_result = AlpacaNewsSource().get_overnight_holdings_news(holdings_symbols)
+        if news_result.value is not None:
             overnight_holdings_news = replace(
                 overnight_holdings_news,
                 available_summary=_format_overnight_holdings_news(
-                    real_news, holdings_symbols
+                    news_result.value, holdings_symbols
                 ),
+                health=news_result.health,
             )
 
     return replace(
@@ -680,14 +689,23 @@ def _with_alpaca_paper_data(screen: PortfolioScreen) -> PortfolioScreen:
     or nothing, like every other adapter pairing in this product -- a
     real account snapshot next to a failed positions fetch would imply a
     connected-but-empty account when the true state is simply unknown."""
+    # ADR-061 Category A / Amendment 1: adapters return ReadResult. The
+    # attach-only-when-both-healthy rule is unchanged; the section's
+    # IntegrationHealth is recorded on every path (including the
+    # unavailable one, where it names the reason).
     alpaca = AlpacaPaperSource()
-    real_account = alpaca.get_account()
-    if real_account is None:
-        return screen
-    real_positions = alpaca.get_positions()
-    if real_positions is None:
-        return screen
-    return replace(screen, alpaca_account=real_account, alpaca_positions=real_positions)
+    account_result = alpaca.get_account()
+    if account_result.value is None:
+        return replace(screen, alpaca_health=account_result.health)
+    positions_result = alpaca.get_positions()
+    if positions_result.value is None:
+        return replace(screen, alpaca_health=positions_result.health)
+    return replace(
+        screen,
+        alpaca_account=account_result.value,
+        alpaca_positions=positions_result.value,
+        alpaca_health=account_result.health,
+    )
 
 
 def _with_alpaca_orders_data(screen: PortfolioScreen) -> PortfolioScreen:
@@ -704,10 +722,18 @@ def _with_alpaca_orders_data(screen: PortfolioScreen) -> PortfolioScreen:
     observation only, never merged with Holdings/Capital Summary and
     carrying no Decision Center linkage -- see
     adapters/alpaca_paper_orders_source.py's own docstring."""
-    orders = AlpacaPaperOrdersSource().get_recent_orders()
-    if orders is None:
-        return screen
-    return replace(screen, alpaca_orders=orders)
+    # ADR-061 Category A / Amendment 1: adapter returns ReadResult. An empty
+    # snapshot is still a HEALTHY value (attached); only a non-HEALTHY read
+    # leaves the section unavailable. IntegrationHealth is recorded on every
+    # path.
+    orders_result = AlpacaPaperOrdersSource().get_recent_orders()
+    if orders_result.value is None:
+        return replace(screen, alpaca_orders_health=orders_result.health)
+    return replace(
+        screen,
+        alpaca_orders=orders_result.value,
+        alpaca_orders_health=orders_result.health,
+    )
 
 
 def _build_portfolio_intelligence_screen(db_path: Optional[str] = None) -> PortfolioScreen:
@@ -740,23 +766,37 @@ def _build_portfolio_intelligence_screen(db_path: Optional[str] = None) -> Portf
     screen always reflects the adapters' current answer."""
     legacy_kwargs = legacy_source_kwargs(db_path)
 
-    real_capital = LegacyCapitalSource(**legacy_kwargs).get_capital_summary()
+    # ADR-061 Category A / Amendment 1: adapters return ReadResult; unwrap
+    # the underlying value into the existing capital/holdings fields
+    # (semantics unchanged -- a real value, an empty tuple for a flat
+    # account, or None when unavailable) and record the section's
+    # IntegrationHealth alongside it.
+    capital_result = LegacyCapitalSource(**legacy_kwargs).get_capital_summary()
 
-    real_positions = LegacyPositionSource(**legacy_kwargs).get_open_positions()
-    if real_positions is None:
+    positions_result = LegacyPositionSource(**legacy_kwargs).get_open_positions()
+    if positions_result.value is None:
         real_holdings = None
-    elif len(real_positions) == 0:
+        holdings_health = positions_result.health
+    elif len(positions_result.value) == 0:
         real_holdings = ()
+        holdings_health = positions_result.health
     else:
-        symbols = tuple(position.symbol for position in real_positions)
-        real_prices = LivePriceSource().get_current_prices(symbols)
-        real_holdings = (
-            _build_portfolio_holdings(real_positions, real_prices)
-            if real_prices is not None
-            else None
-        )
+        symbols = tuple(position.symbol for position in positions_result.value)
+        prices_result = LivePriceSource().get_current_prices(symbols)
+        if prices_result.value is not None:
+            real_holdings = _build_portfolio_holdings(
+                positions_result.value, prices_result.value
+            )
+        else:
+            real_holdings = None
+        holdings_health = prices_result.health
 
-    screen = PortfolioScreen(capital=real_capital, holdings=real_holdings)
+    screen = PortfolioScreen(
+        capital=capital_result.value,
+        capital_health=capital_result.health,
+        holdings=real_holdings,
+        holdings_health=holdings_health,
+    )
     return _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
 
 
@@ -811,14 +851,19 @@ def _build_risk_intelligence_screen(db_path: Optional[str] = None) -> RiskScreen
     This is the `screen_provider` RiskIntelligenceUI re-invokes on every
     demo.load() and every Refresh click -- a fresh read each call, holding
     no state and caching nothing."""
-    real_state = LegacyRiskStateSource(**legacy_source_kwargs(db_path)).get_risk_state()
-    if real_state is None:
-        return RiskScreen()
+    # ADR-061 Category A / Amendment 1: adapter returns ReadResult. `current`
+    # stays None (UNAVAILABLE render) both when the read failed and when the
+    # table simply has no risk_governor_state row; state_health carries
+    # which of the two it was.
+    state_result = LegacyRiskStateSource(**legacy_source_kwargs(db_path)).get_risk_state()
+    if state_result.value is None:
+        return RiskScreen(state_health=state_result.health)
     return RiskScreen(
         current=RiskSnapshot(
-            state=real_state.state,
-            as_of=_format_risk_state_as_of(real_state.as_of),
+            state=state_result.value.state,
+            as_of=_format_risk_state_as_of(state_result.value.as_of),
         ),
+        state_health=state_result.health,
     )
 
 
@@ -857,13 +902,15 @@ def build_trading_intelligence_app() -> gr.Blocks:
     build(). This is the complete, frozen six-screen set per
     docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md Section 1."""
     # ADR-055 Section 2: obtain a read-only, ephemeral local snapshot of the
-    # bot's published `trades.db` dataset once per process. `None` on any
-    # failure (no HF_TOKEN, no network, 404, malformed file) -- the legacy
-    # adapters then keep their `"trades.db"` default and every section stays
-    # on its existing honest-unavailable / illustrative fallback. Only the
+    # bot's published `trades.db` dataset once per process. ADR-061
+    # Category A / Amendment 1: fetch_trades_db_snapshot() now returns a
+    # ReadResult; unwrap its value (a local path, or None on any failure --
+    # no HF_TOKEN, no network, 404, malformed file). On None the legacy
+    # adapters keep their `"trades.db"` default and every section stays on
+    # its existing honest-unavailable / illustrative fallback. Only the
     # three legacy-trades.db-backed screens receive it; Decision Center
     # (build_application()) reads no trades.db and is untouched.
-    snapshot_db_path = fetch_trades_db_snapshot()
+    snapshot_db_path = fetch_trades_db_snapshot().value
 
     morning_brief_blocks = _build_morning_brief_ui(snapshot_db_path).build()
     decision_blocks = build_application().build()

@@ -7,10 +7,17 @@ import tempfile
 
 import pytest
 
+from applications.platform.integrations import IntegrationStatus, ReadResult
 from applications.trading_intelligence.adapters.legacy_candidate_screening_source import (
     CandidateScreeningPick,
     LegacyCandidateScreeningSource,
 )
+
+
+def _healthy_value(result):
+    assert isinstance(result, ReadResult)
+    assert result.health.status is IntegrationStatus.HEALTHY
+    return result.value
 
 
 def _create_screener_log_db(rows):
@@ -80,10 +87,10 @@ def missing_table_db():
     os.remove(path)
 
 
-def test_get_latest_screening_returns_the_batch_ordered_by_rank(single_batch_db):
+def test_get_latest_screening_is_healthy_with_the_batch_ordered_by_rank(single_batch_db):
     source = LegacyCandidateScreeningSource(db_path=single_batch_db)
 
-    snapshot = source.get_latest_screening()
+    snapshot = _healthy_value(source.get_latest_screening())
 
     assert snapshot.screened_at == "2026-08-20T11:32:31+00:00"
     assert snapshot.picks == (
@@ -96,28 +103,34 @@ def test_get_latest_screening_returns_the_batch_ordered_by_rank(single_batch_db)
 def test_get_latest_screening_selects_the_most_recent_batch_only(multi_batch_db):
     source = LegacyCandidateScreeningSource(db_path=multi_batch_db)
 
-    snapshot = source.get_latest_screening()
+    snapshot = _healthy_value(source.get_latest_screening())
 
     assert snapshot.screened_at == "2026-08-20T11:32:31+00:00"
     assert [p.symbol for p in snapshot.picks] == ["SNOW", "BLK"]
 
 
-def test_get_latest_screening_returns_none_when_table_has_no_rows(empty_screener_log_db):
+def test_get_latest_screening_is_healthy_empty_when_table_has_no_rows(empty_screener_log_db):
     source = LegacyCandidateScreeningSource(db_path=empty_screener_log_db)
 
-    assert source.get_latest_screening() is None
+    result = source.get_latest_screening()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.HEALTHY
 
 
-def test_get_latest_screening_returns_none_when_table_is_missing(missing_table_db):
+def test_get_latest_screening_is_api_error_when_table_is_missing(missing_table_db):
     source = LegacyCandidateScreeningSource(db_path=missing_table_db)
 
-    assert source.get_latest_screening() is None
+    result = source.get_latest_screening()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.API_ERROR
 
 
-def test_get_latest_screening_returns_none_when_database_file_is_missing():
+def test_get_latest_screening_is_unavailable_when_database_file_is_missing():
     source = LegacyCandidateScreeningSource(db_path="this_file_does_not_exist_xyz_12345.db")
 
-    assert source.get_latest_screening() is None
+    result = source.get_latest_screening()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.UNAVAILABLE
 
 
 def test_get_latest_screening_handles_null_rank_and_score_safely():
@@ -130,7 +143,7 @@ def test_get_latest_screening_handles_null_rank_and_score_safely():
     ])
     try:
         source = LegacyCandidateScreeningSource(db_path=path)
-        snapshot = source.get_latest_screening()
+        snapshot = _healthy_value(source.get_latest_screening())
         assert [p.symbol for p in snapshot.picks] == ["GOOD", "INCOMPLETE"]
         assert snapshot.picks[1].rank is None
         assert snapshot.picks[1].composite_score is None
@@ -148,7 +161,7 @@ def test_get_latest_screening_handles_a_batch_with_only_null_ranks():
     ])
     try:
         source = LegacyCandidateScreeningSource(db_path=path)
-        snapshot = source.get_latest_screening()
+        snapshot = _healthy_value(source.get_latest_screening())
         assert [p.symbol for p in snapshot.picks] == ["AAA", "ZZZ"]
     finally:
         os.remove(path)

@@ -7,10 +7,17 @@ import tempfile
 
 import pytest
 
+from applications.platform.integrations import IntegrationStatus, ReadResult
 from applications.trading_intelligence.adapters.legacy_position_source import (
     LegacyPositionSource,
     OpenPosition,
 )
+
+
+def _healthy_value(result):
+    assert isinstance(result, ReadResult)
+    assert result.health.status is IntegrationStatus.HEALTHY
+    return result.value
 
 
 def _create_position_state_db(rows):
@@ -74,18 +81,18 @@ def missing_table_db():
     os.remove(path)
 
 
-def test_get_open_positions_returns_a_single_real_row(position_state_db):
+def test_get_open_positions_is_healthy_with_a_single_real_row(position_state_db):
     source = LegacyPositionSource(db_path=position_state_db)
 
-    positions = source.get_open_positions()
-
-    assert positions == (OpenPosition(symbol="AAPL", quantity=19.11, entry_price=315.01),)
+    assert _healthy_value(source.get_open_positions()) == (
+        OpenPosition(symbol="AAPL", quantity=19.11, entry_price=315.01),
+    )
 
 
 def test_get_open_positions_returns_every_open_position_in_symbol_order(multi_position_state_db):
     source = LegacyPositionSource(db_path=multi_position_state_db)
 
-    positions = source.get_open_positions()
+    positions = _healthy_value(source.get_open_positions())
 
     assert [p.symbol for p in positions] == ["AAPL", "BA", "GOOGL"]
 
@@ -94,31 +101,35 @@ def test_get_open_positions_excludes_rows_at_or_below_the_dust_threshold():
     path = _create_position_state_db([("AAPL", 100.0, 19.0), ("MSFT", 200.0, 0.0005)])
     try:
         source = LegacyPositionSource(db_path=path)
-        positions = source.get_open_positions()
+        positions = _healthy_value(source.get_open_positions())
         assert [p.symbol for p in positions] == ["AAPL"]
     finally:
         os.remove(path)
 
 
-def test_get_open_positions_returns_empty_tuple_when_table_has_no_qualifying_rows(empty_position_state_db):
-    """An empty position_state table is a legitimate real result -- zero
-    open positions right now -- and must be distinguished from the table
-    or database not existing at all (which return None below)."""
+def test_get_open_positions_healthy_empty_tuple_when_table_has_no_qualifying_rows(empty_position_state_db):
+    """An empty position_state table is a legitimate HEALTHY result --
+    zero open positions right now -- distinct from the table or database
+    not existing at all (non-HEALTHY, None, below)."""
     source = LegacyPositionSource(db_path=empty_position_state_db)
 
-    assert source.get_open_positions() == ()
+    assert _healthy_value(source.get_open_positions()) == ()
 
 
-def test_get_open_positions_returns_none_when_table_is_missing(missing_table_db):
+def test_get_open_positions_is_api_error_when_table_is_missing(missing_table_db):
     source = LegacyPositionSource(db_path=missing_table_db)
 
-    assert source.get_open_positions() is None
+    result = source.get_open_positions()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.API_ERROR
 
 
-def test_get_open_positions_returns_none_when_database_file_is_missing():
+def test_get_open_positions_is_unavailable_when_database_file_is_missing():
     source = LegacyPositionSource(db_path="this_file_does_not_exist_xyz_12345.db")
 
-    assert source.get_open_positions() is None
+    result = source.get_open_positions()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.UNAVAILABLE
 
 
 def test_module_imports_no_protected_package():

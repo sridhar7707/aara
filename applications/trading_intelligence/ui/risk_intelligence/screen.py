@@ -29,6 +29,8 @@ are not recorded in this data source. History is never fabricated.
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
+from applications.platform.integrations import IntegrationHealth
+
 _VALID_STATES = ("NORMAL", "WARNING", "DEFENSIVE")
 
 
@@ -73,6 +75,11 @@ class RiskSnapshot:
 class RiskScreen:
     current: Optional[RiskSnapshot] = None
     history: Tuple[RiskHistoryEntry, ...] = field(default=())
+    # ADR-061 Category A (A4): integration health behind the current-state
+    # section, populated by the composition root (bootstrap.py) from the
+    # LegacyRiskStateSource ReadResult -- carries whether the operational
+    # risk_state table was HEALTHY (with or without a row) or unavailable.
+    state_health: Optional[IntegrationHealth] = None
 
     @property
     def is_available(self) -> bool:

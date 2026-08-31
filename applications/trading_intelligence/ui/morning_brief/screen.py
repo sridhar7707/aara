@@ -23,6 +23,8 @@ this package's mock_data.py docstring).
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+from applications.platform.integrations import IntegrationHealth
+
 PORTFOLIO_SNAPSHOT_TITLE = "Portfolio Snapshot"
 MARKET_MOOD_REGIME_TITLE = "Market Mood / Regime"
 CANDIDATE_SCREENING_SUMMARY_TITLE = "Candidate Screening Summary"
@@ -34,6 +36,11 @@ class MorningBriefSection:
     title: str
     unavailable_message: str
     available_summary: Optional[str] = None
+    # ADR-061 Category A (A4): the integration health behind this section,
+    # populated by the composition root (bootstrap.py) only when a real,
+    # adapter-sourced summary is present. Stays None on the honest
+    # unavailable fallback, matching this screen's illustrative-only design.
+    health: Optional[IntegrationHealth] = None
 
     @property
     def is_available(self) -> bool:

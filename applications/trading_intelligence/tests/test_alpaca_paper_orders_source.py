@@ -4,6 +4,11 @@ alpaca.trading.client.TradingClient is monkeypatched everywhere here --
 these tests must never make a real network call to Alpaca. The real
 alpaca-py request/enum classes ARE exercised (GetOrdersRequest,
 QueryOrderStatus, Sort) since constructing them is offline and pure.
+
+Post-ADR-061: get_recent_orders() returns ReadResult[AlpacaOrdersSnapshot].
+A HEALTHY result carries a real snapshot (an empty snapshot -- "connected,
+no recent orders" -- is a legitimate HEALTHY result); a non-HEALTHY result
+carries value=None plus an IntegrationHealth naming the reason.
 """
 import ast
 import inspect
@@ -14,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from applications.platform.integrations import IntegrationStatus, ReadResult
 from applications.trading_intelligence.adapters.alpaca_paper_orders_source import (
     AlpacaPaperOrdersSource,
 )
@@ -105,17 +111,23 @@ def _source(**kwargs):
     return AlpacaPaperOrdersSource(**kwargs)
 
 
+def _orders(result):
+    assert isinstance(result, ReadResult)
+    assert result.health.status is IntegrationStatus.HEALTHY
+    return result.value
+
+
 # --- happy path -------------------------------------------------------------
 
 
-def test_returns_a_typed_snapshot_merging_open_and_closed(monkeypatch):
+def test_returns_a_healthy_typed_snapshot_merging_open_and_closed(monkeypatch):
     _patch_client(
         monkeypatch,
         open_orders=[_FakeOrder(id="open-1", status="new")],
         closed_orders=[_FakeOrder(id="closed-1", status="filled")],
     )
 
-    snapshot = _source().get_recent_orders()
+    snapshot = _orders(_source().get_recent_orders())
 
     assert isinstance(snapshot, AlpacaOrdersSnapshot)
     assert {o.order_id for o in snapshot.orders} == {"open-1", "closed-1"}
@@ -126,60 +138,79 @@ def test_returns_a_typed_snapshot_merging_open_and_closed(monkeypatch):
 def test_client_is_always_constructed_with_paper_true(monkeypatch):
     _patch_client(monkeypatch, open_orders=[_FakeOrder()])
 
-    assert _source().get_recent_orders() is not None  # _FakeTradingClient asserts paper is True
+    assert _source().get_recent_orders().health.status is IntegrationStatus.HEALTHY
 
 
-def test_empty_result_is_an_empty_snapshot_not_none(monkeypatch):
+def test_empty_result_is_a_healthy_empty_snapshot_not_unavailable(monkeypatch):
     _patch_client(monkeypatch, open_orders=[], closed_orders=[])
 
-    snapshot = _source().get_recent_orders()
+    result = _source().get_recent_orders()
 
-    assert snapshot == AlpacaOrdersSnapshot(orders=(), truncated=False)
-    assert snapshot is not None
-    assert snapshot.is_empty
-
-
-# --- unavailable (None) cases --------------------------------------------
+    assert result.health.status is IntegrationStatus.HEALTHY
+    assert result.value == AlpacaOrdersSnapshot(orders=(), truncated=False)
+    assert result.value.is_empty
 
 
-def test_returns_none_when_credentials_are_missing(monkeypatch):
+# --- NOT_CONFIGURED ----------------------------------------------------
+
+
+def test_not_configured_when_credentials_are_missing(monkeypatch):
     def _explode(*args, **kwargs):
         raise AssertionError("client must not be built without credentials")
 
     monkeypatch.setattr("alpaca.trading.client.TradingClient", _explode)
 
-    assert AlpacaPaperOrdersSource(api_key="", api_secret="", base_url=_PAPER_URL).get_recent_orders() is None
+    result = AlpacaPaperOrdersSource(api_key="", api_secret="", base_url=_PAPER_URL).get_recent_orders()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.NOT_CONFIGURED
 
 
-def test_returns_none_when_base_url_is_not_confirmed_paper(monkeypatch):
+def test_non_paper_base_url_is_not_configured_never_healthy_or_auth_failed(monkeypatch):
     def _explode(*args, **kwargs):
         raise AssertionError("client must not be built for an unconfirmed environment")
 
     monkeypatch.setattr("alpaca.trading.client.TradingClient", _explode)
 
-    source = AlpacaPaperOrdersSource(api_key="k", api_secret="s", base_url="https://api.alpaca.markets")
-    assert source.get_recent_orders() is None
+    result = AlpacaPaperOrdersSource(
+        api_key="k", api_secret="s", base_url="https://api.alpaca.markets"
+    ).get_recent_orders()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.NOT_CONFIGURED
+    assert result.health.status is not IntegrationStatus.HEALTHY
+    assert result.health.status is not IntegrationStatus.AUTH_FAILED
 
 
-def test_returns_none_when_sdk_client_construction_fails(monkeypatch):
+def test_not_configured_when_sdk_client_construction_raises_importerror(monkeypatch):
     def _raises(*args, **kwargs):
         raise ImportError("simulated alpaca-py not installed")
 
     monkeypatch.setattr("alpaca.trading.client.TradingClient", _raises)
 
-    assert _source().get_recent_orders() is None
+    result = _source().get_recent_orders()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.NOT_CONFIGURED
 
 
-def test_returns_none_when_the_open_call_fails(monkeypatch):
+# --- UNAVAILABLE -----------------------------------------------------
+
+
+def test_unavailable_when_the_open_call_fails(monkeypatch):
     _patch_client(monkeypatch, raise_on={"open"}, closed_orders=[_FakeOrder(id="c")])
 
-    assert _source().get_recent_orders() is None
+    result = _source().get_recent_orders()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.UNAVAILABLE
 
 
-def test_returns_none_when_the_closed_call_fails(monkeypatch):
+def test_unavailable_when_the_closed_call_fails(monkeypatch):
     _patch_client(monkeypatch, raise_on={"closed"}, open_orders=[_FakeOrder(id="o")])
 
-    assert _source().get_recent_orders() is None
+    result = _source().get_recent_orders()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.UNAVAILABLE
+
+
+# --- API_ERROR -----------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -194,20 +225,24 @@ def test_returns_none_when_the_closed_call_fails(monkeypatch):
         _FakeOrder(id="x", filled_at="2026-08-27T15:00:00Z"),  # malformed filled_at
     ],
 )
-def test_a_single_malformed_row_makes_the_whole_result_none(monkeypatch, bad_order):
+def test_a_single_malformed_row_makes_the_whole_result_api_error(monkeypatch, bad_order):
     _patch_client(
         monkeypatch,
         open_orders=[_FakeOrder(id="good-1")],
         closed_orders=[bad_order],
     )
 
-    assert _source().get_recent_orders() is None
+    result = _source().get_recent_orders()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.API_ERROR
 
 
-def test_malformed_row_in_the_open_call_also_makes_the_whole_result_none(monkeypatch):
+def test_malformed_row_in_the_open_call_also_makes_the_whole_result_api_error(monkeypatch):
     _patch_client(monkeypatch, open_orders=[_FakeOrder(id="x", symbol="")])
 
-    assert _source().get_recent_orders() is None
+    result = _source().get_recent_orders()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.API_ERROR
 
 
 # --- merge / dedupe / ordering -----------------------------------------
@@ -222,7 +257,7 @@ def test_dedupes_by_order_id_with_the_open_row_winning(monkeypatch):
         closed_orders=[_FakeOrder(id="dup", status="canceled")],
     )
 
-    snapshot = _source().get_recent_orders()
+    snapshot = _orders(_source().get_recent_orders())
 
     assert [o.order_id for o in snapshot.orders] == ["dup"]
     only = snapshot.orders[0]
@@ -245,7 +280,7 @@ def test_orders_are_sorted_newest_first_with_order_id_tiebreak(monkeypatch):
         ],
     )
 
-    snapshot = _source().get_recent_orders()
+    snapshot = _orders(_source().get_recent_orders())
 
     # t_late group first, order_id descending within equal timestamps; then t_early.
     assert [o.order_id for o in snapshot.orders] == ["d", "c", "a", "b"]
@@ -260,7 +295,7 @@ def test_truncated_is_true_when_the_open_call_hits_the_cap(monkeypatch):
         open_orders=[_FakeOrder(id=f"o{i}", status="new") for i in range(2)],
     )
 
-    snapshot = _source(per_call_cap=2).get_recent_orders()
+    snapshot = _orders(_source(per_call_cap=2).get_recent_orders())
 
     assert snapshot.truncated is True
     assert len(snapshot.orders) == 2
@@ -272,7 +307,7 @@ def test_truncated_is_true_when_the_closed_call_hits_the_cap(monkeypatch):
         closed_orders=[_FakeOrder(id=f"c{i}") for i in range(3)],
     )
 
-    snapshot = _source(per_call_cap=3).get_recent_orders()
+    snapshot = _orders(_source(per_call_cap=3).get_recent_orders())
 
     assert snapshot.truncated is True
 
@@ -284,7 +319,7 @@ def test_truncated_is_false_when_both_calls_are_under_the_cap(monkeypatch):
         closed_orders=[_FakeOrder(id="c1")],
     )
 
-    snapshot = _source(per_call_cap=50).get_recent_orders()
+    snapshot = _orders(_source(per_call_cap=50).get_recent_orders())
 
     assert snapshot.truncated is False
 
@@ -298,7 +333,7 @@ def test_every_open_query_row_is_flagged_working_regardless_of_status(monkeypatc
         open_orders=[_FakeOrder(id="o", status="a-status-not-in-any-known-set")],
     )
 
-    snapshot = _source().get_recent_orders()
+    snapshot = _orders(_source().get_recent_orders())
 
     assert snapshot.orders[0].is_working is True
     assert snapshot.orders[0].status == "a-status-not-in-any-known-set"  # still verbatim
@@ -313,7 +348,7 @@ def test_closed_query_rows_are_flagged_working_only_for_live_statuses(monkeypatc
         ],
     )
 
-    snapshot = _source().get_recent_orders()
+    snapshot = _orders(_source().get_recent_orders())
 
     by_id = {o.order_id: o for o in snapshot.orders}
     assert by_id["live"].is_working is True
@@ -323,7 +358,7 @@ def test_closed_query_rows_are_flagged_working_only_for_live_statuses(monkeypatc
 def test_partially_filled_is_treated_as_working(monkeypatch):
     _patch_client(monkeypatch, closed_orders=[_FakeOrder(id="p", status="partially_filled")])
 
-    snapshot = _source().get_recent_orders()
+    snapshot = _orders(_source().get_recent_orders())
 
     assert snapshot.orders[0].is_working is True
 
@@ -337,7 +372,7 @@ def test_side_and_status_are_broker_verbatim(monkeypatch):
         open_orders=[_FakeOrder(id="o", side="sell", status="partially_filled")],
     )
 
-    order = _source().get_recent_orders().orders[0]
+    order = _orders(_source().get_recent_orders()).orders[0]
 
     assert order.side == "sell"
     assert order.status == "partially_filled"
@@ -351,7 +386,7 @@ def test_optional_numeric_fields_pass_through_as_strings(monkeypatch):
         ],
     )
 
-    order = _source().get_recent_orders().orders[0]
+    order = _orders(_source().get_recent_orders()).orders[0]
 
     assert order.quantity == "5"
     assert order.filled_quantity == "0"
@@ -364,7 +399,7 @@ def test_absent_limit_price_and_filled_at_are_not_fatal(monkeypatch):
         open_orders=[_FakeOrder(id="o", status="new", limit_price=None, filled_at=None)],
     )
 
-    order = _source().get_recent_orders().orders[0]
+    order = _orders(_source().get_recent_orders()).orders[0]
 
     assert order.limit_price == ""
     assert order.filled_at is None
@@ -373,7 +408,7 @@ def test_absent_limit_price_and_filled_at_are_not_fatal(monkeypatch):
 def test_projection_never_carries_strategy_metadata(monkeypatch):
     _patch_client(monkeypatch, open_orders=[_FakeOrder(id="o", status="new")])
 
-    order = _source().get_recent_orders().orders[0]
+    order = _orders(_source().get_recent_orders()).orders[0]
 
     for forbidden in ("client_order_id", "order_class", "legs", "notes", "strategy"):
         assert not hasattr(order, forbidden), f"{forbidden!r} must not appear on AlpacaOrder"
@@ -383,7 +418,7 @@ def test_order_id_is_stringified_from_a_uuid(monkeypatch):
     real_uuid = uuid.uuid4()
     _patch_client(monkeypatch, open_orders=[_FakeOrder(id=real_uuid, status="new")])
 
-    order = _source().get_recent_orders().orders[0]
+    order = _orders(_source().get_recent_orders()).orders[0]
 
     assert order.order_id == str(real_uuid)
     assert isinstance(order.order_id, str)
@@ -491,12 +526,14 @@ def test_module_imports_cleanly_when_top_level_config_is_unavailable():
         "        raise ImportError('simulated: config not staged in HF Space')\n"
         "    return _orig(name, globals, locals, fromlist, level)\n"
         "builtins.__import__ = _blocked\n"
+        "from applications.platform.integrations import IntegrationStatus\n"
         "from applications.trading_intelligence.adapters.alpaca_paper_orders_source import (\n"
         "    ALPACA_KEY, ALPACA_SECRET, AlpacaPaperOrdersSource,\n"
         ")\n"
         "assert ALPACA_KEY == ''\n"
         "assert ALPACA_SECRET == ''\n"
-        "assert AlpacaPaperOrdersSource().get_recent_orders() is None\n"
+        "r = AlpacaPaperOrdersSource().get_recent_orders()\n"
+        "assert r.value is None and r.health.status is IntegrationStatus.NOT_CONFIGURED\n"
         "print('OK')\n"
     )
     result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, timeout=30)

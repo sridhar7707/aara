@@ -31,16 +31,21 @@ adapters/alpaca_paper_source.py:
      physically reach a live-trading endpoint.
   2. ALPACA_BASE_URL is additionally checked for the literal substring
      "paper" before any client is created; if absent, the environment is
-     not confirmed paper and get_recent_orders() returns None (the safe
-     unavailable path) rather than proceeding on an unverified
-     assumption.
+     not confirmed paper and get_recent_orders() reports NOT_CONFIGURED
+     (the safe unavailable path) rather than proceeding on an unverified
+     assumption. A non-paper base URL is reported as NOT_CONFIGURED and
+     can never become HEALTHY or AUTH_FAILED.
 
-Never fabricates. On missing config.py, missing credentials, an SDK
-import failure, a network/API error, or a malformed provider row,
-get_recent_orders() returns None and the caller falls back to the
-existing honest unavailable message. A successful read that matched no
-orders returns an empty AlpacaOrdersSnapshot -- a real "nothing to
-report" result, distinct from None.
+Health contract (ADR-061 Category A): get_recent_orders() returns
+ReadResult[AlpacaOrdersSnapshot]. A HEALTHY result carries a real
+snapshot (an empty AlpacaOrdersSnapshot -- "connected, no recent orders"
+-- is a legitimate HEALTHY result). A non-HEALTHY result carries
+value=None plus an IntegrationHealth naming the reason: NOT_CONFIGURED
+(missing config.py / missing credentials / unconfirmed paper environment /
+SDK not importable), AUTH_FAILED (401/403), RATE_LIMITED (429),
+UNAVAILABLE (network/timeout/5xx), API_ERROR (malformed provider row).
+Credential values are never placed in IntegrationHealth.detail
+(ADR-061 Section 2.9).
 
 Two GET calls, merged and deduplicated by order id:
   1. OPEN orders -- no time filter, defensive per-call cap.
@@ -56,12 +61,11 @@ for dedupe/stable ordering, never surfaced as a decision identifier.
 
 Production note: identical limitation to the other two Alpaca adapters --
 the deployed Trading Intelligence HF Space has no Alpaca credentials or
-outbound network configured today, so this returns None there and the
-section stays unavailable. Locally, with ALPACA_KEY/ALPACA_SECRET present
-via .env, it reads real Alpaca paper orders immediately.
+outbound network configured today, so this reports NOT_CONFIGURED there
+and the section stays unavailable. Locally, with ALPACA_KEY/ALPACA_SECRET
+present via .env, it reads real Alpaca paper orders immediately.
 """
 from datetime import datetime, timedelta, timezone
-from typing import Optional
 
 try:
     from config import ALPACA_BASE_URL, ALPACA_KEY, ALPACA_SECRET
@@ -70,16 +74,23 @@ except ImportError:
     # deployed Trading Intelligence HF Space -- see
     # adapters/alpaca_paper_source.py's own note on the same fallback.
     # Falling back to empty credentials keeps the Space from crashing at
-    # import time; get_recent_orders() then returns None (the expected,
-    # documented unavailable path) rather than raising.
+    # import time; get_recent_orders() then reports NOT_CONFIGURED (the
+    # expected, documented unavailable path) rather than raising.
     ALPACA_KEY = ""
     ALPACA_SECRET = ""
     ALPACA_BASE_URL = ""
 
+from applications.platform.integrations import (
+    IntegrationHealth,
+    ReadResult,
+    classify_exception,
+)
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     AlpacaOrder,
     AlpacaOrdersSnapshot,
 )
+
+_PROVIDER = "alpaca_paper_orders"
 
 _CLOSED_WINDOW_DAYS = 14
 _PER_CALL_CAP = 50
@@ -130,33 +141,43 @@ class AlpacaPaperOrdersSource:
         self._closed_window_days = closed_window_days
         self._per_call_cap = per_call_cap
 
-    def _build_client(self):
-        """Returns a paper-only TradingClient, or None if credentials are
-        missing or the configured environment isn't confirmed paper --
+    def _client_or_health(self):
+        """Returns ``(client, None)`` on success, or ``(None, IntegrationHealth)``
+        describing why a paper-only TradingClient could not be built --
         never raises, never falls back to live."""
         if not self._api_key or not self._api_secret:
-            return None
+            return None, IntegrationHealth.not_configured(
+                _PROVIDER, detail="ALPACA_KEY / ALPACA_SECRET not set"
+            )
         if not _is_paper_environment(self._base_url):
-            return None
+            return None, IntegrationHealth.not_configured(
+                _PROVIDER, detail="ALPACA_BASE_URL is not a paper endpoint"
+            )
         try:
             from alpaca.trading.client import TradingClient
-
-            return TradingClient(self._api_key, self._api_secret, paper=True)
         except Exception:
-            return None
+            return None, IntegrationHealth.not_configured(
+                _PROVIDER, detail="alpaca-py SDK is not importable"
+            )
+        try:
+            return TradingClient(self._api_key, self._api_secret, paper=True), None
+        except ImportError:
+            return None, IntegrationHealth.not_configured(
+                _PROVIDER, detail="alpaca-py SDK is not importable"
+            )
+        except Exception as exc:
+            return None, classify_exception(_PROVIDER, exc)
 
-    def get_recent_orders(self) -> Optional[AlpacaOrdersSnapshot]:
-        """Returns Alpaca's own broker-side recent Paper orders (open +
-        last-14-days closed), merged, deduped by order id, newest-first.
-        Returns None only when credentials/environment aren't confirmed
-        paper, either network call fails, or any row is malformed --
-        callers must treat None as "fall back to the existing unavailable
-        section," never as an error, and must never use a partial result.
-        An empty snapshot is a real "connected, no recent orders" state,
-        not None."""
-        client = self._build_client()
+    def get_recent_orders(self) -> "ReadResult[AlpacaOrdersSnapshot]":
+        """Returns a ReadResult over Alpaca's own broker-side recent Paper
+        orders (open + last-14-days closed), merged, deduped by order id,
+        newest-first. A HEALTHY result with an empty AlpacaOrdersSnapshot
+        is a legitimate real state (connected, no recent orders); a
+        non-HEALTHY result carries value=None plus an IntegrationHealth
+        naming the reason -- callers must never use a partial result."""
+        client, health = self._client_or_health()
         if client is None:
-            return None
+            return ReadResult.failed(health)
 
         try:
             from alpaca.common.enums import Sort
@@ -179,8 +200,8 @@ class AlpacaPaperOrdersSource:
             )
             open_raw = list(client.get_orders(filter=open_request))
             closed_raw = list(client.get_orders(filter=closed_request))
-        except Exception:
-            return None
+        except Exception as exc:
+            return ReadResult.failed(classify_exception(_PROVIDER, exc))
 
         try:
             merged = {}
@@ -192,8 +213,10 @@ class AlpacaPaperOrdersSource:
                 if order.order_id in merged:
                     continue
                 merged[order.order_id] = order
-        except Exception:
-            return None
+        except Exception as exc:
+            return ReadResult.failed(
+                IntegrationHealth.api_error(_PROVIDER, detail=type(exc).__name__)
+            )
 
         ordered = tuple(
             sorted(
@@ -206,14 +229,16 @@ class AlpacaPaperOrdersSource:
             len(open_raw) >= self._per_call_cap
             or len(closed_raw) >= self._per_call_cap
         )
-        return AlpacaOrdersSnapshot(orders=ordered, truncated=truncated)
+        return ReadResult.healthy(
+            AlpacaOrdersSnapshot(orders=ordered, truncated=truncated), _PROVIDER
+        )
 
     @staticmethod
     def _parse_order(raw, forced_working: bool) -> AlpacaOrder:
         """Projects one provider order row onto AlpacaOrder. Raises on any
         malformed/absent identity, sort, or broker-verbatim field -- the
-        caller turns any exception here into a whole-result None, never a
-        partial list."""
+        caller turns any exception here into a whole-result API_ERROR,
+        never a partial list."""
         order_id = str(raw.id)
         symbol = raw.symbol
         if not order_id or not symbol:

@@ -7,6 +7,7 @@ import tempfile
 
 import pytest
 
+from applications.platform.integrations import IntegrationStatus, ReadResult
 from applications.trading_intelligence.adapters.legacy_capital_source import LegacyCapitalSource
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import CapitalSummary
 
@@ -47,30 +48,39 @@ def empty_db():
     os.remove(path)
 
 
-def test_get_capital_summary_returns_correct_summary_for_a_real_row(capital_pools_db):
+def test_get_capital_summary_is_healthy_with_a_real_row(capital_pools_db):
     source = LegacyCapitalSource(db_path=capital_pools_db)
 
-    summary = source.get_capital_summary()
+    result = source.get_capital_summary()
 
-    assert summary == CapitalSummary(
+    assert isinstance(result, ReadResult)
+    assert result.health.status is IntegrationStatus.HEALTHY
+    assert result.value == CapitalSummary(
         allocated_amount=50000.0, available_cash=12000.0, invested_amount=38000.0,
         reserve=1000.0, realized_profit=2500.0,
     )
 
 
-def test_get_capital_summary_returns_none_when_table_is_missing(empty_db):
+def test_get_capital_summary_is_api_error_when_table_is_missing(empty_db):
     source = LegacyCapitalSource(db_path=empty_db)
 
-    assert source.get_capital_summary() is None
+    result = source.get_capital_summary()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.API_ERROR
 
 
-def test_get_capital_summary_returns_none_when_database_file_is_missing():
+def test_get_capital_summary_is_unavailable_when_database_file_is_missing():
     source = LegacyCapitalSource(db_path="this_file_does_not_exist_xyz_12345.db")
 
-    assert source.get_capital_summary() is None
+    result = source.get_capital_summary()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.UNAVAILABLE
 
 
-def test_get_capital_summary_returns_none_when_no_active_pool_row_exists():
+def test_get_capital_summary_is_healthy_empty_when_no_active_pool_row_exists():
+    """A table that exists but holds no active pool row is a genuine
+    "nothing recorded" state -- HEALTHY with value=None -- distinct from
+    the file or table being absent."""
     path = tempfile.mktemp(suffix=".db")
     conn = sqlite3.connect(path)
     conn.execute(
@@ -85,7 +95,9 @@ def test_get_capital_summary_returns_none_when_no_active_pool_row_exists():
     conn.close()
     try:
         source = LegacyCapitalSource(db_path=path)
-        assert source.get_capital_summary() is None
+        result = source.get_capital_summary()
+        assert result.value is None
+        assert result.health.status is IntegrationStatus.HEALTHY
     finally:
         os.remove(path)
 

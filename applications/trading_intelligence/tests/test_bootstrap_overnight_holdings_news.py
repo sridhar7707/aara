@@ -6,7 +6,13 @@
   real holdings can be determined, that a failure at either adapter
   leaves the section on its existing honest unavailable message, and that
   no other Morning Brief section's behavior changes.
+
+Post-ADR-061 (Category A / Amendment 1): the adapter methods return
+ReadResult; the "only when real holdings + real news" trigger is unwrapped
+from `.value`, and MorningBriefSection.health is populated only on the
+real-data path.
 """
+from applications.platform.integrations import IntegrationHealth, ReadResult
 from applications.trading_intelligence import bootstrap
 from applications.trading_intelligence.adapters.alpaca_news_source import (
     HoldingsNewsItem,
@@ -27,8 +33,16 @@ def _item(headline, symbols=("AAPL",), source="Benzinga"):
     )
 
 
+def _ok(value, provider):
+    return ReadResult.healthy(value, provider)
+
+
+def _down(provider):
+    return ReadResult.failed(IntegrationHealth.unavailable(provider))
+
+
 # --------------------------------------------------------------------------
-# _format_overnight_holdings_news
+# _format_overnight_holdings_news (pure -- takes domain objects, unchanged)
 # --------------------------------------------------------------------------
 
 def test_format_reports_no_open_holdings_explicitly():
@@ -89,13 +103,19 @@ def _isolate_other_morning_brief_sources(monkeypatch):
     """Force the three non-news real sources to unavailable so a test can
     reason about the Overnight Holdings News section alone."""
     monkeypatch.setattr(
-        bootstrap.LegacyCapitalSource, "get_capital_summary", lambda self: None
+        bootstrap.LegacyCapitalSource,
+        "get_capital_summary",
+        lambda self: _down("trades_db_capital"),
     )
     monkeypatch.setattr(
-        bootstrap.LegacyRegimeSource, "get_latest_regime", lambda self: None
+        bootstrap.LegacyRegimeSource,
+        "get_latest_regime",
+        lambda self: _down("trades_db_regime"),
     )
     monkeypatch.setattr(
-        bootstrap.LegacyCandidateScreeningSource, "get_latest_screening", lambda self: None
+        bootstrap.LegacyCandidateScreeningSource,
+        "get_latest_screening",
+        lambda self: _down("trades_db_screening"),
     )
 
 
@@ -103,16 +123,22 @@ def test_wires_real_alpaca_news_into_the_overnight_section(monkeypatch):
     _isolate_other_morning_brief_sources(monkeypatch)
     monkeypatch.setattr(
         bootstrap.LegacyPositionSource, "get_open_positions",
-        lambda self: (
-            OpenPosition(symbol="AAPL", quantity=1.0, entry_price=1.0),
-            OpenPosition(symbol="MSFT", quantity=1.0, entry_price=1.0),
+        lambda self: _ok(
+            (
+                OpenPosition(symbol="AAPL", quantity=1.0, entry_price=1.0),
+                OpenPosition(symbol="MSFT", quantity=1.0, entry_price=1.0),
+            ),
+            "trades_db_positions",
         ),
     )
     captured = {}
 
     def _fake_news(self, symbols):
         captured["symbols"] = tuple(symbols)
-        return OvernightHoldingsNews(items=(_item("Big AAPL story", symbols=("AAPL",)),))
+        return _ok(
+            OvernightHoldingsNews(items=(_item("Big AAPL story", symbols=("AAPL",)),)),
+            "alpaca_news",
+        )
 
     monkeypatch.setattr(bootstrap.AlpacaNewsSource, "get_overnight_holdings_news", _fake_news)
 
@@ -121,6 +147,7 @@ def test_wires_real_alpaca_news_into_the_overnight_section(monkeypatch):
 
     assert captured["symbols"] == ("AAPL", "MSFT")  # filtered to real holdings
     assert section.is_available
+    assert section.health is not None
     assert section.available_summary == (
         '1 recent headline for current holdings (AAPL, MSFT) -- '
         'latest: "Big AAPL story" (Benzinga).'
@@ -131,7 +158,8 @@ def test_wires_real_alpaca_news_into_the_overnight_section(monkeypatch):
 def test_overnight_section_stays_unavailable_when_holdings_cannot_be_determined(monkeypatch):
     _isolate_other_morning_brief_sources(monkeypatch)
     monkeypatch.setattr(
-        bootstrap.LegacyPositionSource, "get_open_positions", lambda self: None
+        bootstrap.LegacyPositionSource, "get_open_positions",
+        lambda self: _down("trades_db_positions"),
     )
 
     def _must_not_run(self, symbols):
@@ -144,6 +172,7 @@ def test_overnight_section_stays_unavailable_when_holdings_cannot_be_determined(
 
     assert not section.is_available
     assert section.available_summary is None
+    assert section.health is None
     assert section.unavailable_message == expected.unavailable_message
 
 
@@ -151,10 +180,15 @@ def test_overnight_section_stays_unavailable_when_news_fetch_fails(monkeypatch):
     _isolate_other_morning_brief_sources(monkeypatch)
     monkeypatch.setattr(
         bootstrap.LegacyPositionSource, "get_open_positions",
-        lambda self: (OpenPosition(symbol="AAPL", quantity=1.0, entry_price=1.0),),
+        lambda self: _ok(
+            (OpenPosition(symbol="AAPL", quantity=1.0, entry_price=1.0),),
+            "trades_db_positions",
+        ),
     )
     monkeypatch.setattr(
-        bootstrap.AlpacaNewsSource, "get_overnight_holdings_news", lambda self, symbols: None
+        bootstrap.AlpacaNewsSource,
+        "get_overnight_holdings_news",
+        lambda self, symbols: _down("alpaca_news"),
     )
 
     section = _build_morning_brief_ui()._screen.overnight_holdings_news
@@ -167,11 +201,13 @@ def test_overnight_section_stays_unavailable_when_news_fetch_fails(monkeypatch):
 def test_overnight_section_reports_empty_holdings_explicitly(monkeypatch):
     _isolate_other_morning_brief_sources(monkeypatch)
     monkeypatch.setattr(
-        bootstrap.LegacyPositionSource, "get_open_positions", lambda self: ()
+        bootstrap.LegacyPositionSource,
+        "get_open_positions",
+        lambda self: _ok((), "trades_db_positions"),
     )
     monkeypatch.setattr(
         bootstrap.AlpacaNewsSource, "get_overnight_holdings_news",
-        lambda self, symbols: OvernightHoldingsNews(items=()),
+        lambda self, symbols: _ok(OvernightHoldingsNews(items=()), "alpaca_news"),
     )
 
     section = _build_morning_brief_ui()._screen.overnight_holdings_news
@@ -186,11 +222,16 @@ def test_other_morning_brief_sections_are_unchanged_by_the_news_wiring(monkeypat
     _isolate_other_morning_brief_sources(monkeypatch)
     monkeypatch.setattr(
         bootstrap.LegacyPositionSource, "get_open_positions",
-        lambda self: (OpenPosition(symbol="AAPL", quantity=1.0, entry_price=1.0),),
+        lambda self: _ok(
+            (OpenPosition(symbol="AAPL", quantity=1.0, entry_price=1.0),),
+            "trades_db_positions",
+        ),
     )
     monkeypatch.setattr(
         bootstrap.AlpacaNewsSource, "get_overnight_holdings_news",
-        lambda self, symbols: OvernightHoldingsNews(items=(_item("x"),)),
+        lambda self, symbols: _ok(
+            OvernightHoldingsNews(items=(_item("x"),)), "alpaca_news"
+        ),
     )
 
     screen = _build_morning_brief_ui()._screen

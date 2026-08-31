@@ -101,10 +101,14 @@ def app_url():
     autouse fixture, so without this guard ``build_trading_intelligence_app()``
     could reach the real snapshot fetch during module setup.
     """
+    from applications.platform.integrations import IntegrationHealth, ReadResult
+
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(
             "applications.trading_intelligence.bootstrap.fetch_trades_db_snapshot",
-            lambda: None,
+            lambda: ReadResult.failed(
+                IntegrationHealth.not_configured("hf_trades_db_snapshot")
+            ),
         )
         demo = build_trading_intelligence_app()
         demo.launch(

@@ -1,22 +1,24 @@
 """Tests for applications.trading_intelligence.adapters.trades_db_snapshot.
 
 Covers the ADR-055 Section 2 contract for the read-only, consumer-only
-`trades.db` HuggingFace dataset snapshot pull, as revised after code
-review:
+`trades.db` HuggingFace dataset snapshot pull, plus the ADR-061 Category A
+health contract:
 
   - the fetch runs only inside a HuggingFace Space (gated on SPACE_ID);
-    with no SPACE_ID it returns None with no config/hub import, no
-    network;
+    with no SPACE_ID it returns a NOT_CONFIGURED ReadResult with no
+    config/hub import, no network;
   - inside a Space it attempts the download even with an empty HF_TOKEN
     (public dataset repo), passing token=None;
-  - HF_DB_REPO_ID is still a required configuration guard;
+  - HF_DB_REPO_ID is still a required configuration guard (NOT_CONFIGURED);
   - the download + copy run in a daemon thread joined with a hard
-    20-second timeout; on timeout the call returns None and does not
-    block, and a late-finishing worker can never leave a partial
-    snapshot (atomic os.replace of a per-process temp file);
+    20-second timeout; on timeout the call returns an UNAVAILABLE
+    ReadResult and does not block, and a late-finishing worker can never
+    leave a partial snapshot (atomic os.replace of a per-process temp
+    file);
   - the copy target is the product-owned `.runtime` path, never
     `./trades.db` / cwd;
-  - every failure mode fails closed with None;
+  - every failure mode fails closed with value=None and a classified
+    IntegrationHealth;
   - the module performs no HF write/upload/commit and imports nothing
     under bot/ dashboard/ scheduler/ database/ ledger/.
 
@@ -34,6 +36,7 @@ import time
 
 import pytest
 
+from applications.platform.integrations import IntegrationStatus, ReadResult
 from applications.trading_intelligence.adapters import trades_db_snapshot
 from applications.trading_intelligence.adapters.trades_db_snapshot import (
     fetch_trades_db_snapshot,
@@ -83,15 +86,21 @@ def _forbidden_download(**kwargs):
     raise AssertionError("hf_hub_download must not be called in this path")
 
 
+def _assert_failed(result, status):
+    assert isinstance(result, ReadResult)
+    assert result.value is None
+    assert result.health.status is status
+
+
 # --- SPACE_ID gate --------------------------------------------------------
 
-def test_not_in_space_returns_none_without_download(monkeypatch, runtime_dir):
+def test_not_in_space_is_not_configured_without_download(monkeypatch, runtime_dir):
     monkeypatch.delenv("SPACE_ID", raising=False)
     monkeypatch.setattr("huggingface_hub.hf_hub_download", _forbidden_download)
-    assert fetch_trades_db_snapshot() is None
+    _assert_failed(fetch_trades_db_snapshot(), IntegrationStatus.NOT_CONFIGURED)
 
 
-def test_in_space_success_returns_runtime_path(
+def test_in_space_success_is_healthy_with_the_runtime_path(
     tmp_path, monkeypatch, runtime_dir, in_space, repo_configured
 ):
     fake = _fake_download_factory(tmp_path)
@@ -99,9 +108,10 @@ def test_in_space_success_returns_runtime_path(
 
     result = fetch_trades_db_snapshot()
 
-    assert result == str(runtime_dir)
-    assert pathlib.Path(result).exists()
-    assert pathlib.Path(result).stat().st_size > 0
+    assert result.health.status is IntegrationStatus.HEALTHY
+    assert result.value == str(runtime_dir)
+    assert pathlib.Path(result.value).exists()
+    assert pathlib.Path(result.value).stat().st_size > 0
     assert len(fake.calls) == 1
     assert fake.calls[0]["filename"] == "trades.db"
     assert fake.calls[0]["repo_type"] == "dataset"
@@ -119,16 +129,17 @@ def test_in_space_empty_token_still_attempts_public_repo(
 
     result = fetch_trades_db_snapshot()
 
-    assert result == str(runtime_dir)
+    assert result.health.status is IntegrationStatus.HEALTHY
+    assert result.value == str(runtime_dir)
     assert len(fake.calls) == 1
     assert fake.calls[0]["token"] is None  # empty HF_TOKEN -> token=None
 
 
-def test_missing_repo_id_returns_none(monkeypatch, runtime_dir, in_space):
+def test_missing_repo_id_is_not_configured(monkeypatch, runtime_dir, in_space):
     monkeypatch.setattr("config.HF_DB_REPO_ID", "")
     monkeypatch.setattr("config.HF_TOKEN", "test-token")
     monkeypatch.setattr("huggingface_hub.hf_hub_download", _forbidden_download)
-    assert fetch_trades_db_snapshot() is None
+    _assert_failed(fetch_trades_db_snapshot(), IntegrationStatus.NOT_CONFIGURED)
 
 
 # --- copy target / path contract ---------------------------------------
@@ -141,7 +152,7 @@ def test_copy_target_is_runtime_path_never_cwd_trades_db(
         "huggingface_hub.hf_hub_download", _fake_download_factory(tmp_path)
     )
 
-    resolved = pathlib.Path(fetch_trades_db_snapshot()).resolve()
+    resolved = pathlib.Path(fetch_trades_db_snapshot().value).resolve()
 
     assert resolved != (tmp_path / "trades.db").resolve()
     assert not (tmp_path / "trades.db").exists()
@@ -170,38 +181,57 @@ def test_generic_download_exception_fails_closed(
         raise RuntimeError("network down")
 
     monkeypatch.setattr("huggingface_hub.hf_hub_download", _boom)
-    assert fetch_trades_db_snapshot() is None
+
+    result = fetch_trades_db_snapshot()
+    assert result.value is None
+    assert result.health.status is not IntegrationStatus.HEALTHY
 
 
-def test_404_entry_not_found_fails_closed(
+def test_404_entry_not_found_is_api_error(
     monkeypatch, runtime_dir, in_space, repo_configured
 ):
     def _not_found(**kwargs):
         raise Exception("404 Client Error. Entry Not Found for url: .../trades.db")
 
     monkeypatch.setattr("huggingface_hub.hf_hub_download", _not_found)
-    assert fetch_trades_db_snapshot() is None
+    _assert_failed(fetch_trades_db_snapshot(), IntegrationStatus.API_ERROR)
 
 
-def test_huggingface_hub_not_importable_fails_closed(
+def test_auth_rejected_download_is_auth_failed(
+    monkeypatch, runtime_dir, in_space, repo_configured
+):
+    class _Resp:
+        status_code = 401
+
+    class _AuthError(Exception):
+        response = _Resp()
+
+    def _rejected(**kwargs):
+        raise _AuthError("401 Unauthorized for private dataset")
+
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", _rejected)
+    _assert_failed(fetch_trades_db_snapshot(), IntegrationStatus.AUTH_FAILED)
+
+
+def test_huggingface_hub_not_importable_is_not_configured(
     monkeypatch, runtime_dir, in_space, repo_configured
 ):
     monkeypatch.setitem(sys.modules, "huggingface_hub", None)
-    assert fetch_trades_db_snapshot() is None
+    _assert_failed(fetch_trades_db_snapshot(), IntegrationStatus.NOT_CONFIGURED)
 
 
-def test_zero_byte_download_fails_closed(
+def test_zero_byte_download_is_api_error(
     tmp_path, monkeypatch, runtime_dir, in_space, repo_configured
 ):
     monkeypatch.setattr(
         "huggingface_hub.hf_hub_download",
         _fake_download_factory(tmp_path, contents=b""),
     )
-    assert fetch_trades_db_snapshot() is None
+    _assert_failed(fetch_trades_db_snapshot(), IntegrationStatus.API_ERROR)
     assert not runtime_dir.exists()  # no snapshot written
 
 
-def test_copy_error_fails_closed(
+def test_copy_error_is_api_error(
     tmp_path, monkeypatch, runtime_dir, in_space, repo_configured
 ):
     monkeypatch.setattr(
@@ -212,12 +242,12 @@ def test_copy_error_fails_closed(
         raise OSError("disk full")
 
     monkeypatch.setattr(trades_db_snapshot.shutil, "copy", _copy_boom)
-    assert fetch_trades_db_snapshot() is None
+    _assert_failed(fetch_trades_db_snapshot(), IntegrationStatus.API_ERROR)
 
 
 # --- timeout / abandoned worker --------------------------------------
 
-def test_download_timeout_fails_closed_and_does_not_block(
+def test_download_timeout_is_unavailable_and_does_not_block(
     tmp_path, monkeypatch, runtime_dir, in_space, repo_configured
 ):
     monkeypatch.setattr(trades_db_snapshot, "_FETCH_TIMEOUT_SECONDS", 0.3)
@@ -237,7 +267,8 @@ def test_download_timeout_fails_closed_and_does_not_block(
     elapsed = time.monotonic() - started
     release.set()
 
-    assert result is None
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.UNAVAILABLE
     assert elapsed < 2.0  # returned on the 0.3s join, not the 5s worker
 
 
@@ -257,7 +288,7 @@ def test_abandoned_slow_worker_cannot_leave_a_partial_snapshot(
     monkeypatch.setattr("huggingface_hub.hf_hub_download", _slow)
 
     result = fetch_trades_db_snapshot()
-    assert result is None
+    assert result.value is None
     # nothing published, and no visible partial, while the worker is still blocked
     assert not runtime_dir.exists()
     if runtime_dir.parent.exists():

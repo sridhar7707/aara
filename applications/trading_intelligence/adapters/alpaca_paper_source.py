@@ -30,31 +30,42 @@ Paper-only, by construction, with two independent layers:
      environment variables are set.
   2. ALPACA_BASE_URL is additionally checked for the literal substring
      "paper" before any call is attempted; if absent, the environment is
-     not confirmed to be paper and both methods return None (the existing
-     safe-unavailable path) rather than ever proceeding on an unverified
-     assumption. This is a defensive, belt-and-suspenders check on top of
-     (1), not a substitute for it.
+     not confirmed to be paper and both methods report NOT_CONFIGURED
+     (the existing safe-unavailable path) rather than ever proceeding on
+     an unverified assumption. This is a defensive, belt-and-suspenders
+     check on top of (1), not a substitute for it.
 Together these mean: this adapter cannot be misconfigured into reading
 live data, and will not silently fall back from paper to live or from
-live to paper -- an unconfirmed environment is simply unavailable.
+live to paper -- an unconfirmed environment is simply unavailable. A
+non-paper base URL is reported as NOT_CONFIGURED and can never become
+HEALTHY or AUTH_FAILED.
 
 Credentials are never logged: only a boolean "configured" state and,
 where useful, the last 4 characters of the account number (already
 public within the paper account's own dashboard, not a secret) are ever
 surfaced -- the API key and secret themselves are never written to any
-log, exception message, or return value.
+log, exception message, IntegrationHealth.detail, or return value
+(ADR-061 Section 2.9).
+
+Health contract (ADR-061 Category A): each read method returns
+ReadResult[T]. A HEALTHY result carries a real value (an empty tuple of
+positions for a flat account is a legitimate HEALTHY result). A
+non-HEALTHY result carries value=None plus an IntegrationHealth naming
+the reason: NOT_CONFIGURED (missing credentials / unconfirmed paper
+environment / SDK not importable), AUTH_FAILED (401/403), RATE_LIMITED
+(429), UNAVAILABLE (network/timeout/5xx), API_ERROR (malformed response).
 
 Production note: identical class of limitation to every other adapter in
 this product -- the deployed Trading Intelligence HF Space has no
 credentials or outbound network configuration for Alpaca today. Locally,
 where ALPACA_KEY/ALPACA_SECRET are present via .env, this adapter reads
 real data immediately. In production, until credentials and network
-access are separately provisioned, both methods will consistently return
-None, and callers fall back to the existing unavailable section -- this
-is the intended, safe behavior, not a bug.
+access are separately provisioned, both methods report NOT_CONFIGURED,
+and callers fall back to the existing unavailable section -- this is the
+intended, safe behavior, not a bug.
 """
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 
 try:
     from config import ALPACA_BASE_URL, ALPACA_KEY, ALPACA_SECRET
@@ -66,17 +77,24 @@ except ImportError:
     # back to empty credentials here is the correct, safe behavior: the
     # Space has no Alpaca Space secrets configured today either (see this
     # module's own "Production note" below), so get_account()/
-    # get_positions() would already return None regardless -- this only
-    # prevents that expected, documented gap from crashing the entire
-    # Space at import time instead.
+    # get_positions() would already report NOT_CONFIGURED regardless --
+    # this only prevents that expected, documented gap from crashing the
+    # entire Space at import time instead.
     ALPACA_KEY = ""
     ALPACA_SECRET = ""
     ALPACA_BASE_URL = ""
 
+from applications.platform.integrations import (
+    IntegrationHealth,
+    ReadResult,
+    classify_exception,
+)
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     AlpacaAccountSnapshot,
     AlpacaPosition,
 )
+
+_PROVIDER = "alpaca_paper"
 
 
 @dataclass(frozen=True)
@@ -99,54 +117,74 @@ class AlpacaPaperSource:
     ):
         self._credentials = _AlpacaCredentials(key=api_key, secret=api_secret, base_url=base_url)
 
-    def _build_client(self):
-        """Returns a paper-only TradingClient, or None if credentials are
-        missing or the configured environment isn't confirmed paper --
+    def _client_or_health(self):
+        """Returns ``(client, None)`` on success, or ``(None, IntegrationHealth)``
+        describing why a paper-only TradingClient could not be built --
         never raises, never falls back to live."""
         creds = self._credentials
         if not creds.key or not creds.secret:
-            return None
+            return None, IntegrationHealth.not_configured(
+                _PROVIDER, detail="ALPACA_KEY / ALPACA_SECRET not set"
+            )
         if not _is_paper_environment(creds.base_url):
-            return None
+            return None, IntegrationHealth.not_configured(
+                _PROVIDER, detail="ALPACA_BASE_URL is not a paper endpoint"
+            )
         try:
             from alpaca.trading.client import TradingClient
-            return TradingClient(creds.key, creds.secret, paper=True)
         except Exception:
-            return None
+            return None, IntegrationHealth.not_configured(
+                _PROVIDER, detail="alpaca-py SDK is not importable"
+            )
+        try:
+            return TradingClient(creds.key, creds.secret, paper=True), None
+        except ImportError:
+            return None, IntegrationHealth.not_configured(
+                _PROVIDER, detail="alpaca-py SDK is not importable"
+            )
+        except Exception as exc:
+            return None, classify_exception(_PROVIDER, exc)
 
-    def get_account(self) -> Optional[AlpacaAccountSnapshot]:
-        """Returns the real Alpaca Paper account snapshot, or None if
-        credentials/environment aren't confirmed paper, the network call
-        fails, or the response is malformed -- callers must treat None as
-        "fall back to the existing unavailable section," never as an
-        error."""
-        client = self._build_client()
+    def get_account(self) -> "ReadResult[AlpacaAccountSnapshot]":
+        """Returns a ReadResult over the real Alpaca Paper account
+        snapshot. A HEALTHY result always carries a real snapshot. Any
+        failure yields value=None plus an IntegrationHealth naming the
+        reason -- callers must treat a non-HEALTHY result as "fall back to
+        the existing unavailable section," never as an error."""
+        client, health = self._client_or_health()
         if client is None:
-            return None
+            return ReadResult.failed(health)
         try:
             account = client.get_account()
-            return AlpacaAccountSnapshot(
+        except Exception as exc:
+            return ReadResult.failed(classify_exception(_PROVIDER, exc))
+        try:
+            snapshot = AlpacaAccountSnapshot(
                 equity=float(account.equity),
                 cash=float(account.cash),
                 buying_power=float(account.buying_power),
                 portfolio_value=float(account.portfolio_value),
             )
-        except Exception:
-            return None
+        except Exception as exc:
+            return ReadResult.failed(
+                IntegrationHealth.api_error(_PROVIDER, detail=type(exc).__name__)
+            )
+        return ReadResult.healthy(snapshot, _PROVIDER)
 
-    def get_positions(self) -> Optional[Tuple[AlpacaPosition, ...]]:
-        """Returns every open Alpaca Paper position, ordered by symbol --
-        an empty tuple is a legitimate real result (connected, zero open
-        positions). Returns None only when credentials/environment aren't
-        confirmed paper, the network call fails, or the response can't be
-        parsed -- callers must treat None as "fall back to the existing
-        unavailable section," never as an error, and must never use a
-        partial result."""
-        client = self._build_client()
+    def get_positions(self) -> "ReadResult[Tuple[AlpacaPosition, ...]]":
+        """Returns a ReadResult over every open Alpaca Paper position,
+        ordered by symbol. A HEALTHY result with an empty tuple is a
+        legitimate real state (connected, zero open positions), distinct
+        from a non-HEALTHY result (value=None) which means the read could
+        not be completed -- callers must never use a partial result."""
+        client, health = self._client_or_health()
         if client is None:
-            return None
+            return ReadResult.failed(health)
         try:
             positions = client.get_all_positions()
+        except Exception as exc:
+            return ReadResult.failed(classify_exception(_PROVIDER, exc))
+        try:
             parsed = tuple(
                 AlpacaPosition(
                     symbol=p.symbol,
@@ -160,6 +198,10 @@ class AlpacaPaperSource:
                 )
                 for p in positions
             )
-        except Exception:
-            return None
-        return tuple(sorted(parsed, key=lambda pos: pos.symbol))
+        except Exception as exc:
+            return ReadResult.failed(
+                IntegrationHealth.api_error(_PROVIDER, detail=type(exc).__name__)
+            )
+        return ReadResult.healthy(
+            tuple(sorted(parsed, key=lambda pos: pos.symbol)), _PROVIDER
+        )

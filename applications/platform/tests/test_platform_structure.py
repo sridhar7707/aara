@@ -46,6 +46,10 @@ _MODULES = [
     "applications.platform.navigation.navigation_item",
     "applications.platform.navigation.navigation_model",
     "applications.platform.navigation.navigation_builder",
+    "applications.platform.integrations",
+    "applications.platform.integrations.health",
+    "applications.platform.integrations.classification",
+    "applications.platform.integrations.capability",
 ]
 
 

@@ -22,7 +22,22 @@ import sqlite3
 
 import pytest
 
+from applications.platform.integrations import IntegrationHealth, ReadResult
 from applications.trading_intelligence import bootstrap
+
+
+def _snap_ok(path):
+    return ReadResult.healthy(path, "hf_trades_db_snapshot")
+
+
+def _snap_absent():
+    return ReadResult.failed(
+        IntegrationHealth.not_configured("hf_trades_db_snapshot")
+    )
+
+
+def _adapter_down(provider):
+    return ReadResult.failed(IntegrationHealth.unavailable(provider))
 
 
 def _make_fixture_snapshot(tmp_path):
@@ -70,22 +85,22 @@ def offline(monkeypatch):
     assembling the three screens, so only the SQLite snapshot matters."""
     class _NoNews:
         def get_overnight_holdings_news(self, *_a, **_k):
-            return None
+            return _adapter_down("alpaca_news")
 
     class _NoPrices:
         def get_current_prices(self, *_a, **_k):
-            return None
+            return _adapter_down("yfinance")
 
     class _NoAccount:
         def get_account(self):
-            return None
+            return _adapter_down("alpaca_paper")
 
         def get_positions(self):
-            return None
+            return _adapter_down("alpaca_paper")
 
     class _NoOrders:
         def get_recent_orders(self):
-            return None
+            return _adapter_down("alpaca_paper_orders")
 
     monkeypatch.setattr(bootstrap, "AlpacaNewsSource", _NoNews)
     monkeypatch.setattr(bootstrap, "LivePriceSource", _NoPrices)
@@ -193,7 +208,7 @@ def test_build_app_threads_snapshot_path_into_every_legacy_adapter(
     tmp_path, monkeypatch, offline
 ):
     snap = _make_fixture_snapshot(tmp_path)
-    monkeypatch.setattr(bootstrap, "fetch_trades_db_snapshot", lambda: snap)
+    monkeypatch.setattr(bootstrap, "fetch_trades_db_snapshot", lambda: _snap_ok(snap))
 
     seen = {}
     for name in (
@@ -219,7 +234,7 @@ def test_build_app_without_snapshot_leaves_adapters_on_default(
     tmp_path, monkeypatch, offline
 ):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(bootstrap, "fetch_trades_db_snapshot", lambda: None)
+    monkeypatch.setattr(bootstrap, "fetch_trades_db_snapshot", lambda: _snap_absent())
 
     seen = []
     monkeypatch.setattr(

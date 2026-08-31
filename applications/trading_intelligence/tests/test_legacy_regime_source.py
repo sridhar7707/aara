@@ -7,7 +7,14 @@ import tempfile
 
 import pytest
 
+from applications.platform.integrations import IntegrationStatus, ReadResult
 from applications.trading_intelligence.adapters.legacy_regime_source import LegacyRegimeSource
+
+
+def _assert_healthy_empty(result):
+    assert isinstance(result, ReadResult)
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.HEALTHY
 
 
 @pytest.fixture
@@ -50,25 +57,31 @@ def empty_db():
     os.remove(path)
 
 
-def test_get_latest_regime_returns_the_most_recently_inserted_row(signal_log_db):
+def test_get_latest_regime_is_healthy_with_the_most_recently_inserted_row(signal_log_db):
     source = LegacyRegimeSource(db_path=signal_log_db)
 
-    assert source.get_latest_regime() == "TRENDING_UP"
+    result = source.get_latest_regime()
+    assert result.health.status is IntegrationStatus.HEALTHY
+    assert result.value == "TRENDING_UP"
 
 
-def test_get_latest_regime_returns_none_when_table_is_missing(empty_db):
+def test_get_latest_regime_is_api_error_when_table_is_missing(empty_db):
     source = LegacyRegimeSource(db_path=empty_db)
 
-    assert source.get_latest_regime() is None
+    result = source.get_latest_regime()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.API_ERROR
 
 
-def test_get_latest_regime_returns_none_when_database_file_is_missing():
+def test_get_latest_regime_is_unavailable_when_database_file_is_missing():
     source = LegacyRegimeSource(db_path="this_file_does_not_exist_xyz_12345.db")
 
-    assert source.get_latest_regime() is None
+    result = source.get_latest_regime()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.UNAVAILABLE
 
 
-def test_get_latest_regime_returns_none_when_table_is_empty():
+def test_get_latest_regime_is_healthy_empty_when_table_is_empty():
     path = tempfile.mktemp(suffix=".db")
     conn = sqlite3.connect(path)
     conn.execute(
@@ -80,7 +93,7 @@ def test_get_latest_regime_returns_none_when_table_is_empty():
     conn.close()
     try:
         source = LegacyRegimeSource(db_path=path)
-        assert source.get_latest_regime() is None
+        _assert_healthy_empty(source.get_latest_regime())
     finally:
         os.remove(path)
 
@@ -101,7 +114,7 @@ def test_get_latest_regime_returns_none_when_regime_is_null():
     conn.close()
     try:
         source = LegacyRegimeSource(db_path=path)
-        assert source.get_latest_regime() is None
+        _assert_healthy_empty(source.get_latest_regime())
     finally:
         os.remove(path)
 
@@ -122,7 +135,7 @@ def test_get_latest_regime_returns_none_when_regime_is_empty_string():
     conn.close()
     try:
         source = LegacyRegimeSource(db_path=path)
-        assert source.get_latest_regime() is None
+        _assert_healthy_empty(source.get_latest_regime())
     finally:
         os.remove(path)
 

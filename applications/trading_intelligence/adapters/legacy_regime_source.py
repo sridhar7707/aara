@@ -26,16 +26,28 @@ NOT import bot.main or bot._main_db -- the tiny read-only SELECT it needs
 is duplicated here as a literal string instead, the same convention
 legacy_capital_source.py already established.
 
+Health contract (ADR-061 Category A): get_latest_regime() returns
+ReadResult[str]. A HEALTHY result carries a real regime label OR, when
+the table exists but has no usable regime, a HEALTHY result with
+value=None (a genuine "nothing recorded" state). A non-HEALTHY result
+carries value=None plus an IntegrationHealth naming the reason:
+UNAVAILABLE (the trades.db file is not present, or is locked), API_ERROR
+(the signal_log table is missing, or a row could not be read).
+
 Production note: identical limitation to legacy_capital_source.py -- the
 deployed Trading Intelligence HF Space has no mechanism today to obtain
 trades.db. Locally, where trades.db already exists from prior bot runs,
 this adapter reads real data immediately. In production, until a separate
-sync step is added, get_latest_regime() will consistently return None,
+sync step is added, get_latest_regime() consistently reports UNAVAILABLE,
 and callers fall back to the existing unavailable section -- this is the
 intended, safe behavior, not a bug.
 """
+import os
 import sqlite3
-from typing import Optional
+
+from applications.platform.integrations import IntegrationHealth, ReadResult
+
+_PROVIDER = "trades_db_regime"
 
 _DB_PATH = "trades.db"
 
@@ -44,29 +56,42 @@ _DB_PATH = "trades.db"
 _SELECT_LATEST_REGIME = "SELECT regime FROM signal_log ORDER BY id DESC LIMIT 1"
 
 
+def _sqlite_health(exc: sqlite3.Error) -> IntegrationHealth:
+    """A trades.db file that exists but could not be read. "locked" /
+    "unable to open" is a transient availability problem (UNAVAILABLE);
+    every other sqlite error is API_ERROR. Only the exception's class name
+    is recorded as detail -- never its message (ADR-061 Section 2.9)."""
+    message = str(exc).lower()
+    if "locked" in message or "unable to open" in message or "disk i/o" in message:
+        return IntegrationHealth.unavailable(_PROVIDER, detail=type(exc).__name__)
+    return IntegrationHealth.api_error(_PROVIDER, detail=type(exc).__name__)
+
+
 class LegacyRegimeSource:
     def __init__(self, db_path: str = _DB_PATH):
         self._db_path = db_path
 
-    def get_latest_regime(self) -> Optional[str]:
-        """Returns the most recent regime label written by the trading
-        loop, or None if the database file, the signal_log table, a row,
-        or a non-empty regime value don't exist -- callers must treat
-        None as "fall back to the existing unavailable section," never as
-        an error."""
+    def get_latest_regime(self) -> "ReadResult[str]":
+        """Returns a ReadResult over the most recent regime label written
+        by the trading loop. HEALTHY with a real label on success; HEALTHY
+        with value=None when the table exists but has no usable regime (a
+        genuine "nothing recorded" state); UNAVAILABLE when the database
+        file is absent or locked; API_ERROR when the signal_log table is
+        missing or a row could not be read."""
+        if not os.path.exists(self._db_path):
+            return ReadResult.failed(
+                IntegrationHealth.unavailable(_PROVIDER, detail="trades.db is not present")
+            )
         try:
             conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
-        except sqlite3.Error:
-            return None
+        except sqlite3.Error as exc:
+            return ReadResult.failed(_sqlite_health(exc))
         try:
             row = conn.execute(_SELECT_LATEST_REGIME).fetchone()
-        except sqlite3.Error:
-            return None
+        except sqlite3.Error as exc:
+            return ReadResult.failed(_sqlite_health(exc))
         finally:
             conn.close()
-        if row is None:
-            return None
-        regime = row[0]
-        if not regime:
-            return None
-        return regime
+        if row is None or not row[0]:
+            return ReadResult.empty(_PROVIDER)
+        return ReadResult.healthy(row[0], _PROVIDER)
