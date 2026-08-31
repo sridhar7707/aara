@@ -104,3 +104,17 @@ alpaca-py>=0.40.0
 # come from os.getenv() reading the Space secret store. ADR-062 Section 3
 # item 5 deferred this pending runtime evidence; that evidence now exists.
 python-dotenv
+
+# yfinance -- adapters/live_price_source.py's live current-price fetch,
+# which composes with LegacyPositionSource to give Portfolio Intelligence's
+# Holdings table real market value and weights. Not pulled transitively by
+# anything else in this file (gradio 4.44.1, gradio-client 1.3.0, plain
+# uvicorn, starlette, spaces, alpaca-py, supabase-auth, pillow, tzdata,
+# python-dotenv all checked -- none declare it), so on the minimal HF Space
+# image `import yfinance` raises and the adapter reports NOT_CONFIGURED
+# ("yfinance not importable") -- confirmed via the deployed Space's rendered
+# "Holdings data is currently unavailable" state. Same isolated live-network
+# dependency the adapter's own docstring already records as authorized;
+# duplicates dashboard/'s yfinance.download() primitive rather than importing
+# the protected package. Unpinned, matching the root requirements.txt.
+yfinance
