@@ -209,8 +209,19 @@ def test_risk_intelligence_content_is_present_in_the_composed_app():
     # in the stable component tree (visibility is toggled at render time
     # depending on whether risk_state could be read) -- never fabricated
     # data, never an "Illustrative Data" disclosure.
+    #
+    # ADR-061 A4: the unavailable-state element's text is the fixed fallback
+    # sentence when no health was recorded or the source was HEALTHY, or the
+    # shared render_unavailable() phrase ("Data unavailable -- <reason>")
+    # when RiskScreen.state_health carries a specific non-HEALTHY
+    # IntegrationHealth. Which one the composed app shows depends on whether
+    # the operational risk_state table can be read in this environment, so
+    # accept either -- the invariant under test is that an unavailable-state
+    # rendering is always present, not which phrasing it uses.
     assert any(
-        "Risk Intelligence data is currently unavailable." in value for value in html_values
+        "Risk Intelligence data is currently unavailable." in value
+        or "Data unavailable --" in value
+        for value in html_values
     )
     assert any("Observed governor classification" in value for value in html_values)
     assert not any("Illustrative Data" in value for value in html_values)
