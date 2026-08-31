@@ -26,7 +26,6 @@ drives them now that seeding is removed.
 """
 from dataclasses import replace
 from datetime import datetime, timezone
-from functools import partial
 from typing import Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -82,6 +81,10 @@ from applications.trading_intelligence.adapters.sentinel_projection_decision_sou
     SentinelProjectionDecisionSource,
 )
 from applications.trading_intelligence.adapters.trades_db_snapshot import fetch_trades_db_snapshot
+from applications.trading_intelligence.bootstrap_trades_db_snapshot import (
+    legacy_source_kwargs,
+    snapshot_bound_provider,
+)
 from applications.trading_intelligence.entitlements import TradingIntelligenceEntitlementChecker
 from applications.trading_intelligence.product import (
     DECISION_CENTER_WORKSPACE,
@@ -547,19 +550,6 @@ def _format_overnight_holdings_news(
     )
 
 
-def _legacy_source_kwargs(db_path: Optional[str]) -> Dict[str, str]:
-    """Constructor kwargs for the five ``legacy_*_source.py`` adapters.
-
-    When ``db_path`` is a real string (the runtime ``trades.db`` snapshot
-    fetched per ADR-055), the adapters read that product-owned copy; when
-    it is ``None`` (no snapshot -- the deployed Space with no ``HF_TOKEN``,
-    or local dev), the adapters keep their own ``"trades.db"`` default, so
-    a developer machine that already has ``trades.db`` is unaffected and
-    the deployed Space falls back to its existing honest-unavailable
-    states."""
-    return {"db_path": db_path} if db_path else {}
-
-
 def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefScreen:
     """Assemble one real-or-unavailable MorningBriefScreen from the legacy
     trades.db adapters plus the read-only AlpacaNewsSource.
@@ -594,7 +584,7 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
     candidate_screening_summary = illustrative_screen.candidate_screening_summary
     overnight_holdings_news = illustrative_screen.overnight_holdings_news
 
-    legacy_kwargs = _legacy_source_kwargs(db_path)
+    legacy_kwargs = legacy_source_kwargs(db_path)
 
     real_capital = LegacyCapitalSource(**legacy_kwargs).get_capital_summary()
     if real_capital is not None:
@@ -643,13 +633,12 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
 
 
 def _build_morning_brief_ui(db_path: Optional[str] = None) -> MorningBriefUI:
-    """Wire Morning Brief to fetch its data at render time.
-    `_build_morning_brief_screen` (bound to the runtime `db_path` snapshot,
-    if any) is passed as the screen provider, so MorningBriefUI calls it
-    once now (for the build-time snapshot) and again on every demo.load()
-    / Refresh -- each call re-reads the already-fetched snapshot file, so
-    the snapshot is pulled once per process, not once per refresh."""
-    return MorningBriefUI(screen_provider=partial(_build_morning_brief_screen, db_path))
+    """Wire Morning Brief to fetch its data at render time, from the
+    runtime `db_path` snapshot when one was fetched (see
+    `snapshot_bound_provider`)."""
+    return MorningBriefUI(
+        screen_provider=snapshot_bound_provider(_build_morning_brief_screen, db_path)
+    )
 
 
 def _build_portfolio_holdings(
@@ -749,7 +738,7 @@ def _build_portfolio_intelligence_screen(db_path: Optional[str] = None) -> Portf
     re-invokes on every demo.load() and every Refresh click -- it is a
     fresh read each call, holding no state and caching nothing, so the
     screen always reflects the adapters' current answer."""
-    legacy_kwargs = _legacy_source_kwargs(db_path)
+    legacy_kwargs = legacy_source_kwargs(db_path)
 
     real_capital = LegacyCapitalSource(**legacy_kwargs).get_capital_summary()
 
@@ -772,13 +761,11 @@ def _build_portfolio_intelligence_screen(db_path: Optional[str] = None) -> Portf
 
 
 def _build_portfolio_intelligence_ui(db_path: Optional[str] = None) -> PortfolioIntelligenceUI:
-    """Wire Portfolio Intelligence to fetch its data at render time.
-    `_build_portfolio_intelligence_screen` (bound to the runtime `db_path`
-    snapshot, if any) is passed as the screen provider, so
-    PortfolioIntelligenceUI calls it once now (for the build-time
-    snapshot) and again on every demo.load() / Refresh."""
+    """Wire Portfolio Intelligence to fetch its data at render time, from
+    the runtime `db_path` snapshot when one was fetched (see
+    `snapshot_bound_provider`)."""
     return PortfolioIntelligenceUI(
-        screen_provider=partial(_build_portfolio_intelligence_screen, db_path)
+        screen_provider=snapshot_bound_provider(_build_portfolio_intelligence_screen, db_path)
     )
 
 
@@ -824,7 +811,7 @@ def _build_risk_intelligence_screen(db_path: Optional[str] = None) -> RiskScreen
     This is the `screen_provider` RiskIntelligenceUI re-invokes on every
     demo.load() and every Refresh click -- a fresh read each call, holding
     no state and caching nothing."""
-    real_state = LegacyRiskStateSource(**_legacy_source_kwargs(db_path)).get_risk_state()
+    real_state = LegacyRiskStateSource(**legacy_source_kwargs(db_path)).get_risk_state()
     if real_state is None:
         return RiskScreen()
     return RiskScreen(
@@ -836,13 +823,11 @@ def _build_risk_intelligence_screen(db_path: Optional[str] = None) -> RiskScreen
 
 
 def _build_risk_intelligence_ui(db_path: Optional[str] = None) -> RiskIntelligenceUI:
-    """Wire Risk Intelligence to fetch its data at render time.
-    `_build_risk_intelligence_screen` (bound to the runtime `db_path`
-    snapshot, if any) is passed as the screen provider, so
-    RiskIntelligenceUI calls it once now (for the build-time snapshot) and
-    again on every demo.load() / Refresh."""
+    """Wire Risk Intelligence to fetch its data at render time, from the
+    runtime `db_path` snapshot when one was fetched (see
+    `snapshot_bound_provider`)."""
     return RiskIntelligenceUI(
-        screen_provider=partial(_build_risk_intelligence_screen, db_path)
+        screen_provider=snapshot_bound_provider(_build_risk_intelligence_screen, db_path)
     )
 
 

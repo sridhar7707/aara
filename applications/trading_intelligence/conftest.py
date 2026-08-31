@@ -16,8 +16,9 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def neutralize_trades_db_snapshot(monkeypatch):
-    try:
-        from applications.trading_intelligence import bootstrap
-    except Exception:
-        return
+    # Import unguarded: if bootstrap cannot import, every test that would
+    # reach fetch_trades_db_snapshot must fail loudly here, not silently
+    # fall through to a live HuggingFace download.
+    from applications.trading_intelligence import bootstrap
+
     monkeypatch.setattr(bootstrap, "fetch_trades_db_snapshot", lambda: None)

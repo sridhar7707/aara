@@ -1,25 +1,36 @@
 """Tests for applications.trading_intelligence.adapters.trades_db_snapshot.
 
 Covers the ADR-055 Section 2 contract for the read-only, consumer-only
-`trades.db` HuggingFace dataset snapshot pull:
+`trades.db` HuggingFace dataset snapshot pull, as revised after code
+review:
 
-  - a successful `hf_hub_download` yields a product-owned `.runtime` path,
-  - the copy target is that runtime path, never `./trades.db` / cwd,
-  - every failure mode (generic exception, 404 / entry-not-found,
-    `huggingface_hub` not importable, missing token, missing repo id,
-    zero-byte download, copy error) fails closed with `None`,
-  - the module performs no HF write/upload/commit of any kind,
-  - the module imports nothing under bot/ dashboard/ scheduler/ database/
-    ledger/.
+  - the fetch runs only inside a HuggingFace Space (gated on SPACE_ID);
+    with no SPACE_ID it returns None with no config/hub import, no
+    network;
+  - inside a Space it attempts the download even with an empty HF_TOKEN
+    (public dataset repo), passing token=None;
+  - HF_DB_REPO_ID is still a required configuration guard;
+  - the download + copy run in a daemon thread joined with a hard
+    20-second timeout; on timeout the call returns None and does not
+    block, and a late-finishing worker can never leave a partial
+    snapshot (atomic os.replace of a per-process temp file);
+  - the copy target is the product-owned `.runtime` path, never
+    `./trades.db` / cwd;
+  - every failure mode fails closed with None;
+  - the module performs no HF write/upload/commit and imports nothing
+    under bot/ dashboard/ scheduler/ database/ ledger/.
 
-`hf_hub_download` is faked (no network); the runtime directory is
-redirected to a tmp path so the real working tree is never touched.
+`hf_hub_download` is always faked -- no network. Timing tests drive a
+worker that blocks on a test-controlled event, with the join timeout
+monkeypatched down, so they stay fast and deterministic.
 """
 import ast
 import fnmatch
 import inspect
 import pathlib
 import sys
+import threading
+import time
 
 import pytest
 
@@ -30,10 +41,12 @@ from applications.trading_intelligence.adapters.trades_db_snapshot import (
 
 _MODULE_SRC = inspect.getsource(trades_db_snapshot)
 
+_SQLITE_BYTES = b"SQLite format 3\x00" + b"rest-of-file-padding"
+
 
 @pytest.fixture
 def runtime_dir(tmp_path, monkeypatch):
-    """Redirect the module's product-owned runtime path into tmp."""
+    """Redirect the module's product-owned runtime area into tmp."""
     rt = tmp_path / ".runtime"
     snap = rt / "trades_snapshot.db"
     monkeypatch.setattr(trades_db_snapshot, "_RUNTIME_DIR", rt)
@@ -42,15 +55,17 @@ def runtime_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def hf_config(monkeypatch):
-    """A configured, non-empty HF dataset identity + token."""
+def in_space(monkeypatch):
+    monkeypatch.setenv("SPACE_ID", "ksri77/aara-trading-intelligence")
+
+
+@pytest.fixture
+def repo_configured(monkeypatch):
     monkeypatch.setattr("config.HF_DB_REPO_ID", "ksri77/ai-trading-bot-db")
     monkeypatch.setattr("config.HF_TOKEN", "test-token")
 
 
-def _fake_download_factory(tmp_path, *, contents=b"SQLite format 3\x00rest-of-file"):
-    """Returns a fake hf_hub_download that writes `contents` to a cache
-    file and returns its path, recording the kwargs it was called with."""
+def _fake_download_factory(tmp_path, *, contents=_SQLITE_BYTES):
     calls = []
 
     def _fake(**kwargs):
@@ -64,8 +79,20 @@ def _fake_download_factory(tmp_path, *, contents=b"SQLite format 3\x00rest-of-fi
     return _fake
 
 
-def test_success_returns_product_runtime_snapshot_path(
-    tmp_path, monkeypatch, runtime_dir, hf_config
+def _forbidden_download(**kwargs):
+    raise AssertionError("hf_hub_download must not be called in this path")
+
+
+# --- SPACE_ID gate --------------------------------------------------------
+
+def test_not_in_space_returns_none_without_download(monkeypatch, runtime_dir):
+    monkeypatch.delenv("SPACE_ID", raising=False)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", _forbidden_download)
+    assert fetch_trades_db_snapshot() is None
+
+
+def test_in_space_success_returns_runtime_path(
+    tmp_path, monkeypatch, runtime_dir, in_space, repo_configured
 ):
     fake = _fake_download_factory(tmp_path)
     monkeypatch.setattr("huggingface_hub.hf_hub_download", fake)
@@ -75,35 +102,55 @@ def test_success_returns_product_runtime_snapshot_path(
     assert result == str(runtime_dir)
     assert pathlib.Path(result).exists()
     assert pathlib.Path(result).stat().st_size > 0
-    # exactly one download, for the one dataset file, as a dataset repo
     assert len(fake.calls) == 1
     assert fake.calls[0]["filename"] == "trades.db"
     assert fake.calls[0]["repo_type"] == "dataset"
     assert fake.calls[0]["repo_id"] == "ksri77/ai-trading-bot-db"
+    assert "force_download" not in fake.calls[0]
 
+
+def test_in_space_empty_token_still_attempts_public_repo(
+    tmp_path, monkeypatch, runtime_dir, in_space
+):
+    monkeypatch.setattr("config.HF_DB_REPO_ID", "ksri77/ai-trading-bot-db")
+    monkeypatch.setattr("config.HF_TOKEN", "")
+    fake = _fake_download_factory(tmp_path)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fake)
+
+    result = fetch_trades_db_snapshot()
+
+    assert result == str(runtime_dir)
+    assert len(fake.calls) == 1
+    assert fake.calls[0]["token"] is None  # empty HF_TOKEN -> token=None
+
+
+def test_missing_repo_id_returns_none(monkeypatch, runtime_dir, in_space):
+    monkeypatch.setattr("config.HF_DB_REPO_ID", "")
+    monkeypatch.setattr("config.HF_TOKEN", "test-token")
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", _forbidden_download)
+    assert fetch_trades_db_snapshot() is None
+
+
+# --- copy target / path contract ---------------------------------------
 
 def test_copy_target_is_runtime_path_never_cwd_trades_db(
-    tmp_path, monkeypatch, runtime_dir, hf_config
+    tmp_path, monkeypatch, runtime_dir, in_space, repo_configured
 ):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         "huggingface_hub.hf_hub_download", _fake_download_factory(tmp_path)
     )
 
-    result = fetch_trades_db_snapshot()
+    resolved = pathlib.Path(fetch_trades_db_snapshot()).resolve()
 
-    resolved = pathlib.Path(result).resolve()
-    # never the bot's working file / a cwd-relative trades.db
     assert resolved != (tmp_path / "trades.db").resolve()
     assert not (tmp_path / "trades.db").exists()
     assert resolved.name != "trades.db"
-    # basename is still covered by .gitignore's `trades*.db`
     assert fnmatch.fnmatch(resolved.name, "trades*.db")
     assert resolved.parent.name == ".runtime"
 
 
 def test_default_snapshot_path_is_inside_the_product_runtime_area():
-    # No download -- just the location contract of the unpatched module.
     path = pathlib.Path(trades_db_snapshot._snapshot_path())
     assert path.name == "trades_snapshot.db"
     assert path.name != "trades.db"
@@ -114,8 +161,10 @@ def test_default_snapshot_path_is_inside_the_product_runtime_area():
     assert parts[-4] == "applications"
 
 
+# --- fail-closed paths -------------------------------------------------
+
 def test_generic_download_exception_fails_closed(
-    tmp_path, monkeypatch, runtime_dir, hf_config
+    monkeypatch, runtime_dir, in_space, repo_configured
 ):
     def _boom(**kwargs):
         raise RuntimeError("network down")
@@ -125,7 +174,7 @@ def test_generic_download_exception_fails_closed(
 
 
 def test_404_entry_not_found_fails_closed(
-    tmp_path, monkeypatch, runtime_dir, hf_config
+    monkeypatch, runtime_dir, in_space, repo_configured
 ):
     def _not_found(**kwargs):
         raise Exception("404 Client Error. Entry Not Found for url: .../trades.db")
@@ -135,48 +184,26 @@ def test_404_entry_not_found_fails_closed(
 
 
 def test_huggingface_hub_not_importable_fails_closed(
-    monkeypatch, runtime_dir, hf_config
+    monkeypatch, runtime_dir, in_space, repo_configured
 ):
     monkeypatch.setitem(sys.modules, "huggingface_hub", None)
     assert fetch_trades_db_snapshot() is None
 
 
-def test_missing_token_skips_download_and_fails_closed(
-    monkeypatch, runtime_dir
-):
-    monkeypatch.setattr("config.HF_DB_REPO_ID", "ksri77/ai-trading-bot-db")
-    monkeypatch.setattr("config.HF_TOKEN", "")
-
-    def _must_not_be_called(**kwargs):
-        raise AssertionError("hf_hub_download must not run without a token")
-
-    monkeypatch.setattr("huggingface_hub.hf_hub_download", _must_not_be_called)
-    assert fetch_trades_db_snapshot() is None
-
-
-def test_missing_repo_id_fails_closed(monkeypatch, runtime_dir):
-    monkeypatch.setattr("config.HF_DB_REPO_ID", "")
-    monkeypatch.setattr("config.HF_TOKEN", "test-token")
-
-    def _must_not_be_called(**kwargs):
-        raise AssertionError("hf_hub_download must not run without a repo id")
-
-    monkeypatch.setattr("huggingface_hub.hf_hub_download", _must_not_be_called)
-    assert fetch_trades_db_snapshot() is None
-
-
 def test_zero_byte_download_fails_closed(
-    tmp_path, monkeypatch, runtime_dir, hf_config
+    tmp_path, monkeypatch, runtime_dir, in_space, repo_configured
 ):
     monkeypatch.setattr(
         "huggingface_hub.hf_hub_download",
         _fake_download_factory(tmp_path, contents=b""),
     )
     assert fetch_trades_db_snapshot() is None
-    assert not runtime_dir.exists() or runtime_dir.stat().st_size == 0
+    assert not runtime_dir.exists()  # no snapshot written
 
 
-def test_copy_error_fails_closed(tmp_path, monkeypatch, runtime_dir, hf_config):
+def test_copy_error_fails_closed(
+    tmp_path, monkeypatch, runtime_dir, in_space, repo_configured
+):
     monkeypatch.setattr(
         "huggingface_hub.hf_hub_download", _fake_download_factory(tmp_path)
     )
@@ -188,21 +215,72 @@ def test_copy_error_fails_closed(tmp_path, monkeypatch, runtime_dir, hf_config):
     assert fetch_trades_db_snapshot() is None
 
 
+# --- timeout / abandoned worker --------------------------------------
+
+def test_download_timeout_fails_closed_and_does_not_block(
+    tmp_path, monkeypatch, runtime_dir, in_space, repo_configured
+):
+    monkeypatch.setattr(trades_db_snapshot, "_FETCH_TIMEOUT_SECONDS", 0.3)
+    release = threading.Event()
+
+    def _slow(**kwargs):
+        release.wait(timeout=5)
+        cache_file = tmp_path / "hf_cache" / "trades.db"
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_bytes(_SQLITE_BYTES)
+        return str(cache_file)
+
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", _slow)
+
+    started = time.monotonic()
+    result = fetch_trades_db_snapshot()
+    elapsed = time.monotonic() - started
+    release.set()
+
+    assert result is None
+    assert elapsed < 2.0  # returned on the 0.3s join, not the 5s worker
+
+
+def test_abandoned_slow_worker_cannot_leave_a_partial_snapshot(
+    tmp_path, monkeypatch, runtime_dir, in_space, repo_configured
+):
+    monkeypatch.setattr(trades_db_snapshot, "_FETCH_TIMEOUT_SECONDS", 0.3)
+    release = threading.Event()
+    source = tmp_path / "hf_cache" / "trades.db"
+
+    def _slow(**kwargs):
+        release.wait(timeout=5)
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(_SQLITE_BYTES)
+        return str(source)
+
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", _slow)
+
+    result = fetch_trades_db_snapshot()
+    assert result is None
+    # nothing published, and no visible partial, while the worker is still blocked
+    assert not runtime_dir.exists()
+    if runtime_dir.parent.exists():
+        assert list(runtime_dir.parent.iterdir()) == []
+
+    # let the abandoned worker finish; it must publish atomically
+    release.set()
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline and not runtime_dir.exists():
+        time.sleep(0.02)
+    assert runtime_dir.exists()
+    assert runtime_dir.read_bytes() == _SQLITE_BYTES  # whole file, not torn
+    leftovers = [p.name for p in runtime_dir.parent.glob(".trades_snapshot.*.part")]
+    assert leftovers == []
+
+
+# --- static safety guarantees --------------------------------------
+
 def test_module_performs_no_hf_write_upload_or_commit():
-    # AST identifiers only -- the module docstring legitimately *names*
-    # these operations to say it never performs them, so a substring scan
-    # would false-positive on its own compliance notes.
     forbidden = {
-        "upload_file",
-        "upload_folder",
-        "create_commit",
-        "create_repo",
-        "delete_file",
-        "delete_repo",
-        "HfApi",
-        "CommitOperationAdd",
-        "push_to_hub",
-        "hf_hub_upload",
+        "upload_file", "upload_folder", "create_commit", "create_repo",
+        "delete_file", "delete_repo", "HfApi", "CommitOperationAdd",
+        "push_to_hub", "hf_hub_upload",
     }
     tree = ast.parse(_MODULE_SRC)
     used = set()
