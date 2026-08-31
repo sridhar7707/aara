@@ -49,6 +49,11 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_SPACE_ID: ${{ secrets.HF_SPACE_ID_TRADING_INTELLIGENCE }}
+          # ADR-060 Section 2.1: existing GitHub repo secrets, passed through so
+          # the sync block below can mirror them into the Space's own secret
+          # store. ALPACA_BASE_URL is deliberately not passed (ADR-060 Section 4).
+          ALPACA_KEY:    ${{ secrets.ALPACA_KEY }}
+          ALPACA_SECRET: ${{ secrets.ALPACA_SECRET }}
         run: |
           python - <<'PYEOF'
           import os, sys, shutil
@@ -153,6 +158,17 @@ jobs:
               "applications/trading_intelligence/main.py", staging / "app.py",
           )
 
+          # ADR-056 Section 2.1: stage the top-level config.py verbatim so
+          # `from config import ...` resolves at Space runtime instead of
+          # hitting the ImportError fallback. Serves both ADR-054's Alpaca
+          # paper adapters (ALPACA_KEY/ALPACA_SECRET/ALPACA_BASE_URL) and
+          # ADR-055's trades.db snapshot pull (HF_DB_REPO_ID/HF_TOKEN). The
+          # file is copied byte-for-byte -- not rewritten, filtered, or
+          # templated -- and contains no secret values (every credential is
+          # read via os.getenv). The corresponding Space secrets are a
+          # separate maintainer step (ADR-056 Section 2.2).
+          shutil.copy("config.py", staging / "config.py")
+
           # Product-scoped requirements (gradio + Pillow only -- see
           # requirements_trading_intelligence.txt's own header comment for
           # why 4.44.1, not requirements_space.txt's 5.9.0).
@@ -199,6 +215,21 @@ jobs:
               )
           except Exception as e:
               print(f"::warning::README.md upload failed: {e} — Space card metadata may be stale")
+
+          # ADR-060 Section 2.2: mirror the named GitHub repo secrets into the
+          # Trading Intelligence Space's own encrypted secret store so config.py's
+          # os.getenv(...) resolves them at Space runtime. GitHub stays the single
+          # source of truth; add_space_secret overwrites (idempotent per deploy);
+          # a missing value is a warning, not a hard failure -- that section just
+          # stays on its honest-unavailable fallback. No value is printed.
+          for _name in ("ALPACA_KEY", "ALPACA_SECRET", "HF_TOKEN"):
+              _val = os.environ.get(_name, "")
+              if _val:
+                  api.add_space_secret(repo_id=space_id, key=_name, value=_val)
+                  print(f"synced Space secret: {_name}")
+              else:
+                  print(f"::warning::{_name} not set in CI env — Space secret not synced; "
+                        f"that section stays on its unavailable fallback")
 
           print(f"Trading Intelligence deployed -> https://huggingface.co/spaces/{space_id}")
           PYEOF
