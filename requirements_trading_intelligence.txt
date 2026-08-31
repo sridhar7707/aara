@@ -88,3 +88,19 @@ spaces
 # it pulls pandas/numpy transitively -- and is justified by the two
 # adapters above being the only path to real broker data in the Space.
 alpaca-py>=0.40.0
+
+# ADR-063: python-dotenv -- required because the staged top-level config.py
+# (ADR-056 Section 2.1) begins with an unguarded `from dotenv import
+# load_dotenv`. Not pulled transitively by anything else in this file
+# (gradio 4.44.1, gradio-client 1.3.0, plain uvicorn, starlette, spaces,
+# alpaca-py, supabase-auth, pillow, tzdata all checked -- none declare it),
+# so on the minimal HF Space image `import config` raises
+# ModuleNotFoundError and every `from config import ...` across the product
+# (the three read-only Alpaca adapters and adapters/trades_db_snapshot.py)
+# silently falls back to empty values -- confirmed via the deployed Space's
+# rendered NOT_CONFIGURED state despite ALPACA_KEY/ALPACA_SECRET being
+# synced as Space secrets (ADR-060). Pure-Python, zero-dependency; in the
+# Space there is no .env file so load_dotenv() is a no-op and values still
+# come from os.getenv() reading the Space secret store. ADR-062 Section 3
+# item 5 deferred this pending runtime evidence; that evidence now exists.
+python-dotenv
