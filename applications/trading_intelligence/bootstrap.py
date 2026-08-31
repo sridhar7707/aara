@@ -589,8 +589,11 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
     # ADR-061 Category A / Amendment 1: adapters return ReadResult; unwrap
     # the underlying value for the existing "only replace the illustrative
     # summary when real data is present" logic, and record the section's
-    # IntegrationHealth on the same real-data path.
+    # IntegrationHealth on every path -- including the unavailable fallback,
+    # so the view can name the specific reason (ADR-061 A4). Recording
+    # health does not change is_available (still keyed on available_summary).
     capital_result = LegacyCapitalSource(**legacy_kwargs).get_capital_summary()
+    portfolio_snapshot = replace(portfolio_snapshot, health=capital_result.health)
     if capital_result.value is not None:
         real_capital = capital_result.value
         portfolio_snapshot = replace(
@@ -600,36 +603,39 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
                 f"(${real_capital.available_cash:,.2f} cash, "
                 f"${real_capital.invested_amount:,.2f} invested)."
             ),
-            health=capital_result.health,
         )
 
     regime_result = LegacyRegimeSource(**legacy_kwargs).get_latest_regime()
+    market_mood_regime = replace(market_mood_regime, health=regime_result.health)
     if regime_result.value is not None:
         market_mood_regime = replace(
             market_mood_regime,
             available_summary=f"Current market regime: {regime_result.value}.",
-            health=regime_result.health,
         )
 
     screening_result = LegacyCandidateScreeningSource(**legacy_kwargs).get_latest_screening()
+    candidate_screening_summary = replace(
+        candidate_screening_summary, health=screening_result.health
+    )
     if screening_result.value is not None:
         candidate_screening_summary = replace(
             candidate_screening_summary,
             available_summary=_format_candidate_screening_summary(screening_result.value),
-            health=screening_result.health,
         )
 
     positions_result = LegacyPositionSource(**legacy_kwargs).get_open_positions()
     if positions_result.value is not None:
         holdings_symbols = tuple(position.symbol for position in positions_result.value)
         news_result = AlpacaNewsSource().get_overnight_holdings_news(holdings_symbols)
+        overnight_holdings_news = replace(
+            overnight_holdings_news, health=news_result.health
+        )
         if news_result.value is not None:
             overnight_holdings_news = replace(
                 overnight_holdings_news,
                 available_summary=_format_overnight_holdings_news(
                     news_result.value, holdings_symbols
                 ),
-                health=news_result.health,
             )
 
     return replace(

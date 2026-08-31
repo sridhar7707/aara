@@ -45,6 +45,10 @@ from zoneinfo import ZoneInfo
 
 import gradio as gr
 
+from applications.trading_intelligence.ui.integration_health_view import (
+    CSS as _INTEGRATION_HEALTH_CSS,
+    render_unavailable,
+)
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     AlpacaAccountSnapshot,
     AlpacaOrder,
@@ -178,8 +182,9 @@ _PARTIAL_DATA_HTML = (
 
 # Per-section unavailable notes (rendered in place of the Capital Summary
 # metrics / Allocation bar / Holdings table when their real source is not
-# available). Styled with .pi-unavailable -- the same look the Alpaca
-# sections' own unavailable state already uses.
+# available). ADR-061 A4: passed as the `fallback_message` to the shared
+# render_unavailable(), which names the specific reason from the section's
+# IntegrationHealth when one was recorded and otherwise shows this text.
 _CAPITAL_UNAVAILABLE_MESSAGE = (
     "Capital Summary is not available -- the managed capital pool could "
     "not be read in this environment."
@@ -276,7 +281,8 @@ class PortfolioIntelligenceUI:
     def build(self) -> gr.Blocks:
         initial = self._screen
         with gr.Blocks(
-            title="AARA Trading Intelligence — Portfolio Intelligence", css=CSS,
+            title="AARA Trading Intelligence — Portfolio Intelligence",
+            css=CSS + _INTEGRATION_HEALTH_CSS,
         ) as demo:
             gr.HTML(SHELL_IDENTITY_HTML, elem_classes=["aara-shell-header"])
             gr.HTML(build_shell_nav_html("Portfolio Intelligence"), elem_classes=["aara-shell-nav"])
@@ -440,16 +446,32 @@ class PortfolioIntelligenceUI:
     def _capital_summary_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
         if screen.capital_is_available:
             return (self._format_capital_summary_html(screen.capital), True)
-        return (self._format_unavailable_html(_CAPITAL_UNAVAILABLE_MESSAGE), True)
+        return (
+            render_unavailable(
+                screen.capital_health, fallback_message=_CAPITAL_UNAVAILABLE_MESSAGE
+            ),
+            True,
+        )
 
     def _allocation_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
         if screen.capital_is_available:
             return (self._format_allocation_html(screen.capital), True)
-        return (self._format_unavailable_html(_CAPITAL_UNAVAILABLE_MESSAGE), True)
+        return (
+            render_unavailable(
+                screen.capital_health, fallback_message=_CAPITAL_UNAVAILABLE_MESSAGE
+            ),
+            True,
+        )
 
     def _holdings_message_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
         if not screen.holdings_is_available:
-            return (self._format_unavailable_html(_HOLDINGS_UNAVAILABLE_MESSAGE), True)
+            return (
+                render_unavailable(
+                    screen.holdings_health,
+                    fallback_message=_HOLDINGS_UNAVAILABLE_MESSAGE,
+                ),
+                True,
+            )
         if screen.is_empty:
             return (self._format_empty_message_html(screen), True)
         return ("", False)
@@ -463,8 +485,9 @@ class PortfolioIntelligenceUI:
         if screen.alpaca_is_available:
             return (self._format_alpaca_account_html(screen.alpaca_account), True)
         return (
-            f'<div class="pi-alpaca-unavailable">'
-            f'{html.escape(_ALPACA_UNAVAILABLE_MESSAGE)}</div>',
+            render_unavailable(
+                screen.alpaca_health, fallback_message=_ALPACA_UNAVAILABLE_MESSAGE
+            ),
             True,
         )
 
@@ -500,8 +523,10 @@ class PortfolioIntelligenceUI:
     def _alpaca_orders_message_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
         if not screen.alpaca_orders_available:
             return (
-                f'<div class="pi-alpaca-unavailable">'
-                f'{html.escape(_ALPACA_ORDERS_UNAVAILABLE_MESSAGE)}</div>',
+                render_unavailable(
+                    screen.alpaca_orders_health,
+                    fallback_message=_ALPACA_ORDERS_UNAVAILABLE_MESSAGE,
+                ),
                 True,
             )
         if screen.alpaca_orders.is_empty:
@@ -526,10 +551,6 @@ class PortfolioIntelligenceUI:
         if screen.capital_is_available:
             return _PARTIAL_DATA_HTML
         return _UNAVAILABLE_DATA_HTML
-
-    @staticmethod
-    def _format_unavailable_html(message: str) -> str:
-        return f'<div class="pi-unavailable">{html.escape(message)}</div>'
 
     @staticmethod
     def _format_capital_summary_html(capital: CapitalSummary) -> str:

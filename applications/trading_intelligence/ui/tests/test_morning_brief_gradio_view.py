@@ -2,6 +2,7 @@ import gradio as gr
 
 from dataclasses import replace
 
+from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.ui.morning_brief.gradio_view import (
     _AS_OF_PREFIX,
     MorningBriefUI,
@@ -185,13 +186,14 @@ def test_fallback_remains_fully_unavailable_when_no_real_screen_is_supplied():
 def test_default_render_shows_no_available_summary_markup():
     """Production guardrail: with no real screen supplied, every section
     is unavailable, so the rendered page contains zero
-    '.mb-available-summary' blocks -- only '.mb-unavailable-message' ones.
-    A section can only render an available summary from a real,
-    adapter-sourced value (see bootstrap.py)."""
+    '.mb-available-summary' blocks -- only the shared
+    '.aara-integration-status' unavailable body (ADR-061 A4). A section can
+    only render an available summary from a real, adapter-sourced value
+    (see bootstrap.py)."""
     combined = "\n".join(_html_values(MorningBriefUI().build()))
 
     assert "mb-available-summary" not in combined
-    assert "mb-unavailable-message" in combined
+    assert "aara-integration-status" in combined
 
 
 # --- Render-time fetch: Refresh button, demo.load, "as of" indicator ----
@@ -347,4 +349,49 @@ def test_no_screen_and_no_provider_uses_the_mock_unavailable_screen():
     assert ui._screen.is_empty
     body_updates = ui._render()[1:]
     for update in body_updates:
-        assert "mb-unavailable-message" in update["value"]
+        assert "aara-integration-status" in update["value"]
+
+
+# --- ADR-061 A4: per-section IntegrationHealth in the unavailable body ---
+
+
+def test_section_health_names_the_specific_reason_on_the_unavailable_path():
+    """When bootstrap.py records a non-HEALTHY section.health on the
+    unavailable path, the section body names that reason via the shared
+    renderer; a section with health=None keeps its own fixed message."""
+    screen = build_mock_screen()
+    with_health = replace(
+        screen,
+        portfolio_snapshot=replace(
+            screen.portfolio_snapshot,
+            health=IntegrationHealth.not_configured("trades_db_capital"),
+        ),
+        market_mood_regime=replace(
+            screen.market_mood_regime,
+            health=IntegrationHealth.unavailable("trades_db_regime"),
+        ),
+    )
+    combined = "\n".join(_html_values(MorningBriefUI(screen=with_health).build()))
+
+    assert "not configured for this environment" in combined
+    assert "provider could not be reached" in combined
+    assert "aara-integration-status" in combined
+    # the two sections with health=None keep their own fixed message
+    assert screen.candidate_screening_summary.unavailable_message in combined
+    assert screen.overnight_holdings_news.unavailable_message in combined
+    # never fabricated content
+    assert "mb-available-summary" not in combined
+
+
+def test_section_health_does_not_change_availability():
+    screen = build_mock_screen()
+    with_health = replace(
+        screen,
+        portfolio_snapshot=replace(
+            screen.portfolio_snapshot,
+            health=IntegrationHealth.auth_failed("trades_db_capital"),
+        ),
+    )
+
+    assert with_health.portfolio_snapshot.is_available is False
+    assert with_health.is_empty is True

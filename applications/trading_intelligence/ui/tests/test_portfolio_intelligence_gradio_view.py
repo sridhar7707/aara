@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 import gradio as gr
 
+from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
     _ALPACA_ORDERS_SCOPE_CAPTION,
     _ALPACA_ORDERS_TRUNCATION_NOTE,
@@ -264,12 +265,6 @@ def test_format_holdings_rows_handles_multiple_holdings_in_order():
     assert [row[0] for row in rows] == ["AAPL", "MSFT"]
 
 
-def test_unavailable_html_helper_uses_the_pi_unavailable_class():
-    out = PortfolioIntelligenceUI._format_unavailable_html("nope")
-
-    assert out == '<div class="pi-unavailable">nope</div>'
-
-
 # --- UNAVAILABLE state (capital source returned None) ---------------
 
 
@@ -293,6 +288,75 @@ def test_holdings_unavailable_renders_the_message_and_no_table():
 
     assert any(_HOLDINGS_UNAVAILABLE_MESSAGE in v for v in html_values)
     assert not any(d for d in dataframes if "pi-holdings-table" in (d.elem_classes or []))
+
+
+# --- ADR-061 A4: per-section IntegrationHealth in the unavailable state ---
+
+
+def test_capital_not_configured_health_renders_a_not_configured_message():
+    screen = PortfolioScreen(
+        capital=None,
+        capital_health=IntegrationHealth.not_configured("trades_db_capital"),
+        holdings=None,
+        holdings_health=IntegrationHealth.not_configured("trades_db_positions"),
+    )
+    html_text, table_cells = _rendered_surfaces(PortfolioIntelligenceUI(screen=screen))
+
+    assert "not configured for this environment" in html_text
+    assert "aara-integration-status" in html_text
+    assert table_cells == []
+
+
+def test_alpaca_health_reason_is_named_in_the_alpaca_sections():
+    screen = PortfolioScreen(
+        capital=_make_capital(),
+        alpaca_account=None,
+        alpaca_health=IntegrationHealth.auth_failed("alpaca_paper"),
+        alpaca_orders=None,
+        alpaca_orders_health=IntegrationHealth.unavailable("alpaca_paper_orders"),
+    )
+    html_text, _ = _rendered_surfaces(PortfolioIntelligenceUI(screen=screen))
+
+    assert "authentication failed" in html_text          # account/positions section
+    assert "provider could not be reached" in html_text  # recent-orders section
+
+
+def test_unavailable_sections_render_no_fabricated_numeric_data():
+    """ADR-061 Section 2.5: a non-HEALTHY section must not be replaced by
+    fabricated / defaulted / zero-valued figures."""
+    from applications.trading_intelligence.ui.portfolio_intelligence.mock_data import (
+        build_mock_screen,
+    )
+
+    mock = build_mock_screen()
+    screen = PortfolioScreen(
+        capital=None,
+        capital_health=IntegrationHealth.auth_failed("trades_db_capital"),
+        holdings=None,
+        holdings_health=IntegrationHealth.unavailable("trades_db_positions"),
+        alpaca_health=IntegrationHealth.not_configured("alpaca_paper"),
+        alpaca_orders_health=IntegrationHealth.not_configured("alpaca_paper_orders"),
+    )
+    html_text, table_cells = _rendered_surfaces(PortfolioIntelligenceUI(screen=screen))
+
+    assert table_cells == []
+    assert "$" not in html_text
+    for marker in ("pi-capital-summary", "pi-allocation-bar", "pi-holdings-table"):
+        assert marker not in html_text
+    for fabricated in (
+        f"${mock.capital.allocated_amount:,.2f}",
+        f"${mock.capital.available_cash:,.2f}",
+    ):
+        assert fabricated not in html_text
+
+
+def test_health_none_still_renders_the_fixed_fallback_message():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=None, holdings=None))
+
+    html_text, _ = _rendered_surfaces(ui)
+
+    assert html_text.count(_CAPITAL_UNAVAILABLE_MESSAGE) == 2  # summary + allocation
+    assert _HOLDINGS_UNAVAILABLE_MESSAGE in html_text
 
 
 # --- PARTIAL state (real capital, holdings unavailable) ------------

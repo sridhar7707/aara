@@ -61,6 +61,10 @@ from zoneinfo import ZoneInfo
 
 import gradio as gr
 
+from applications.trading_intelligence.ui.integration_health_view import (
+    CSS as _INTEGRATION_HEALTH_CSS,
+    render_unavailable,
+)
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
     RiskHistoryEntry,
     RiskScreen,
@@ -89,14 +93,12 @@ _STATE_BADGE_CLASSES = {
 # Rendered in place of every current-state / history / sizing element when
 # no real risk source is available (RiskScreen.is_available is False -- the
 # production default when the operational `risk_state` table cannot be
-# read). Reuses the .ri-empty-message treatment this screen's own theme.py
-# already defines; no fabricated state badge, history table, evaluation
-# card, or sizing metric is emitted alongside it.
-_UNAVAILABLE_MESSAGE_HTML = (
-    '<div class="ri-empty-message">'
-    f'{html.escape("Risk Intelligence data is currently unavailable.")}'
-    "</div>"
-)
+# read). ADR-061 A4: routed through the shared render_unavailable() so the
+# specific reason (NOT_CONFIGURED / AUTH_FAILED / RATE_LIMITED / UNAVAILABLE
+# / API_ERROR) carried on RiskScreen.state_health is named, falling back to
+# this fixed sentence when no health was recorded. No fabricated state
+# badge, history table, evaluation card, or sizing metric is emitted
+# alongside it.
 
 _PAGE_HEADER_HTML = (
     '<div class="ri-page-header">'
@@ -237,7 +239,8 @@ class RiskIntelligenceUI:
     def build(self) -> gr.Blocks:
         initial = self._screen
         with gr.Blocks(
-            title="AARA Trading Intelligence — Risk Intelligence", css=CSS,
+            title="AARA Trading Intelligence — Risk Intelligence",
+            css=CSS + _INTEGRATION_HEALTH_CSS,
             head=_LIVE_REGION_SETUP_JS,
         ) as demo:
             gr.HTML(SHELL_IDENTITY_HTML, elem_classes=["aara-shell-header"])
@@ -369,7 +372,12 @@ class RiskIntelligenceUI:
 
     @staticmethod
     def _unavailable_state(screen: RiskScreen) -> Tuple[str, bool]:
-        return (_UNAVAILABLE_MESSAGE_HTML, not screen.is_available)
+        return (
+            render_unavailable(
+                screen.state_health, fallback_message=screen.unavailable_message
+            ),
+            not screen.is_available,
+        )
 
     @staticmethod
     def _observed_note_state(screen: RiskScreen) -> Tuple[str, bool]:

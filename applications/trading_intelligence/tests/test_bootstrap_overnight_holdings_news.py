@@ -9,10 +9,17 @@
 
 Post-ADR-061 (Category A / Amendment 1): the adapter methods return
 ReadResult; the "only when real holdings + real news" trigger is unwrapped
-from `.value`, and MorningBriefSection.health is populated only on the
-real-data path.
+from `.value`. Per ADR-061 A4, MorningBriefSection.health is populated on
+every path -- including the unavailable fallback -- so the view can name
+the specific failure reason.
 """
-from applications.platform.integrations import IntegrationHealth, ReadResult
+from dataclasses import replace
+
+from applications.platform.integrations import (
+    IntegrationHealth,
+    IntegrationStatus,
+    ReadResult,
+)
 from applications.trading_intelligence import bootstrap
 from applications.trading_intelligence.adapters.alpaca_news_source import (
     HoldingsNewsItem,
@@ -196,6 +203,10 @@ def test_overnight_section_stays_unavailable_when_news_fetch_fails(monkeypatch):
 
     assert not section.is_available
     assert section.unavailable_message == expected.unavailable_message
+    # ADR-061 A4: the failed news read's health is recorded on the
+    # unavailable path so the view can name the reason.
+    assert section.health is not None
+    assert section.health.status is IntegrationStatus.UNAVAILABLE
 
 
 def test_overnight_section_reports_empty_holdings_explicitly(monkeypatch):
@@ -216,9 +227,13 @@ def test_overnight_section_reports_empty_holdings_explicitly(monkeypatch):
     assert section.available_summary == "No open holdings -- no overnight holdings news to report."
 
 
-def test_other_morning_brief_sections_are_unchanged_by_the_news_wiring(monkeypatch):
-    """The three non-news sections must keep their exact existing behavior
-    -- this unit only touches Overnight Holdings News."""
+def test_other_morning_brief_sections_carry_adapter_health_but_are_otherwise_unchanged(
+    monkeypatch,
+):
+    """The three non-news sections keep their exact existing content --
+    title, unavailable_message, and no available_summary. ADR-061 A4 adds
+    only the (failed) adapter's IntegrationHealth on the unavailable path,
+    so is_available and every other field stay as the baseline mock."""
     _isolate_other_morning_brief_sources(monkeypatch)
     monkeypatch.setattr(
         bootstrap.LegacyPositionSource, "get_open_positions",
@@ -240,4 +255,9 @@ def test_other_morning_brief_sections_are_unchanged_by_the_news_wiring(monkeypat
     for attr in ("portfolio_snapshot", "market_mood_regime", "candidate_screening_summary"):
         section = getattr(screen, attr)
         expected = getattr(baseline, attr)
-        assert section == expected, f"{attr} must be untouched by this unit"
+        assert section.health is not None, f"{attr} should carry the failed adapter health"
+        assert section.health.status is IntegrationStatus.UNAVAILABLE
+        assert section.is_available is False
+        assert replace(section, health=None) == expected, (
+            f"{attr} must be untouched apart from the new health field"
+        )

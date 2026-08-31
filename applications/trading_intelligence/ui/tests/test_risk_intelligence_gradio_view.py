@@ -2,6 +2,7 @@ import pathlib
 
 import gradio as gr
 
+from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import (
     _AS_OF_PREFIX,
     _LIVE_ANNOUNCER_ELEM_ID,
@@ -9,7 +10,6 @@ from applications.trading_intelligence.ui.risk_intelligence.gradio_view import (
     _OBSERVED_CLASSIFICATION_HTML,
     _SIZING_UNAVAILABLE_HTML,
     _TRIGGER_REASON_UNAVAILABLE_HTML,
-    _UNAVAILABLE_MESSAGE_HTML,
     _format_as_of_html,
     RiskIntelligenceUI,
 )
@@ -90,7 +90,11 @@ def test_default_build_renders_the_unavailable_message_and_no_fabricated_content
     combined = "\n".join(value for value in html_values if value)
     dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
 
-    assert _UNAVAILABLE_MESSAGE_HTML in html_values
+    assert any(
+        "aara-integration-status" in value
+        and "Risk Intelligence data is currently unavailable." in value
+        for value in html_values
+    )
     assert "Risk Intelligence data is currently unavailable." in combined
     assert all(df.visible is False for df in dataframes)
     assert "Illustrative Data" not in combined
@@ -724,6 +728,52 @@ def test_observed_disclosure_is_hidden_in_the_default_unavailable_build():
     ]
     assert len(observed_blocks) == 1
     assert observed_blocks[0].visible is False
+
+
+def _combined_html(demo):
+    return "\n".join(
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    )
+
+
+def test_unavailable_state_names_the_auth_failure_reason_when_health_says_so():
+    """ADR-061 A4: when RiskScreen.state_health reports AUTH_FAILED, the
+    unavailable body names an authentication failure via the shared
+    render_unavailable() mechanism -- and still emits no fabricated risk
+    state badge, history table, evaluation card, or sizing metric."""
+    screen = RiskScreen(state_health=IntegrationHealth.auth_failed("risk_state"))
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    combined = _combined_html(demo)
+
+    assert "authentication failed" in combined
+    assert "aara-integration-status" in combined
+    for fabricated in (
+        "ri-state-badge", "state-normal", "state-warning", "state-defensive",
+        "ri-current-state", "ri-sizing-metrics", "ri-history-detail-card",
+    ):
+        assert fabricated not in combined
+
+
+def test_unavailable_state_reasons_render_for_each_status():
+    for factory, phrase in (
+        (IntegrationHealth.not_configured, "not configured for this environment"),
+        (IntegrationHealth.unavailable, "provider could not be reached"),
+        (IntegrationHealth.api_error, "provider returned an unexpected response"),
+    ):
+        screen = RiskScreen(state_health=factory("risk_state"))
+        combined = _combined_html(RiskIntelligenceUI(screen=screen).build())
+        assert phrase in combined
+
+
+def test_unavailable_state_with_no_health_falls_back_to_the_screen_message():
+    demo = RiskIntelligenceUI(screen=RiskScreen()).build()  # state_health is None
+
+    combined = _combined_html(demo)
+
+    assert "Risk Intelligence data is currently unavailable." in combined
+    assert "aara-integration-status" in combined
 
 
 def test_existing_current_state_and_history_rendering_is_unaffected():

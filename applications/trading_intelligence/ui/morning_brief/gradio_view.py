@@ -45,6 +45,10 @@ from zoneinfo import ZoneInfo
 
 import gradio as gr
 
+from applications.trading_intelligence.ui.integration_health_view import (
+    CSS as _INTEGRATION_HEALTH_CSS,
+    render_unavailable,
+)
 from applications.trading_intelligence.ui.morning_brief.mock_data import build_mock_screen
 from applications.trading_intelligence.ui.morning_brief.screen import (
     MorningBriefScreen,
@@ -109,7 +113,8 @@ class MorningBriefUI:
     def build(self) -> gr.Blocks:
         initial = self._screen
         with gr.Blocks(
-            title="AARA Trading Intelligence — Morning Brief", css=CSS,
+            title="AARA Trading Intelligence — Morning Brief",
+            css=CSS + _INTEGRATION_HEALTH_CSS,
         ) as demo:
             gr.HTML(SHELL_IDENTITY_HTML, elem_classes=["aara-shell-header"])
             gr.HTML(build_shell_nav_html("Morning Brief"), elem_classes=["aara-shell-nav"])
@@ -193,10 +198,13 @@ class MorningBriefUI:
 
     @staticmethod
     def _format_unavailable_message_html(section: MorningBriefSection) -> str:
-        return (
-            '<div class="mb-unavailable-message">'
-            f'{html.escape(section.unavailable_message)}'
-            "</div>"
+        # ADR-061 A4: route the unavailable body through the shared
+        # renderer so a section backed by a real adapter names its
+        # specific failure reason (bootstrap.py records section.health on
+        # every path); a section with no adapter health (section.health is
+        # None) falls back to its own fixed unavailable_message unchanged.
+        return render_unavailable(
+            section.health, fallback_message=section.unavailable_message
         )
 
     @staticmethod
