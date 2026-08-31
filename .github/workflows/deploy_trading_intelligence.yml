@@ -129,6 +129,16 @@ jobs:
               ignore=skip_tests_and_cache,
           )
 
+          # ADR-062: applications/platform/integrations/ -- the ADR-061
+          # IntegrationHealth contract, imported at module scope by
+          # bootstrap.py's adapter chain. Self-contained (stdlib +
+          # intra-package only); no fifth subpackage transitively required.
+          shutil.copytree(
+              "applications/platform/integrations",
+              staging / "applications" / "platform" / "integrations",
+              ignore=skip_tests_and_cache,
+          )
+
           # Shared Sentinel Intelligence Engine (zero external dependencies
           # of its own -- verified: no third-party imports anywhere in it).
           shutil.copytree(
