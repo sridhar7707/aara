@@ -41,6 +41,12 @@ class MorningBriefSection:
     # adapter-sourced summary is present. Stays None on the honest
     # unavailable fallback, matching this screen's illustrative-only design.
     health: Optional[IntegrationHealth] = None
+    # The authoritative timestamp of the data THIS section is showing --
+    # the source row's own timestamp for the trades.db-backed sections, the
+    # live fetch instant for Overnight Holdings News -- distinct from the
+    # page-level render clock. Set by bootstrap.py only alongside a real
+    # available_summary; stays None on the unavailable fallback.
+    as_of: Optional[str] = None
 
     @property
     def is_available(self) -> bool:

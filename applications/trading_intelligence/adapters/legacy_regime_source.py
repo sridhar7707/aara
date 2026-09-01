@@ -27,12 +27,16 @@ is duplicated here as a literal string instead, the same convention
 legacy_capital_source.py already established.
 
 Health contract (ADR-061 Category A): get_latest_regime() returns
-ReadResult[str]. A HEALTHY result carries a real regime label OR, when
-the table exists but has no usable regime, a HEALTHY result with
-value=None (a genuine "nothing recorded" state). A non-HEALTHY result
-carries value=None plus an IntegrationHealth naming the reason:
-UNAVAILABLE (the trades.db file is not present, or is locked), API_ERROR
-(the signal_log table is missing, or a row could not be read).
+ReadResult[RegimeSnapshot] -- the regime label plus `as_of`, the
+`signal_log.timestamp` of the row it came from, so Morning Brief can show
+when that regime was recorded (it is the last per-cycle scanner
+classification, not a view-time market-wide calculation). A HEALTHY
+result carries a real RegimeSnapshot OR, when the table exists but has no
+usable regime, a HEALTHY result with value=None (a genuine "nothing
+recorded" state). A non-HEALTHY result carries value=None plus an
+IntegrationHealth naming the reason: UNAVAILABLE (the trades.db file is
+not present, or is locked), API_ERROR (the signal_log table is missing,
+or a row could not be read).
 
 Production note: identical limitation to legacy_capital_source.py -- the
 deployed Trading Intelligence HF Space has no mechanism today to obtain
@@ -44,6 +48,8 @@ intended, safe behavior, not a bug.
 """
 import os
 import sqlite3
+from dataclasses import dataclass
+from typing import Optional
 
 from applications.platform.integrations import IntegrationHealth, ReadResult
 
@@ -53,7 +59,20 @@ _DB_PATH = "trades.db"
 
 # Duplicated from bot/_main_db.py's own signal_log schema -- not imported,
 # per this module's own docstring.
-_SELECT_LATEST_REGIME = "SELECT regime FROM signal_log ORDER BY id DESC LIMIT 1"
+_SELECT_LATEST_REGIME = (
+    "SELECT regime, timestamp FROM signal_log ORDER BY id DESC LIMIT 1"
+)
+
+
+@dataclass(frozen=True)
+class RegimeSnapshot:
+    """The most recent per-cycle scanner regime label and the
+    `signal_log.timestamp` of the row it was read from. `as_of` is
+    Optional only defensively -- the real schema has `timestamp TEXT NOT
+    NULL`."""
+
+    regime: str
+    as_of: Optional[str]
 
 
 def _sqlite_health(exc: sqlite3.Error) -> IntegrationHealth:
@@ -71,10 +90,11 @@ class LegacyRegimeSource:
     def __init__(self, db_path: str = _DB_PATH):
         self._db_path = db_path
 
-    def get_latest_regime(self) -> "ReadResult[str]":
+    def get_latest_regime(self) -> "ReadResult[RegimeSnapshot]":
         """Returns a ReadResult over the most recent regime label written
-        by the trading loop. HEALTHY with a real label on success; HEALTHY
-        with value=None when the table exists but has no usable regime (a
+        by the trading loop, plus the `signal_log.timestamp` of that row.
+        HEALTHY with a real RegimeSnapshot on success; HEALTHY with
+        value=None when the table exists but has no usable regime (a
         genuine "nothing recorded" state); UNAVAILABLE when the database
         file is absent or locked; API_ERROR when the signal_log table is
         missing or a row could not be read."""
@@ -94,4 +114,5 @@ class LegacyRegimeSource:
             conn.close()
         if row is None or not row[0]:
             return ReadResult.empty(_PROVIDER)
-        return ReadResult.healthy(row[0], _PROVIDER)
+        as_of = row[1] if row[1] else None
+        return ReadResult.healthy(RegimeSnapshot(regime=row[0], as_of=as_of), _PROVIDER)

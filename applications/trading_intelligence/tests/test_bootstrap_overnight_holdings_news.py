@@ -110,9 +110,9 @@ def _isolate_other_morning_brief_sources(monkeypatch):
     """Force the three non-news real sources to unavailable so a test can
     reason about the Overnight Holdings News section alone."""
     monkeypatch.setattr(
-        bootstrap.LegacyCapitalSource,
-        "get_capital_summary",
-        lambda self: _down("trades_db_capital"),
+        bootstrap.LegacyPortfolioSnapshotSource,
+        "get_latest_portfolio_snapshot",
+        lambda self: _down("trades_db_portfolio_snapshot"),
     )
     monkeypatch.setattr(
         bootstrap.LegacyRegimeSource,

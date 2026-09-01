@@ -8,7 +8,10 @@ import tempfile
 import pytest
 
 from applications.platform.integrations import IntegrationStatus, ReadResult
-from applications.trading_intelligence.adapters.legacy_regime_source import LegacyRegimeSource
+from applications.trading_intelligence.adapters.legacy_regime_source import (
+    LegacyRegimeSource,
+    RegimeSnapshot,
+)
 
 
 def _assert_healthy_empty(result):
@@ -62,7 +65,30 @@ def test_get_latest_regime_is_healthy_with_the_most_recently_inserted_row(signal
 
     result = source.get_latest_regime()
     assert result.health.status is IntegrationStatus.HEALTHY
-    assert result.value == "TRENDING_UP"
+    # Regime label unchanged, plus the signal_log.timestamp of that row.
+    assert result.value == RegimeSnapshot(
+        regime="TRENDING_UP", as_of="2026-08-21T09:00:00+00:00"
+    )
+
+
+def test_get_latest_regime_as_of_is_none_when_the_row_has_no_timestamp():
+    path = tempfile.mktemp(suffix=".db")
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE signal_log (id INTEGER, timestamp TEXT, symbol TEXT, regime TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO signal_log (id, timestamp, symbol, regime) "
+        "VALUES (1, NULL, 'AAPL', 'RANGING')"
+    )
+    conn.commit()
+    conn.close()
+    try:
+        result = LegacyRegimeSource(db_path=path).get_latest_regime()
+        assert result.health.status is IntegrationStatus.HEALTHY
+        assert result.value == RegimeSnapshot(regime="RANGING", as_of=None)
+    finally:
+        os.remove(path)
 
 
 def test_get_latest_regime_is_api_error_when_table_is_missing(empty_db):

@@ -24,6 +24,7 @@ services and the SentinelEngine facade are still constructed below -- the
 read chain shares their ledger/projection repositories -- but nothing
 drives them now that seeding is removed.
 """
+import os
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
@@ -65,12 +66,18 @@ from applications.trading_intelligence.adapters.legacy_candidate_screening_sourc
     LegacyCandidateScreeningSource,
 )
 from applications.trading_intelligence.adapters.legacy_capital_source import LegacyCapitalSource
+from applications.trading_intelligence.adapters.legacy_portfolio_snapshot_source import (
+    LegacyPortfolioSnapshotSource,
+)
 from applications.trading_intelligence.adapters.legacy_position_source import (
     LegacyPositionSource,
     OpenPosition,
 )
 from applications.trading_intelligence.adapters.legacy_regime_source import LegacyRegimeSource
 from applications.trading_intelligence.adapters.legacy_risk_state_source import LegacyRiskStateSource
+from applications.trading_intelligence.adapters.live_market_quote_source import (
+    LiveMarketQuoteSource,
+)
 from applications.trading_intelligence.adapters.live_price_source import LivePriceSource
 from applications.trading_intelligence.adapters.sentinel_audit_source import SentinelAuditSource
 from applications.trading_intelligence.adapters.sentinel_evidence_source import SentinelEvidenceSource
@@ -507,6 +514,35 @@ _INNER_NAV_LINK_JS = """
 """
 
 
+_MB_SECTION_DISPLAY_TIMEZONE = ZoneInfo("America/Chicago")
+
+
+def _now_utc() -> datetime:
+    """Wall-clock now, UTC. Isolated as a named helper so the Overnight
+    Holdings News fetch instant is deterministic under test -- the same
+    reason MorningBriefUI._now() exists in the view."""
+    return datetime.now(timezone.utc)
+
+
+def _format_section_as_of(raw: Optional[str]) -> Optional[str]:
+    """Presentation-only: convert an ISO-8601 timestamp (a source row's
+    own timestamp, or an .isoformat() fetch instant) into the same
+    "%Y-%m-%d %H:%M %Z" America/Chicago wall-clock format every other
+    Trading Intelligence timestamp uses. A naive value is treated as UTC
+    (that is what the bot's trades.db writers persist). `None`/empty -> no
+    line; an unparseable value is passed through unchanged rather than
+    dropped, matching `_format_risk_state_as_of`."""
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return raw
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(_MB_SECTION_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
+
+
 def _format_candidate_screening_summary(snapshot: CandidateScreeningSnapshot) -> str:
     """Pure formatting, no I/O -- always states the actual persisted
     screened_at date literally (never "today"), so a stale local
@@ -554,10 +590,17 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
     """Assemble one real-or-unavailable MorningBriefScreen from the legacy
     trades.db adapters plus the read-only AlpacaNewsSource.
 
-    Real Portfolio Snapshot (reusing the exact same, unmodified
-    LegacyCapitalSource already wired for Portfolio Intelligence -- no
-    second capital adapter), real Market Mood/Regime (via
-    LegacyRegimeSource), and real Candidate Screening Summary (via
+    Real Portfolio Snapshot (via LegacyPortfolioSnapshotSource, reading
+    trades.db's portfolio_snapshots -- the freshest operational portfolio
+    value, appended every bot cycle, the same source dashboard/'s overview
+    already treats as current; deliberately NOT capital_pools /
+    LegacyCapitalSource, whose accounting-pool row lags the live portfolio
+    when the bot is idle -- Portfolio Intelligence still uses that adapter,
+    unchanged, and is not touched here), real Market Mood/Regime (the
+    persisted per-cycle regime label via LegacyRegimeSource, plus -- only
+    when a live yfinance quote is HEALTHY -- a factual SPY last/prev-close/
+    %-move clause via LiveMarketQuoteSource), and real Candidate Screening
+    Summary (via
     LegacyCandidateScreeningSource, reading trades.db's screener_log --
     explicitly not the Trust Ledger's candidate_evaluation_events, which
     stays gated behind ADR-004/Q1) when their respective legacy trades.db
@@ -573,6 +616,14 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
     message independently when its adapter finds no real data -- expected
     in the deployed HF Space today, which has no mechanism yet to obtain
     trades.db and no Alpaca credentials.
+
+    Each available section also carries `as_of`: the authoritative
+    timestamp of the data it is showing -- the source row's own timestamp
+    for the three trades.db-backed sections (portfolio_snapshots.timestamp,
+    signal_log.timestamp, screener_log.screened_at), and the live Alpaca
+    fetch instant for Overnight Holdings News. This is distinct from the
+    page-level render clock; a section with no real data leaves `as_of`
+    None.
 
     This function is the `screen_provider` MorningBriefUI re-invokes on
     every demo.load() and every Refresh click -- it is a fresh read each
@@ -592,17 +643,22 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
     # IntegrationHealth on every path -- including the unavailable fallback,
     # so the view can name the specific reason (ADR-061 A4). Recording
     # health does not change is_available (still keyed on available_summary).
-    capital_result = LegacyCapitalSource(**legacy_kwargs).get_capital_summary()
-    portfolio_snapshot = replace(portfolio_snapshot, health=capital_result.health)
-    if capital_result.value is not None:
-        real_capital = capital_result.value
+    snapshot_result = LegacyPortfolioSnapshotSource(
+        **legacy_kwargs
+    ).get_latest_portfolio_snapshot()
+    portfolio_snapshot = replace(portfolio_snapshot, health=snapshot_result.health)
+    if snapshot_result.value is not None:
+        real_snapshot = snapshot_result.value
         portfolio_snapshot = replace(
             portfolio_snapshot,
             available_summary=(
-                f"Total value ${real_capital.total_value:,.2f} "
-                f"(${real_capital.available_cash:,.2f} cash, "
-                f"${real_capital.invested_amount:,.2f} invested)."
+                f"Total value ${real_snapshot.total_value:,.2f} "
+                f"(${real_snapshot.available_cash:,.2f} cash, "
+                f"${real_snapshot.invested_amount:,.2f} invested)."
             ),
+            # The portfolio_snapshots row's own timestamp -- NOT the render
+            # clock, NOT capital_pools.updated_at.
+            as_of=_format_section_as_of(real_snapshot.as_of),
         )
 
     regime_result = LegacyRegimeSource(**legacy_kwargs).get_latest_regime()
@@ -610,8 +666,31 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
     if regime_result.value is not None:
         market_mood_regime = replace(
             market_mood_regime,
-            available_summary=f"Current market regime: {regime_result.value}.",
+            # Regime string unchanged; the signal_log.timestamp of the row
+            # it came from is surfaced separately as `as_of`.
+            available_summary=f"Current market regime: {regime_result.value.regime}.",
+            as_of=_format_section_as_of(regime_result.value.as_of),
         )
+        # P2: append a factual SPY daily-move clause -- ONLY when a live
+        # yfinance quote is HEALTHY. yfinance is the ADR-063 dependency and
+        # LiveMarketQuoteSource follows the same ADR-061 health contract as
+        # LivePriceSource. The regime sentence above is preserved
+        # byte-for-byte; a NOT_CONFIGURED / RATE_LIMITED / UNAVAILABLE /
+        # API_ERROR quote appends nothing (never a fabricated figure). The
+        # "as of" date is the yfinance bar's own date, not a render/now/
+        # snapshot timestamp; "today" only when is_today is True.
+        spy_quote = LiveMarketQuoteSource().get_spy_quote()
+        if spy_quote.value is not None:
+            q = spy_quote.value
+            when = "today" if q.is_today else "last session"
+            market_mood_regime = replace(
+                market_mood_regime,
+                available_summary=(
+                    market_mood_regime.available_summary
+                    + f" SPY {q.last:,.2f}, prev close {q.previous_close:,.2f} "
+                    + f"({q.pct_change:+.2f}% {when}) -- daily bar as of {q.as_of}."
+                ),
+            )
 
     screening_result = LegacyCandidateScreeningSource(**legacy_kwargs).get_latest_screening()
     candidate_screening_summary = replace(
@@ -621,12 +700,18 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
         candidate_screening_summary = replace(
             candidate_screening_summary,
             available_summary=_format_candidate_screening_summary(screening_result.value),
+            # screener_log.screened_at -- the same authoritative timestamp
+            # the summary body already states as a date.
+            as_of=_format_section_as_of(screening_result.value.screened_at),
         )
 
     positions_result = LegacyPositionSource(**legacy_kwargs).get_open_positions()
     if positions_result.value is not None:
         holdings_symbols = tuple(position.symbol for position in positions_result.value)
         news_result = AlpacaNewsSource().get_overnight_holdings_news(holdings_symbols)
+        # The live Alpaca News GET just returned -- this instant is the
+        # retrieval time, deliberately not any trades.db snapshot time.
+        news_fetched_at = _now_utc()
         overnight_holdings_news = replace(
             overnight_holdings_news, health=news_result.health
         )
@@ -636,6 +721,7 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
                 available_summary=_format_overnight_holdings_news(
                     news_result.value, holdings_symbols
                 ),
+                as_of=_format_section_as_of(news_fetched_at.isoformat()),
             )
 
     return replace(
@@ -647,12 +733,29 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
     )
 
 
+def _snapshot_fetched_at(db_path: Optional[str]) -> Optional[datetime]:
+    """When `fetch_trades_db_snapshot()` (ADR-055) last wrote `db_path` for
+    THIS Space process. ADR-055 pulls the snapshot once per process --
+    `os.replace()` stamps the file's mtime at that moment -- and Refresh
+    only re-reads the same file, so this value is fixed for the life of the
+    process and only advances on a Space restart. Read-only `os.stat`;
+    touches nothing about the download / cache mechanism. Returns None when
+    no snapshot was obtained (deployed Space fell back to unavailable,
+    local dev, or tests)."""
+    if not db_path or not os.path.exists(db_path):
+        return None
+    return datetime.fromtimestamp(os.path.getmtime(db_path), timezone.utc)
+
+
 def _build_morning_brief_ui(db_path: Optional[str] = None) -> MorningBriefUI:
     """Wire Morning Brief to fetch its data at render time, from the
     runtime `db_path` snapshot when one was fetched (see
-    `snapshot_bound_provider`)."""
+    `snapshot_bound_provider`). `snapshot_fetched_at_provider` surfaces the
+    snapshot's fetch instant separately from the render clock so the UI can
+    show that Refresh does not re-download the database."""
     return MorningBriefUI(
-        screen_provider=snapshot_bound_provider(_build_morning_brief_screen, db_path)
+        screen_provider=snapshot_bound_provider(_build_morning_brief_screen, db_path),
+        snapshot_fetched_at_provider=lambda: _snapshot_fetched_at(db_path),
     )
 
 

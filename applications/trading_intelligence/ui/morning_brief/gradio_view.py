@@ -12,9 +12,16 @@ Data is fetched at render time, not build time: the UI takes a
 which assembles a MorningBriefScreen from LegacyCapitalSource,
 LegacyRegimeSource, LegacyCandidateScreeningSource and AlpacaNewsSource)
 and re-invokes it on every `demo.load()` and every Refresh click, so a
-long-running Space shows data as of page load rather than app start. An
-"As of {timestamp}" line reflects the last fetch. The Refresh button
-reuses ui/decision_center/gradio_view.py's and
+long-running Space shows data as of page load rather than app start.
+Freshness is shown at two levels: page-level, a "Rendered at {timestamp}"
+line (the UI render clock, advances on every Refresh) and an "Operational
+data snapshot: {timestamp}" line (when the ADR-055 trades.db snapshot was
+fetched for this Space process -- fixed across Refresh, since Refresh
+re-reads the same file and never re-downloads the database); and
+per-section, an "as of {timestamp}" line under each available section
+carrying that section's own data timestamp (its source row's timestamp
+for the trades.db-backed sections, the live fetch instant for Overnight
+Holdings News). The Refresh button reuses ui/decision_center/gradio_view.py's and
 ui/portfolio_intelligence/gradio_view.py's disable -> render -> enable
 double-submit guard. When neither `screen` nor `screen_provider` is
 supplied the provider is `build_mock_screen` -- this package's own fixed
@@ -64,7 +71,20 @@ _PAGE_HEADER_HTML = (
     "</div>"
 )
 
-_AS_OF_PREFIX = "As of "
+# The UI render clock -- advances every Refresh.
+_RENDERED_AT_PREFIX = "Rendered at "
+
+# Freshness of the ADR-055 trades.db operational snapshot for this Space
+# process -- deliberately worded so it is never read as a realtime
+# database, and annotated to make the once-per-process caching explicit.
+_SNAPSHOT_PREFIX = "Operational data snapshot: "
+_SNAPSHOT_REFRESH_NOTE = " (fetched once per Space start; not re-downloaded on Refresh)"
+_SNAPSHOT_UNAVAILABLE = _SNAPSHOT_PREFIX + "unavailable"
+
+# Per-section data-freshness lead-in -- rendered under a section's own
+# available_summary, so "as of" refers to that section's data, never the
+# page-level render clock (which uses `_RENDERED_AT_PREFIX`).
+_SECTION_AS_OF_PREFIX = "as of "
 
 # Local primitive, not a cross-package import (same "duplicate the
 # primitive" convention ui/portfolio_intelligence/gradio_view.py uses for
@@ -74,13 +94,32 @@ _AS_OF_PREFIX = "As of "
 _DISPLAY_TIMEZONE = ZoneInfo("America/Chicago")
 
 
-def _format_as_of_html(moment: datetime) -> str:
-    """Render-time "as of" stamp for the whole screen. Reuses the existing
-    `.mb-subtitle` treatment (muted secondary text, already defined in
-    this package's theme.py and used by `_PAGE_HEADER_HTML`) rather than
-    introducing a new styled class."""
+def _format_rendered_at_html(moment: datetime) -> str:
+    """Render-clock stamp for the whole screen -- when this render ran, not
+    a claim about any data's freshness. Reuses the existing `.mb-subtitle`
+    treatment (muted secondary text, already defined in this package's
+    theme.py and used by `_PAGE_HEADER_HTML`) rather than introducing a new
+    styled class."""
     stamp = moment.astimezone(_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
-    return f'<div class="mb-subtitle">{html.escape(_AS_OF_PREFIX + stamp)}</div>'
+    return f'<div class="mb-subtitle">{html.escape(_RENDERED_AT_PREFIX + stamp)}</div>'
+
+
+def _format_snapshot_line_html(moment: Optional[datetime]) -> str:
+    """Freshness of the trades.db operational snapshot (ADR-055) for the
+    current Space process, shown as a line separate from the render clock
+    so a stale snapshot is never mistaken for realtime data. ADR-055 pulls
+    the snapshot once per process and Refresh re-reads the same file, so
+    this line is fixed across Refresh clicks and only advances when the
+    Space process restarts. `None` (no snapshot obtained) renders an honest
+    "unavailable" -- never a fabricated timestamp."""
+    if moment is None:
+        return f'<div class="mb-subtitle">{html.escape(_SNAPSHOT_UNAVAILABLE)}</div>'
+    stamp = moment.astimezone(_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
+    return (
+        '<div class="mb-subtitle">'
+        f"{html.escape(_SNAPSHOT_PREFIX + stamp + _SNAPSHOT_REFRESH_NOTE)}"
+        "</div>"
+    )
 
 
 class MorningBriefUI:
@@ -89,6 +128,9 @@ class MorningBriefUI:
         screen: Optional[MorningBriefScreen] = None,
         *,
         screen_provider: Optional[Callable[[], MorningBriefScreen]] = None,
+        snapshot_fetched_at_provider: Optional[
+            Callable[[], Optional[datetime]]
+        ] = None,
     ):
         """Render-time data model. `screen_provider` (bootstrap.py's
         `_build_morning_brief_screen`) is re-invoked on every `demo.load()`
@@ -98,10 +140,18 @@ class MorningBriefUI:
         `build_mock_screen` -- this package's own fixed all-unavailable
         screen, never a fabricated one.
 
-        The provider is also called once here so `self._screen` describes
-        the build-time snapshot -- the same value bootstrap.py computed
-        eagerly before this slice. `build()` renders from that snapshot and
-        wires `demo.load()` to refresh it immediately on page load."""
+        `snapshot_fetched_at_provider` (bootstrap.py's `_snapshot_fetched_at`
+        bound to the runtime snapshot path) returns when the ADR-055
+        trades.db snapshot was fetched for this process, or `None` if none
+        was. It is re-called on every render but reads the same file, so
+        its value is stable across Refresh -- that stability is the point.
+        Default: a provider returning `None` (pure shell / tests).
+
+        The screen provider is also called once here so `self._screen`
+        describes the build-time snapshot -- the same value bootstrap.py
+        computed eagerly before this slice. `build()` renders from that
+        snapshot and wires `demo.load()` to refresh it immediately on page
+        load."""
         if screen_provider is not None:
             self._screen_provider = screen_provider
         elif screen is not None:
@@ -109,6 +159,9 @@ class MorningBriefUI:
         else:
             self._screen_provider = build_mock_screen
         self._screen = self._screen_provider()
+        self._snapshot_fetched_at_provider = snapshot_fetched_at_provider or (
+            lambda: None
+        )
 
     def build(self) -> gr.Blocks:
         initial = self._screen
@@ -123,14 +176,17 @@ class MorningBriefUI:
             refresh_button = gr.Button(
                 "↻ Refresh", size="sm", scale=0, elem_classes=["aara-refresh-button"],
             )
-            as_of_output = gr.HTML(_format_as_of_html(self._now()))
+            rendered_at_output = gr.HTML(_format_rendered_at_html(self._now()))
+            snapshot_output = gr.HTML(
+                _format_snapshot_line_html(self._snapshot_fetched_at_provider())
+            )
 
             section_bodies = []
             for section in initial.sections:
                 gr.HTML(self._format_section_label_html(section))
                 section_bodies.append(gr.HTML(self._section_body_html(section)))
 
-            outputs = [as_of_output, *section_bodies]
+            outputs = [rendered_at_output, snapshot_output, *section_bodies]
 
             # Same disable -> render -> enable double-submit guard chain as
             # ui/decision_center/ and ui/portfolio_intelligence/: a second
@@ -170,16 +226,21 @@ class MorningBriefUI:
 
     def _render(self) -> Tuple[Dict[str, Any], ...]:
         """Re-fetch through the provider and return one Gradio update per
-        dynamic output, in build()'s `outputs` order (the "As of" line
-        first, then one body per section in MorningBriefScreen.sections
-        order). Called by demo.load() on page load and by the Refresh
-        chain. A provider that now returns an all-unavailable screen
-        collapses every section back to its own explicit unavailable
-        message -- there is no mock/illustrative fallback anywhere in this
-        path."""
+        dynamic output, in build()'s `outputs` order (the render-clock line
+        first, then the operational-snapshot-freshness line, then one body
+        per section in MorningBriefScreen.sections order). Called by
+        demo.load() on page load and by the Refresh chain. The render clock
+        advances every call; the snapshot line is re-read but stays fixed
+        (Refresh does not re-download the database). A provider that now
+        returns an all-unavailable screen collapses every section back to
+        its own explicit unavailable message -- there is no
+        mock/illustrative fallback anywhere in this path."""
         screen = self._screen_provider()
         return (
-            gr.update(value=_format_as_of_html(self._now())),
+            gr.update(value=_format_rendered_at_html(self._now())),
+            gr.update(
+                value=_format_snapshot_line_html(self._snapshot_fetched_at_provider())
+            ),
             *(
                 gr.update(value=self._section_body_html(section))
                 for section in screen.sections
@@ -209,8 +270,18 @@ class MorningBriefUI:
 
     @staticmethod
     def _format_available_summary_html(section: MorningBriefSection) -> str:
-        return (
+        body = (
             '<div class="mb-available-summary">'
-            f'{html.escape(section.available_summary)}'
+            f"{html.escape(section.available_summary)}"
             "</div>"
         )
+        if section.as_of:
+            # A per-section freshness line: the timestamp of the data this
+            # section is showing (its source row / live fetch instant),
+            # separate from the page-level "Rendered at" clock.
+            body += (
+                '<div class="mb-subtitle">'
+                f"{html.escape(_SECTION_AS_OF_PREFIX + section.as_of)}"
+                "</div>"
+            )
+        return body

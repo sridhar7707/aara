@@ -1,10 +1,14 @@
 import gradio as gr
 
 from dataclasses import replace
+from datetime import datetime, timezone
 
 from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.ui.morning_brief.gradio_view import (
-    _AS_OF_PREFIX,
+    _RENDERED_AT_PREFIX,
+    _SECTION_AS_OF_PREFIX,
+    _SNAPSHOT_PREFIX,
+    _SNAPSHOT_UNAVAILABLE,
     MorningBriefUI,
 )
 from applications.trading_intelligence.ui.morning_brief.mock_data import build_mock_screen
@@ -146,6 +150,98 @@ def test_real_market_mood_regime_renders_instead_of_the_unavailable_message():
     assert screen.market_mood_regime.unavailable_message not in combined
 
 
+# --- P1: per-section "as of" data-freshness line -------------------------
+
+
+def test_section_as_of_line_renders_under_an_available_summary():
+    """A section carrying `as_of` renders an extra `.mb-subtitle` line with
+    that timestamp, immediately after its own available_summary."""
+    screen = build_mock_screen()
+    real_screen = replace(
+        screen,
+        portfolio_snapshot=replace(
+            screen.portfolio_snapshot,
+            available_summary="Total value $100,029.85 ($59,869.06 cash, $40,160.79 invested).",
+            as_of="2026-08-31 14:39 CDT",
+        ),
+    )
+    body = MorningBriefUI._format_available_summary_html(real_screen.portfolio_snapshot)
+
+    assert "mb-available-summary" in body
+    assert f'<div class="mb-subtitle">{_SECTION_AS_OF_PREFIX}2026-08-31 14:39 CDT</div>' in body
+    # the freshness line comes after the summary, not before it
+    assert body.index("mb-available-summary") < body.index("mb-subtitle")
+
+
+def test_section_as_of_line_absent_when_as_of_is_none():
+    section = replace(
+        build_mock_screen().portfolio_snapshot,
+        available_summary="Total value $1.00 ($1.00 cash, $0.00 invested).",
+        as_of=None,
+    )
+    body = MorningBriefUI._format_available_summary_html(section)
+
+    assert "mb-available-summary" in body
+    assert "mb-subtitle" not in body
+    assert _SECTION_AS_OF_PREFIX not in body
+
+
+def test_section_as_of_prefix_is_distinct_from_the_page_render_clock_prefix():
+    """Per-section 'as of ...' must not read as the page-level render clock
+    ('Rendered at ...') -- requirement 5."""
+    assert _SECTION_AS_OF_PREFIX != _RENDERED_AT_PREFIX
+    assert _SECTION_AS_OF_PREFIX.strip() == "as of"
+
+
+def test_section_as_of_line_is_present_in_the_full_built_screen():
+    screen = build_mock_screen()
+    real_screen = replace(
+        screen,
+        market_mood_regime=replace(
+            screen.market_mood_regime,
+            available_summary="Current market regime: HIGH_VOLATILITY.",
+            as_of="2026-08-31 14:39 CDT",
+        ),
+    )
+    combined = "\n".join(_html_values(MorningBriefUI(screen=real_screen).build()))
+
+    assert "Current market regime: HIGH_VOLATILITY." in combined
+    assert f"{_SECTION_AS_OF_PREFIX}2026-08-31 14:39 CDT" in combined
+    # still a separate concept from the page-level lines
+    assert _RENDERED_AT_PREFIX in combined
+    assert _SNAPSHOT_PREFIX in combined or _SNAPSHOT_UNAVAILABLE in combined
+
+
+def test_p2_spy_clause_rides_inside_the_existing_available_summary_output():
+    """P2: the SPY daily-move clause is part of the regime section's
+    available_summary string (composed in bootstrap.py) -- it renders
+    inside the same `mb-available-summary` div, adds no new output
+    component, and does not change _OUTPUT_COUNT."""
+    spy_summary = (
+        "Current market regime: HIGH_VOLATILITY. "
+        "SPY 512.34, prev close 508.10 (+0.83% today) -- daily bar as of 2026-09-01."
+    )
+    real_screen = replace(
+        build_mock_screen(),
+        market_mood_regime=replace(
+            build_mock_screen().market_mood_regime,
+            available_summary=spy_summary,
+            as_of="2026-08-31 14:39 CDT",
+        ),
+    )
+    ui = MorningBriefUI(screen=real_screen)
+
+    body = MorningBriefUI._format_available_summary_html(real_screen.market_mood_regime)
+    assert "mb-available-summary" in body
+    # whole clause is inside the summary div, before the per-section as-of line
+    summary_div = body.split('<div class="mb-subtitle">')[0]
+    assert "SPY 512.34, prev close 508.10 (+0.83% today) -- daily bar as of 2026-09-01." in summary_div
+
+    combined = "\n".join(_html_values(ui.build()))
+    assert spy_summary in combined
+    assert len(ui._render()) == _OUTPUT_COUNT  # unchanged: 6
+
+
 def test_candidate_screening_and_overnight_news_stay_unavailable_when_other_sections_are_real():
     """The one thing this unit must never do: make every section look
     available just because two of them are. Portfolio Snapshot and Market
@@ -196,10 +292,12 @@ def test_default_render_shows_no_available_summary_markup():
     assert "aara-integration-status" in combined
 
 
-# --- Render-time fetch: Refresh button, demo.load, "as of" indicator ----
+# --- Render-time fetch: Refresh button, demo.load, freshness indicators --
 
 
-_OUTPUT_COUNT = 5  # "As of" line + one body per MorningBriefScreen.sections (4)
+# render-clock line + operational-snapshot line + one body per
+# MorningBriefScreen.sections (4)
+_OUTPUT_COUNT = 6
 
 
 def _refresh_button(demo):
@@ -309,12 +407,13 @@ def test_render_reflects_a_fresh_screen_from_the_provider_each_call():
     ui = MorningBriefUI(screen_provider=provider)
 
     first = ui._render()
-    # output index 1 == Portfolio Snapshot body (first section)
-    assert "Total value $1.00" in first[1]["value"]
-    assert "mb-available-summary" in first[1]["value"]
+    # output index 2 == Portfolio Snapshot body (index 0 = render clock,
+    # index 1 = operational-snapshot line, then one per section)
+    assert "Total value $1.00" in first[2]["value"]
+    assert "mb-available-summary" in first[2]["value"]
 
     second = ui._render()  # provider repeats the last screen
-    assert "Total value $1.00" in second[1]["value"]
+    assert "Total value $1.00" in second[2]["value"]
     assert len(calls) == 3  # 1 in __init__ + 2 explicit _render calls
 
 
@@ -326,20 +425,90 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
     updates = ui._render()
 
     baseline = build_mock_screen()
-    section_bodies = updates[1:]  # drop the "As of" update
+    section_bodies = updates[2:]  # drop the render-clock + snapshot updates
     assert len(section_bodies) == len(baseline.sections)
     for update, section in zip(section_bodies, baseline.sections):
         assert section.unavailable_message in update["value"]
         assert "mb-available-summary" not in update["value"]
 
 
-def test_as_of_indicator_is_present_at_build_and_refreshed_by_render():
+def test_rendered_at_indicator_is_present_at_build_and_refreshed_by_render():
     demo = MorningBriefUI().build()
-    assert any(_AS_OF_PREFIX in v for v in _html_values(demo))
+    assert any(_RENDERED_AT_PREFIX in v for v in _html_values(demo))
 
-    as_of_update = MorningBriefUI()._render()[0]  # output index 0
-    assert _AS_OF_PREFIX in as_of_update["value"]
-    assert "CDT" in as_of_update["value"] or "CST" in as_of_update["value"]
+    rendered_at_update = MorningBriefUI()._render()[0]  # output index 0
+    assert _RENDERED_AT_PREFIX in rendered_at_update["value"]
+    assert "CDT" in rendered_at_update["value"] or "CST" in rendered_at_update["value"]
+
+
+def test_operational_snapshot_line_is_distinct_from_the_render_clock():
+    """The two freshness lines are separate blocks with different wording:
+    'Rendered at ...' is the UI render clock; 'Operational data snapshot:
+    ...' is when the ADR-055 trades.db snapshot was fetched for this
+    process. A stale snapshot must never be presented as the render time."""
+    fetched = datetime(2026, 8, 31, 19, 39, tzinfo=timezone.utc)
+    ui = MorningBriefUI(snapshot_fetched_at_provider=lambda: fetched)
+
+    values = _html_values(ui.build())
+    rendered_line = next(v for v in values if _RENDERED_AT_PREFIX in v)
+    snapshot_line = next(v for v in values if _SNAPSHOT_PREFIX in v)
+
+    assert rendered_line != snapshot_line
+    assert _SNAPSHOT_PREFIX not in rendered_line
+    assert _RENDERED_AT_PREFIX not in snapshot_line
+    # 19:39 UTC on 2026-08-31 == 14:39 America/Chicago (CDT)
+    assert "Operational data snapshot: 2026-08-31 14:39 CDT" in snapshot_line
+    assert "not re-downloaded on Refresh" in snapshot_line
+
+
+def test_operational_snapshot_line_stays_fixed_while_render_clock_advances_on_refresh():
+    """Refresh re-reads the same snapshot file, so the snapshot line's
+    value is byte-identical across renders even though the render clock
+    line is recomputed each time."""
+    fetched = datetime(2026, 8, 31, 19, 39, tzinfo=timezone.utc)
+    ui = MorningBriefUI(
+        screen_provider=build_mock_screen,
+        snapshot_fetched_at_provider=lambda: fetched,
+    )
+
+    first, second = ui._render(), ui._render()
+
+    # index 0 = render clock (recomputed), index 1 = snapshot line (fixed)
+    assert first[1]["value"] == second[1]["value"]
+    assert _SNAPSHOT_PREFIX in first[1]["value"]
+    assert "2026-08-31 14:39 CDT" in first[1]["value"]
+    assert _RENDERED_AT_PREFIX in first[0]["value"]
+
+
+def test_operational_snapshot_line_reports_unavailable_when_no_snapshot():
+    """No snapshot obtained (deployed Space fell back, local dev, tests):
+    an honest 'unavailable', never a fabricated timestamp."""
+    ui = MorningBriefUI()  # default provider returns None
+
+    build_values = _html_values(ui.build())
+    assert any(_SNAPSHOT_UNAVAILABLE in v for v in build_values)
+
+    snapshot_update = ui._render()[1]
+    assert snapshot_update["value"] == f'<div class="mb-subtitle">{_SNAPSHOT_UNAVAILABLE}</div>'
+
+
+def test_snapshot_fetched_at_provider_is_re_called_every_render():
+    """The provider is invoked on build and on each render (it re-stats the
+    file) -- it is not cached at construction."""
+    calls = []
+
+    def _provider():
+        calls.append(True)
+        return datetime(2026, 8, 31, 19, 39, tzinfo=timezone.utc)
+
+    ui = MorningBriefUI(
+        screen_provider=build_mock_screen, snapshot_fetched_at_provider=_provider
+    )
+    ui.build()
+    ui._render()
+    ui._render()
+
+    assert len(calls) == 3  # 1 in build() + 2 explicit _render calls
 
 
 def test_no_screen_and_no_provider_uses_the_mock_unavailable_screen():
@@ -347,7 +516,7 @@ def test_no_screen_and_no_provider_uses_the_mock_unavailable_screen():
 
     assert ui._screen == build_mock_screen()
     assert ui._screen.is_empty
-    body_updates = ui._render()[1:]
+    body_updates = ui._render()[2:]  # drop render-clock + snapshot updates
     for update in body_updates:
         assert "aara-integration-status" in update["value"]
 

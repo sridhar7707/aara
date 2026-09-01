@@ -18,8 +18,12 @@ tables stands in for the fetched snapshot; network-touching collaborators
 (live prices, Alpaca) are stubbed so the test is offline and
 deterministic.
 """
+import os
 import sqlite3
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
+import gradio as gr
 import pytest
 
 from applications.platform.integrations import IntegrationHealth, ReadResult
@@ -55,13 +59,22 @@ def _make_fixture_snapshot(tmp_path):
             (allocated_amount, available_cash, invested_amount, reserve, realized_profit, status)
         VALUES (50000.0, 12345.67, 37000.0, 654.33, 1200.5, 'active');
 
+        CREATE TABLE portfolio_snapshots (
+            timestamp TEXT PRIMARY KEY, portfolio_value REAL, available_cash REAL,
+            open_positions INTEGER
+        );
+        INSERT INTO portfolio_snapshots VALUES ('2026-08-30T19:39:42+00:00', 80000.0, 20000.0, 5);
+        INSERT INTO portfolio_snapshots VALUES ('2026-08-31T19:39:42+00:00', 88000.0, 25000.0, 5);
+
         CREATE TABLE position_state (symbol TEXT, shares REAL, entry_price REAL);
         INSERT INTO position_state (symbol, shares, entry_price) VALUES ('AAPL', 10.0, 190.0);
         INSERT INTO position_state (symbol, shares, entry_price) VALUES ('MSFT', 4.0, 410.0);
 
-        CREATE TABLE signal_log (id INTEGER PRIMARY KEY, regime TEXT);
-        INSERT INTO signal_log (regime) VALUES ('RISK_ON');
-        INSERT INTO signal_log (regime) VALUES ('NEUTRAL_HIGH_VOL');
+        CREATE TABLE signal_log (id INTEGER PRIMARY KEY, timestamp TEXT, regime TEXT);
+        INSERT INTO signal_log (timestamp, regime)
+        VALUES ('2026-08-31T13:10:00+00:00', 'RISK_ON');
+        INSERT INTO signal_log (timestamp, regime)
+        VALUES ('2026-08-31T19:39:45+00:00', 'NEUTRAL_HIGH_VOL');
 
         CREATE TABLE risk_state (key TEXT PRIMARY KEY, value TEXT, updated_at TEXT);
         INSERT INTO risk_state (key, value, updated_at)
@@ -102,10 +115,15 @@ def offline(monkeypatch):
         def get_recent_orders(self):
             return _adapter_down("alpaca_paper_orders")
 
+    class _NoMarketQuote:
+        def get_spy_quote(self):
+            return _adapter_down("yfinance_market_quote")
+
     monkeypatch.setattr(bootstrap, "AlpacaNewsSource", _NoNews)
     monkeypatch.setattr(bootstrap, "LivePriceSource", _NoPrices)
     monkeypatch.setattr(bootstrap, "AlpacaPaperSource", _NoAccount)
     monkeypatch.setattr(bootstrap, "AlpacaPaperOrdersSource", _NoOrders)
+    monkeypatch.setattr(bootstrap, "LiveMarketQuoteSource", _NoMarketQuote)
 
 
 # --- screen providers read real snapshot rows ------------------------------
@@ -143,7 +161,158 @@ def test_morning_brief_regime_and_capital_real_from_snapshot(tmp_path, offline):
     snap = _make_fixture_snapshot(tmp_path)
     screen = bootstrap._build_morning_brief_screen(db_path=snap)
     assert "NEUTRAL_HIGH_VOL" in screen.market_mood_regime.available_summary
-    assert "12,345.67" in screen.portfolio_snapshot.available_summary
+    # Portfolio Snapshot now comes from the latest portfolio_snapshots row
+    # (88,000.00 value / 25,000.00 cash / 63,000.00 invested), NOT the
+    # stale capital_pools accounting row (12,345.67 cash).
+    summary = screen.portfolio_snapshot.available_summary
+    assert "88,000.00" in summary
+    assert "25,000.00 cash" in summary
+    assert "63,000.00 invested" in summary
+    assert "12,345.67" not in summary
+
+
+def test_morning_brief_portfolio_section_as_of_is_the_portfolio_snapshots_timestamp(
+    tmp_path, offline
+):
+    """P1 per-section freshness: Portfolio Snapshot's `as_of` is the latest
+    portfolio_snapshots row's own timestamp (2026-08-31T19:39:42Z ->
+    14:39 CDT), not the render clock and not capital_pools.updated_at."""
+    snap = _make_fixture_snapshot(tmp_path)
+    section = bootstrap._build_morning_brief_screen(db_path=snap).portfolio_snapshot
+    assert section.as_of == "2026-08-31 14:39 CDT"
+
+
+def test_morning_brief_regime_section_as_of_is_the_signal_log_timestamp(tmp_path, offline):
+    """Market Mood / Regime's `as_of` is signal_log.timestamp of the row
+    the regime label came from (2026-08-31T19:39:45Z -> 14:39 CDT); the
+    regime string itself is unchanged."""
+    snap = _make_fixture_snapshot(tmp_path)
+    section = bootstrap._build_morning_brief_screen(db_path=snap).market_mood_regime
+    assert section.available_summary == "Current market regime: NEUTRAL_HIGH_VOL."
+    assert section.as_of == "2026-08-31 14:39 CDT"
+
+
+def test_morning_brief_screening_section_as_of_is_screener_log_screened_at(
+    tmp_path, offline
+):
+    """Candidate Screening Summary's `as_of` is screener_log.screened_at --
+    the same authoritative timestamp the summary body already states as a
+    date (2020-01-02), rendered here with the wall-clock convention."""
+    snap = _make_fixture_snapshot(tmp_path)
+    section = bootstrap._build_morning_brief_screen(
+        db_path=snap
+    ).candidate_screening_summary
+    assert "2020-01-02" in section.available_summary  # body: persisted date, not today
+    # date-only screened_at -> midnight UTC -> 2020-01-01 18:00 CST
+    assert section.as_of == "2020-01-01 18:00 CST"
+
+
+def test_morning_brief_news_section_as_of_is_the_live_fetch_instant_not_snapshot_time(
+    tmp_path, monkeypatch, offline
+):
+    """Overnight Holdings News' `as_of` is the instant the live Alpaca News
+    GET returned -- captured via bootstrap._now_utc(), NOT any trades.db
+    snapshot timestamp. It differs from the portfolio_snapshots-derived
+    `as_of` and moves with each build/Refresh."""
+    from applications.trading_intelligence.adapters.alpaca_news_source import (
+        HoldingsNewsItem,
+        OvernightHoldingsNews,
+    )
+
+    class _LiveNews:
+        def get_overnight_holdings_news(self, symbols):
+            return ReadResult.healthy(
+                OvernightHoldingsNews(
+                    items=(
+                        HoldingsNewsItem(
+                            headline="AAPL up", symbols=("AAPL",), source="Benzinga",
+                            created_at="2026-09-01T05:00:00+00:00",
+                            url="https://example.test/a",
+                        ),
+                    )
+                ),
+                "alpaca_news",
+            )
+
+    monkeypatch.setattr(bootstrap, "AlpacaNewsSource", _LiveNews)
+    monkeypatch.setattr(
+        bootstrap,
+        "_now_utc",
+        lambda: datetime(2026, 9, 1, 12, 34, tzinfo=timezone.utc),
+    )
+
+    snap = _make_fixture_snapshot(tmp_path)
+    screen = bootstrap._build_morning_brief_screen(db_path=snap)
+    news = screen.overnight_holdings_news
+
+    assert news.is_available
+    assert news.as_of == "2026-09-01 07:34 CDT"  # 12:34 UTC -> CDT fetch instant
+    # not the portfolio_snapshots-derived section timestamp
+    assert news.as_of != screen.portfolio_snapshot.as_of
+    # not any trades.db snapshot timestamp present in the fixture
+    assert "2026-08-31" not in news.as_of
+
+
+def test_morning_brief_section_as_of_is_none_on_the_unavailable_path(tmp_path, offline):
+    """No trades.db -> every trades.db-backed section stays unavailable and
+    carries no `as_of` (never a fabricated timestamp)."""
+    screen = bootstrap._build_morning_brief_screen(db_path=str(tmp_path / "nope.db"))
+    for attr in (
+        "portfolio_snapshot",
+        "market_mood_regime",
+        "candidate_screening_summary",
+        "overnight_holdings_news",
+    ):
+        assert getattr(screen, attr).as_of is None
+
+
+def _html_strings(demo):
+    return [
+        b.value
+        for b in demo.blocks.values()
+        if isinstance(b, gr.HTML) and isinstance(getattr(b, "value", None), str)
+    ]
+
+
+def test_morning_brief_ui_shows_snapshot_fetch_time_separate_from_render_clock(
+    tmp_path, offline
+):
+    """ADR-055 snapshot-age visibility: the built Morning Brief carries a
+    'Rendered at ...' line (render clock) AND a separate 'Operational data
+    snapshot: ...' line whose timestamp is the fetched snapshot file's
+    mtime -- i.e. when this process obtained it. Refresh does not
+    re-download, so this is derived read-only from os.path.getmtime."""
+    snap = _make_fixture_snapshot(tmp_path)
+
+    demo = bootstrap._build_morning_brief_ui(snap).build()
+    combined = "\n".join(_html_strings(demo))
+
+    expected_stamp = (
+        datetime.fromtimestamp(os.path.getmtime(snap), timezone.utc)
+        .astimezone(ZoneInfo("America/Chicago"))
+        .strftime("%Y-%m-%d %H:%M %Z")
+    )
+
+    assert "Rendered at " in combined
+    assert f"Operational data snapshot: {expected_stamp}" in combined
+    assert "not re-downloaded on Refresh" in combined
+
+
+def test_morning_brief_ui_snapshot_line_unavailable_when_no_snapshot_path(offline):
+    demo = bootstrap._build_morning_brief_ui(None).build()
+    combined = "\n".join(_html_strings(demo))
+
+    assert "Rendered at " in combined
+    assert "Operational data snapshot: unavailable" in combined
+
+
+def test_snapshot_fetched_at_helper_reads_the_file_mtime(tmp_path):
+    snap = _make_fixture_snapshot(tmp_path)
+    result = bootstrap._snapshot_fetched_at(snap)
+    assert result == datetime.fromtimestamp(os.path.getmtime(snap), timezone.utc)
+
+    assert bootstrap._snapshot_fetched_at(None) is None
+    assert bootstrap._snapshot_fetched_at(str(tmp_path / "missing.db")) is None
 
 
 def test_morning_brief_unavailable_when_no_snapshot(tmp_path, monkeypatch, offline):
@@ -213,6 +382,7 @@ def test_build_app_threads_snapshot_path_into_every_legacy_adapter(
     seen = {}
     for name in (
         "LegacyCapitalSource",
+        "LegacyPortfolioSnapshotSource",
         "LegacyRegimeSource",
         "LegacyCandidateScreeningSource",
         "LegacyPositionSource",
