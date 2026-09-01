@@ -266,8 +266,10 @@ def _signal_sell(con: sqlite3.Connection, client: AlpacaClient, symbol: str, pos
                  pool: CapitalPool | None = None) -> bool:
     limit_order = client.sell(symbol, qty=pos_qty, limit_price=current_price)
     sell_result = limit_order
+    total_filled_qty = 0.0
     if limit_order:
         filled_qty = client.wait_for_fill(limit_order["order_id"], timeout_secs=12)
+        total_filled_qty = filled_qty
         remaining_qty = pos_qty - filled_qty
         if remaining_qty > 0.001 and is_from_stop:
             logger.warning(
@@ -276,7 +278,7 @@ def _signal_sell(con: sqlite3.Connection, client: AlpacaClient, symbol: str, pos
             )
             market_order = client.sell_market(symbol, remaining_qty)
             if market_order:
-                client.wait_for_fill(market_order["order_id"], timeout_secs=10)
+                total_filled_qty += client.wait_for_fill(market_order["order_id"], timeout_secs=10)
                 sell_result = market_order
             else:
                 logger.error(
@@ -285,7 +287,11 @@ def _signal_sell(con: sqlite3.Connection, client: AlpacaClient, symbol: str, pos
                     f"({filled_qty:.4f} of {pos_qty:.4f} shares)"
                 )
                 sell_result = None if filled_qty == 0.0 else limit_order
-    if sell_result:
+    # A truthy sell_result only means an order was accepted, not that it filled.
+    # Persist the SELL and close position_state only when shares actually changed
+    # hands; a zero-fill (limit timed out + cancelled, or market escalation
+    # rejected) falls through to the "will retry next cycle" branch below.
+    if sell_result and total_filled_qty > 0.0:
         sell_notional = pos_qty * current_price
         order_id = sell_result.get("order_id")
         if is_from_stop:

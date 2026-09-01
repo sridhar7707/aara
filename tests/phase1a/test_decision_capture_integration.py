@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from unittest.mock import Mock
 
 import pytest
@@ -20,7 +21,7 @@ import ledger.ledger as ledger_svc  # noqa: E402
 import bot.trust_ledger.candidates as candidates  # noqa: E402
 from bot._main_cycle import _handle_entry, EntryContext  # noqa: E402
 from bot._main_positions import _handle_exits  # noqa: E402
-from bot._main_trust_decisions import ExitLedgerContext  # noqa: E402
+from bot._main_trust_decisions import ExitDecisionRecorder, ExitLedgerContext  # noqa: E402
 from bot.risk.risk_manager import RiskManager  # noqa: E402
 
 
@@ -455,3 +456,173 @@ def test_full_buy_then_sell_writes_outcome_event_and_closes_decision_state(
     assert ledger_conn.execute(
         "SELECT outcome_state FROM decision_state WHERE decision_id=?", (buy_decision_id,)
     ).fetchone()[0] == "CLOSED"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Zero-fill SELL: a broker-accepted SELL that never fills (filled_qty == 0)
+# must not persist a trade, delete position_state, record a PDT day-trade,
+# mutate stop_fired_today, or write a Trust-Ledger EXECUTED / outcome event.
+# (Fill-quantity fake clients only -- no network, no broker.)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _ZeroFillRisk(_NeverExitRisk):
+    """Never triggers an exit gate; PDT day-trades land in an inspectable list."""
+
+    def __init__(self):
+        self.day_trade_log = []
+
+    def record_day_trade(self):
+        self.day_trade_log.append(1)
+
+
+class _ZeroFillSellClient:
+    """sell()/sell_market() are accepted by the broker; nothing ever fills."""
+
+    def sell(self, symbol, qty, limit_price=None):
+        return {"order_id": "ord-zero-limit"}
+
+    def sell_market(self, symbol, qty):
+        return {"order_id": "ord-zero-market"}
+
+    def wait_for_fill(self, order_id, timeout_secs=15):
+        return 0.0
+
+
+class _StopLossRisk(_NeverExitRisk):
+    def check_stop_loss(self, *a, **k):
+        return True
+
+
+def test_handle_exits_time_exit_zero_fill_no_pdt_no_ledger_executed(trades_db, ledger_conn, chain):
+    """A time-exit SELL the broker accepts but never fills (filled_qty == 0)
+    must leave everything untouched: no trades row, position_state intact, no
+    PDT record; on the Trust Ledger a QUALIFIED_REJECTION (not EXECUTED), no
+    decision_outcome_events row, and the BUY's decision_state still OPEN."""
+    from config import MAX_HOLD_DAYS
+
+    # real BUY -> OPEN decision_state + position_state for AAPL
+    entry_ctx = _minimal_entry_ctx(
+        ledger_conn, chain, current_atr=2.0, xgb=_FakeXgb(),
+        tradeable_capital=5000.0, available_cash=5000.0, portfolio_value=10000.0,
+    )
+    _handle_entry(trades_db, client=_FakeFillClient(), risk=_AlwaysApproveRisk(), symbol="AAPL", ctx=entry_ctx)
+
+    buy_decision_id = ledger_conn.execute(
+        "SELECT decision_id FROM decision_events WHERE asset='AAPL' AND action='BUY' "
+        "ORDER BY sequence_number DESC LIMIT 1"
+    ).fetchone()[0]
+    assert ledger_conn.execute(
+        "SELECT outcome_state FROM decision_state WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == "OPEN"
+
+    entry_px, held_qty = trades_db.execute(
+        "SELECT entry_price, shares FROM position_state WHERE symbol='AAPL'"
+    ).fetchone()
+
+    # Age the position past MAX_HOLD_DAYS so the time-exit gate fires, and pin
+    # high_water_mark/shares so _handle_exits' housekeeping upsert (which would
+    # otherwise reset opened_at) does not run.
+    old_open = (datetime.now(timezone.utc) - timedelta(days=MAX_HOLD_DAYS + 5)).isoformat()
+    trades_db.execute(
+        "UPDATE position_state SET opened_at=?, high_water_mark=?, shares=? WHERE symbol='AAPL'",
+        (old_open, 1_000_000.0, held_qty),
+    )
+    trades_db.commit()
+
+    ps_before = trades_db.execute("SELECT * FROM position_state WHERE symbol='AAPL'").fetchone()
+    trades_before = trades_db.execute("SELECT COUNT(*) FROM trades WHERE symbol='AAPL'").fetchone()[0]
+    outcomes_before = ledger_conn.execute("SELECT COUNT(*) FROM decision_outcome_events").fetchone()[0]
+
+    risk = _ZeroFillRisk()
+    processed = _handle_exits(
+        trades_db, client=_ZeroFillSellClient(), risk=risk, symbol="AAPL",
+        positions={"AAPL": _FakePosition(avg_entry_price=entry_px, qty=held_qty, unrealized_plpc=-0.005)},
+        sell_order_syms=set(), current_price=98.0, current_atr=0.0,
+        regime_name="TRENDING_UP", portfolio_value=10_000.0, action=0, pdt_exempt=False,
+        stop_fired_today=set(), ledger_ctx=_exit_ledger_ctx(ledger_conn, chain),
+    )
+
+    assert processed is True
+    # zero-fill time exit leaves trades absent
+    assert trades_db.execute(
+        "SELECT COUNT(*) FROM trades WHERE symbol='AAPL'"
+    ).fetchone()[0] == trades_before
+    assert trades_db.execute(
+        "SELECT COUNT(*) FROM trades WHERE symbol='AAPL' AND action LIKE 'SELL%'"
+    ).fetchone()[0] == 0
+    # position_state is unchanged
+    assert trades_db.execute("SELECT * FROM position_state WHERE symbol='AAPL'").fetchone() == ps_before
+    # no PDT record is created
+    assert risk.day_trade_log == []
+    # Trust Ledger records QUALIFIED_REJECTION rather than EXECUTED
+    _, action, event_type, _, _ = _latest_decision(ledger_conn, "AAPL")
+    assert action == "REJECT"
+    assert event_type == "QUALIFIED_REJECTION"
+    # no decision_outcome_events row is created
+    assert ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events"
+    ).fetchone()[0] == outcomes_before
+    assert ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == 0
+    # decision_state remains OPEN
+    assert ledger_conn.execute(
+        "SELECT outcome_state FROM decision_state WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == "OPEN"
+
+
+def test_handle_exits_stop_loss_zero_fill_does_not_set_stop_fired_today(trades_db, ledger_conn, chain):
+    """A stop-loss whose limit AND market-escalation orders are both accepted
+    but fill zero must NOT add the symbol to stop_fired_today (the stop never
+    executed), must write no SELL trades row, and must record a
+    QUALIFIED_REJECTION on the Trust Ledger."""
+    stop_fired_today: set = set()
+    positions = {"AAPL": _FakePosition(avg_entry_price=100.0, qty=3.0, unrealized_plpc=-0.05)}
+
+    processed = _handle_exits(
+        trades_db, client=_ZeroFillSellClient(), risk=_StopLossRisk(), symbol="AAPL", positions=positions,
+        sell_order_syms=set(), current_price=95.0, current_atr=0.0,
+        regime_name="TRENDING_UP", portfolio_value=10_000.0, action=0, pdt_exempt=False,
+        stop_fired_today=stop_fired_today, ledger_ctx=_exit_ledger_ctx(ledger_conn, chain),
+    )
+
+    assert processed is True
+    # zero-fill stop-loss does not add the symbol to stop_fired_today
+    assert "AAPL" not in stop_fired_today
+    assert stop_fired_today == set()
+    # no SELL trades row
+    assert trades_db.execute(
+        "SELECT COUNT(*) FROM trades WHERE symbol='AAPL' AND action LIKE 'SELL%'"
+    ).fetchone()[0] == 0
+    # Trust Ledger: QUALIFIED_REJECTION, not EXECUTED
+    _, action, event_type, _, _ = _latest_decision(ledger_conn, "AAPL")
+    assert action == "REJECT"
+    assert event_type == "QUALIFIED_REJECTION"
+
+
+def test_exit_decision_recorder_sell_false_writes_qualified_rejection_no_outcome(ledger_conn, chain):
+    """Unit test of ExitDecisionRecorder.sell(success=False): it must append a
+    REJECT / QUALIFIED_REJECTION decision_events row (reason: '<r> sell order
+    failed to fill') and must NOT run _record_outcome -- no
+    decision_outcome_events row is written."""
+    rec = ExitDecisionRecorder(
+        _exit_ledger_ctx(ledger_conn, chain), "AAPL",
+        portfolio_value=10_000.0, current_price=98.0, regime_name="TRENDING_UP",
+    )
+    outcomes_before = ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events"
+    ).fetchone()[0]
+
+    rec.sell(False, "time-exit", pnl_pct=-0.02, holding_days=45)
+
+    row = _latest_decision(ledger_conn, "AAPL")
+    assert row is not None
+    _, action, event_type, risk_checks, _ = row
+    assert action == "REJECT"
+    assert event_type == "QUALIFIED_REJECTION"
+    assert json.loads(risk_checks) == {"exit_reason": "time-exit sell order failed to fill"}
+    # _record_outcome was not invoked
+    assert ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events"
+    ).fetchone()[0] == outcomes_before
