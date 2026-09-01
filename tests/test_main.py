@@ -1077,12 +1077,13 @@ def test_exit_path_with_uuid_order_id_writes_sell_row_and_clears_position(db, mo
     _upsert_position_state(db, "GOOGL", 110.0, 120.0, 1.0, 5.0)
     assert db.execute("SELECT 1 FROM position_state WHERE symbol='GOOGL'").fetchone()
 
-    ok = mp._signal_sell(
+    ok, fully_closed = mp._signal_sell(
         db, client, "GOOGL", 5.0, 100.0, "TRENDING_UP", 10_000.0,
         reason="signal", pnl_pct=-0.05, entry_price=110.0, holding_days=3, pool=None,
     )
 
     assert ok is True
+    assert fully_closed is True
     rows = db.execute(
         "SELECT action, order_id, typeof(order_id) FROM trades WHERE symbol='GOOGL'"
     ).fetchall()

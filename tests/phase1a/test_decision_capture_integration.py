@@ -669,6 +669,235 @@ def test_handle_exits_gap_down_zero_fill_does_not_phantom_close(trades_db, ledge
     ).fetchone()[0] == "OPEN"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Partial-fill SELL: a broker-accepted SELL that fills only some of the ordered
+# shares must persist a SELL trade / decision_events row for the ACTUAL filled
+# quantity, keep position_state alive with the unfilled remainder, and leave the
+# originating BUY decision OPEN (no decision_outcome_events row) until a later
+# close finishes the position. Drift-trims are always partial and must never
+# close the BUY decision.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _PartialFillSellClient:
+    """Broker accepts the order; wait_for_fill reports only `fill_qty` shares
+    (used for both the limit leg and any market-escalation leg)."""
+
+    def __init__(self, fill_qty):
+        self.fill_qty = fill_qty
+        self.orders = []
+
+    def sell(self, symbol, qty, limit_price=None):
+        self.orders.append(qty)
+        return {"order_id": "ord-partial-limit"}
+
+    def sell_market(self, symbol, qty):
+        self.orders.append(qty)
+        return {"order_id": "ord-partial-market"}
+
+    def wait_for_fill(self, order_id, timeout_secs=15):
+        return self.fill_qty
+
+
+def _seed_open_buy(trades_db, ledger_conn, chain):
+    """Real BUY through _handle_entry -> OPEN decision_state + position_state."""
+    entry_ctx = _minimal_entry_ctx(
+        ledger_conn, chain, current_atr=2.0, xgb=_FakeXgb(),
+        tradeable_capital=5000.0, available_cash=5000.0, portfolio_value=10000.0,
+    )
+    _handle_entry(trades_db, client=_FakeFillClient(), risk=_AlwaysApproveRisk(), symbol="AAPL", ctx=entry_ctx)
+    buy_decision_id = ledger_conn.execute(
+        "SELECT decision_id FROM decision_events WHERE asset='AAPL' AND action='BUY' "
+        "ORDER BY sequence_number DESC LIMIT 1"
+    ).fetchone()[0]
+    assert ledger_conn.execute(
+        "SELECT outcome_state FROM decision_state WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == "OPEN"
+    entry_px, held_qty = trades_db.execute(
+        "SELECT entry_price, shares FROM position_state WHERE symbol='AAPL'"
+    ).fetchone()
+    return buy_decision_id, entry_px, held_qty
+
+
+def test_handle_exits_partial_fill_keeps_buy_decision_open_and_writes_no_outcome(
+    trades_db, ledger_conn, chain,
+):
+    buy_decision_id, entry_px, held_qty = _seed_open_buy(trades_db, ledger_conn, chain)
+    opened_at_before = trades_db.execute(
+        "SELECT opened_at FROM position_state WHERE symbol='AAPL'"
+    ).fetchone()[0]
+    outcomes_before = ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events"
+    ).fetchone()[0]
+
+    filled = round(held_qty * 0.4, 4)
+    processed = _handle_exits(
+        trades_db, client=_PartialFillSellClient(filled), risk=_NeverExitRisk(), symbol="AAPL",
+        positions={"AAPL": _FakePosition(avg_entry_price=entry_px, qty=held_qty, unrealized_plpc=0.05)},
+        sell_order_syms=set(), current_price=105.0, current_atr=0.0,
+        regime_name="TRENDING_UP", portfolio_value=10_000.0, action=2, pdt_exempt=True,
+        stop_fired_today=set(), ledger_ctx=_exit_ledger_ctx(ledger_conn, chain),
+    )
+
+    assert processed is True
+    # SELL trade row carries the ACTUAL filled quantity
+    sell_rows = trades_db.execute(
+        "SELECT action, shares FROM trades WHERE symbol='AAPL' AND action LIKE 'SELL%'"
+    ).fetchall()
+    assert len(sell_rows) == 1
+    assert sell_rows[0][0] == "SELL"
+    assert sell_rows[0][1] == pytest.approx(filled)
+    # position_state stays, with the unfilled remainder; entry_price / opened_at preserved
+    ps = trades_db.execute(
+        "SELECT entry_price, shares, opened_at FROM position_state WHERE symbol='AAPL'"
+    ).fetchone()
+    assert ps is not None
+    assert ps[0] == pytest.approx(entry_px)
+    assert ps[1] == pytest.approx(held_qty - filled)
+    assert ps[2] == opened_at_before
+    # SELL decision is EXECUTED ...
+    _, action, event_type, _, _ = _latest_decision(ledger_conn, "AAPL")
+    assert (action, event_type) == ("SELL", "EXECUTED")
+    # ... but no outcome event, and the BUY decision is still OPEN
+    assert ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events"
+    ).fetchone()[0] == outcomes_before
+    assert ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == 0
+    assert ledger_conn.execute(
+        "SELECT outcome_state FROM decision_state WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == "OPEN"
+
+
+def test_handle_exits_partial_then_remainder_close_writes_exactly_one_outcome(
+    trades_db, ledger_conn, chain,
+):
+    buy_decision_id, entry_px, held_qty = _seed_open_buy(trades_db, ledger_conn, chain)
+
+    first_fill = round(held_qty * 0.4, 4)
+    _handle_exits(
+        trades_db, client=_PartialFillSellClient(first_fill), risk=_NeverExitRisk(), symbol="AAPL",
+        positions={"AAPL": _FakePosition(avg_entry_price=entry_px, qty=held_qty, unrealized_plpc=0.05)},
+        sell_order_syms=set(), current_price=105.0, current_atr=0.0,
+        regime_name="TRENDING_UP", portfolio_value=10_000.0, action=2, pdt_exempt=True,
+        stop_fired_today=set(), ledger_ctx=_exit_ledger_ctx(ledger_conn, chain),
+    )
+    remainder = trades_db.execute(
+        "SELECT shares FROM position_state WHERE symbol='AAPL'"
+    ).fetchone()[0]
+    assert remainder == pytest.approx(held_qty - first_fill)
+
+    # close the remainder in full
+    _handle_exits(
+        trades_db, client=_PartialFillSellClient(remainder), risk=_NeverExitRisk(), symbol="AAPL",
+        positions={"AAPL": _FakePosition(avg_entry_price=entry_px, qty=remainder, unrealized_plpc=0.07)},
+        sell_order_syms=set(), current_price=107.0, current_atr=0.0,
+        regime_name="TRENDING_UP", portfolio_value=10_000.0, action=2, pdt_exempt=True,
+        stop_fired_today=set(), ledger_ctx=_exit_ledger_ctx(ledger_conn, chain),
+    )
+
+    # position fully gone
+    assert trades_db.execute(
+        "SELECT COUNT(*) FROM position_state WHERE symbol='AAPL'"
+    ).fetchone()[0] == 0
+    # exactly one outcome event, referencing the original BUY, and it is now CLOSED
+    assert ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == 1
+    assert ledger_conn.execute(
+        "SELECT outcome_state FROM decision_state WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == "CLOSED"
+    # two SELL trade rows: the partial and the remainder close
+    assert trades_db.execute(
+        "SELECT COUNT(*) FROM trades WHERE symbol='AAPL' AND action LIKE 'SELL%'"
+    ).fetchone()[0] == 2
+
+
+def test_handle_exits_drift_trim_does_not_close_buy_decision(trades_db, ledger_conn, chain):
+    """Gate ④ drift-trim is a partial sell that leaves the position open — it
+    must write no decision_outcome_events row and leave the BUY decision OPEN,
+    regardless of the fill being complete for the trim quantity."""
+    buy_decision_id, entry_px, held_qty = _seed_open_buy(trades_db, ledger_conn, chain)
+    outcomes_before = ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events"
+    ).fetchone()[0]
+
+    # oversize the position so (qty * price) / portfolio_value > MAX_POSITION_DRIFT_PCT (0.25)
+    drift_qty = held_qty + 40.0
+    client = _PartialFillSellClient(fill_qty=999.0)  # fills whatever trim qty is asked
+    processed = _handle_exits(
+        trades_db, client=client, risk=_NeverExitRisk(), symbol="AAPL",
+        positions={"AAPL": _FakePosition(avg_entry_price=entry_px, qty=drift_qty, unrealized_plpc=0.0)},
+        sell_order_syms=set(), current_price=100.0, current_atr=0.0,
+        regime_name="TRENDING_UP", portfolio_value=10_000.0, action=0, pdt_exempt=True,
+        stop_fired_today=set(), ledger_ctx=_exit_ledger_ctx(ledger_conn, chain),
+    )
+
+    assert processed is True
+    # a SELL_TRIM row was written
+    assert trades_db.execute(
+        "SELECT COUNT(*) FROM trades WHERE symbol='AAPL' AND action='SELL_TRIM'"
+    ).fetchone()[0] == 1
+    # position_state still present
+    assert trades_db.execute(
+        "SELECT COUNT(*) FROM position_state WHERE symbol='AAPL'"
+    ).fetchone()[0] == 1
+    # no outcome event; BUY decision still OPEN
+    assert ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events"
+    ).fetchone()[0] == outcomes_before
+    assert ledger_conn.execute(
+        "SELECT outcome_state FROM decision_state WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == "OPEN"
+
+
+def test_handle_exits_gap_down_partial_fill_records_actual_qty_and_keeps_remainder(
+    trades_db, ledger_conn, chain,
+):
+    buy_decision_id, entry_px, held_qty = _seed_open_buy(trades_db, ledger_conn, chain)
+    opened_at_before = trades_db.execute(
+        "SELECT opened_at FROM position_state WHERE symbol='AAPL'"
+    ).fetchone()[0]
+    outcomes_before = ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events"
+    ).fetchone()[0]
+
+    filled = round(held_qty * 0.5, 4)
+    processed = _handle_exits(
+        trades_db, client=_PartialFillSellClient(filled), risk=_ZeroFillRisk(), symbol="AAPL",
+        positions={"AAPL": _FakePosition(avg_entry_price=entry_px, qty=held_qty, unrealized_plpc=-0.15)},
+        sell_order_syms=set(), current_price=entry_px * 0.85, current_atr=0.0,
+        regime_name="TRENDING_UP", portfolio_value=10_000.0, action=0, pdt_exempt=True,
+        stop_fired_today=set(), ledger_ctx=_exit_ledger_ctx(ledger_conn, chain),
+    )
+
+    assert processed is True
+    sell_rows = trades_db.execute(
+        "SELECT action, shares FROM trades WHERE symbol='AAPL' AND action LIKE 'SELL%'"
+    ).fetchall()
+    assert len(sell_rows) == 1
+    assert sell_rows[0][0] == "SELL_GAP_DOWN"
+    assert sell_rows[0][1] == pytest.approx(filled)
+    # remainder kept, entry_price / opened_at preserved
+    ps = trades_db.execute(
+        "SELECT entry_price, shares, opened_at FROM position_state WHERE symbol='AAPL'"
+    ).fetchone()
+    assert ps is not None
+    assert ps[0] == pytest.approx(entry_px)
+    assert ps[1] == pytest.approx(held_qty - filled)
+    assert ps[2] == opened_at_before
+    # SELL decision EXECUTED, but no outcome yet and BUY still OPEN
+    _, action, event_type, _, _ = _latest_decision(ledger_conn, "AAPL")
+    assert (action, event_type) == ("SELL", "EXECUTED")
+    assert ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events"
+    ).fetchone()[0] == outcomes_before
+    assert ledger_conn.execute(
+        "SELECT outcome_state FROM decision_state WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == "OPEN"
+
+
 def test_exit_decision_recorder_sell_false_writes_qualified_rejection_no_outcome(ledger_conn, chain):
     """Unit test of ExitDecisionRecorder.sell(success=False): it must append a
     REJECT / QUALIFIED_REJECTION decision_events row (reason: '<r> sell order

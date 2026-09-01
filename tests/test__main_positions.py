@@ -4,13 +4,15 @@ Critical invariant (post zero-fill fix): a SELL with total filled_qty == 0
 must NOT
   - write a completed SELL trades row,
   - delete position_state,
-  - report success (_signal_sell must return False).
+  - report a sale (_signal_sell must return (False, False)).
 
-A fill > 0 must still persist the SELL with the broker order_id and close
-position_state. Partial fills follow the pre-existing contract (recorded as a
-close for the ordered quantity; the remainder is left for
-_reconcile_positions -- see wait_for_fill's own docstring), which this fix
-does not change.
+_signal_sell returns (sold, fully_closed):
+  - full fill  -> (True, True):  SELL row for the actual filled qty, position_state deleted.
+  - partial    -> (True, False): SELL row for the ACTUAL filled qty, position_state kept
+                                 with the unfilled remainder (entry_price / opened_at /
+                                 high_water_mark / atr_at_entry preserved). Caller must NOT
+                                 record a decision outcome yet.
+  - zero fill  -> (False, False): nothing persisted, position_state untouched.
 """
 import uuid
 
@@ -74,7 +76,7 @@ def _trades(db, symbol):
 
 def _pos_row(db, symbol):
     return db.execute(
-        "SELECT entry_price, high_water_mark, atr_at_entry, shares "
+        "SELECT entry_price, high_water_mark, atr_at_entry, shares, opened_at "
         "FROM position_state WHERE symbol=?",
         (symbol,),
     ).fetchone()
@@ -85,12 +87,13 @@ def test_signal_sell_zero_fill_writes_no_trade_and_keeps_position_state(db):
     before = _pos_row(db, "GOOGL")
     client = _FakeClient(limit_submit=True, limit_fill=0.0)
 
-    result = mp._signal_sell(
+    sold, fully_closed = mp._signal_sell(
         db, client, "GOOGL", 5.0, 100.0, "TRENDING_UP", 10_000.0,
         reason="time-exit", pnl_pct=-0.03, entry_price=110.0, holding_days=40, pool=None,
     )
 
-    assert result is False
+    assert sold is False
+    assert fully_closed is False
     assert _trades(db, "GOOGL") == []
     assert _pos_row(db, "GOOGL") == before
 
@@ -99,12 +102,13 @@ def test_signal_sell_full_fill_persists_trade_with_order_id_and_deletes_position
     _seed_position(db)
     client = _FakeClient(limit_submit=True, limit_fill=5.0)
 
-    result = mp._signal_sell(
+    sold, fully_closed = mp._signal_sell(
         db, client, "GOOGL", 5.0, 100.0, "TRENDING_UP", 10_000.0,
         reason="time-exit", pnl_pct=-0.03, entry_price=110.0, holding_days=40, pool=None,
     )
 
-    assert result is True
+    assert sold is True
+    assert fully_closed is True
     rows = _trades(db, "GOOGL")
     assert len(rows) == 1
     action, shares, oid = rows[0]
@@ -114,27 +118,80 @@ def test_signal_sell_full_fill_persists_trade_with_order_id_and_deletes_position
     assert _pos_row(db, "GOOGL") is None
 
 
-def test_signal_sell_partial_fill_follows_existing_reconcile_contract(db):
-    """Pre-existing semantics: any fill > 0 records a close for the ordered
-    quantity and deletes position_state; the unfilled remainder is left for
-    _reconcile_positions. This fix does not change that -- only the
-    zero-fill case."""
-    _seed_position(db)
+def test_signal_sell_full_fill_records_actual_filled_quantity(db):
+    """Broker reports a filled qty slightly under the ordered qty (rounding /
+    fractional dust) but within the 0.001 epsilon -- still a full close, and
+    the trade row must carry the ACTUAL filled quantity, not the ordered one."""
+    _seed_position(db, shares=5.0)
+    client = _FakeClient(limit_submit=True, limit_fill=4.9995)  # within epsilon of 5
+
+    sold, fully_closed = mp._signal_sell(
+        db, client, "GOOGL", 5.0, 100.0, "TRENDING_UP", 10_000.0,
+        reason="signal", pnl_pct=0.02, entry_price=110.0, holding_days=10, pool=None,
+    )
+
+    assert (sold, fully_closed) == (True, True)
+    rows = _trades(db, "GOOGL")
+    assert len(rows) == 1
+    action, shares, _oid = rows[0]
+    assert action == "SELL"
+    assert shares == pytest.approx(4.9995)
+    assert _pos_row(db, "GOOGL") is None
+
+
+def test_signal_sell_partial_fill_records_filled_qty_and_keeps_remainder(db):
+    """A partial fill records a SELL for the ACTUAL filled quantity and keeps
+    position_state alive with the unfilled remainder; entry_price and
+    opened_at are preserved so holding-period / cost-basis math still works.
+    The result reports a real sale that did NOT fully close the position."""
+    _seed_position(db, entry=110.0, hwm=120.0, atr=1.0, shares=5.0)
+    before = _pos_row(db, "GOOGL")
     client = _FakeClient(limit_submit=True, limit_fill=2.0)  # 2 of 5
 
-    result = mp._signal_sell(
+    sold, fully_closed = mp._signal_sell(
         db, client, "GOOGL", 5.0, 100.0, "TRENDING_UP", 10_000.0,
         reason="signal", pnl_pct=0.01, entry_price=110.0, holding_days=10, pool=None,
     )
 
-    assert result is True
+    assert sold is True
+    assert fully_closed is False
     rows = _trades(db, "GOOGL")
     assert len(rows) == 1
     action, shares, oid = rows[0]
     assert action == "SELL"
-    assert shares == 5.0            # ordered qty, per the existing contract
+    assert shares == pytest.approx(2.0)      # actual fill, never the ordered 5
     assert oid == client.limit_oid
-    assert _pos_row(db, "GOOGL") is None
+    after = _pos_row(db, "GOOGL")
+    assert after is not None
+    entry_price, _hwm, _atr, rem_shares, opened_at = after
+    assert rem_shares == pytest.approx(3.0)
+    assert entry_price == pytest.approx(110.0)          # preserved
+    assert opened_at == before[4]                        # preserved
+
+
+def test_signal_sell_partial_stop_escalation_sums_both_legs_and_keeps_remainder(db):
+    """Stop path: limit leg fills 2, market escalation fills 1 -> one SELL_STOP
+    row for the combined 3 shares, remainder 2 left in position_state."""
+    _seed_position(db, shares=5.0)
+    client = _FakeClient(
+        limit_submit=True, limit_fill=2.0, market_submit=True, market_fill=1.0,
+    )
+
+    sold, fully_closed = mp._signal_sell(
+        db, client, "GOOGL", 5.0, 100.0, "TRENDING_UP", 10_000.0,
+        is_from_stop=True, reason="stop-loss", pnl_pct=-0.06, entry_price=110.0, pool=None,
+    )
+
+    assert (sold, fully_closed) == (True, False)
+    rows = _trades(db, "GOOGL")
+    assert len(rows) == 1
+    action, shares, oid = rows[0]
+    assert action == "SELL_STOP"
+    assert shares == pytest.approx(3.0)
+    assert oid == client.market_oid
+    after = _pos_row(db, "GOOGL")
+    assert after is not None
+    assert after[3] == pytest.approx(2.0)
 
 
 def test_signal_sell_stop_escalation_zero_fill_both_legs_returns_false_no_persistence(db):
@@ -144,12 +201,13 @@ def test_signal_sell_stop_escalation_zero_fill_both_legs_returns_false_no_persis
         limit_submit=True, limit_fill=0.0, market_submit=True, market_fill=0.0,
     )
 
-    result = mp._signal_sell(
+    sold, fully_closed = mp._signal_sell(
         db, client, "GOOGL", 5.0, 100.0, "TRENDING_UP", 10_000.0,
         is_from_stop=True, reason="stop-loss", pnl_pct=-0.06, entry_price=110.0, pool=None,
     )
 
-    assert result is False
+    assert sold is False
+    assert fully_closed is False
     assert _trades(db, "GOOGL") == []
     assert _pos_row(db, "GOOGL") == before
 
@@ -160,12 +218,13 @@ def test_signal_sell_stop_escalation_market_fills_full_persists_stop_row(db):
         limit_submit=True, limit_fill=0.0, market_submit=True, market_fill=5.0,
     )
 
-    result = mp._signal_sell(
+    sold, fully_closed = mp._signal_sell(
         db, client, "GOOGL", 5.0, 100.0, "TRENDING_UP", 10_000.0,
         is_from_stop=True, reason="stop-loss", pnl_pct=-0.06, entry_price=110.0, pool=None,
     )
 
-    assert result is True
+    assert sold is True
+    assert fully_closed is True
     rows = _trades(db, "GOOGL")
     assert len(rows) == 1
     action, shares, oid = rows[0]
@@ -179,11 +238,49 @@ def test_signal_sell_submit_failure_returns_false_no_persistence(db):
     before = _pos_row(db, "GOOGL")
     client = _FakeClient(limit_submit=False)
 
-    result = mp._signal_sell(
+    sold, fully_closed = mp._signal_sell(
         db, client, "GOOGL", 5.0, 100.0, "TRENDING_UP", 10_000.0,
         reason="time-exit", pnl_pct=-0.03, entry_price=110.0, pool=None,
     )
 
-    assert result is False
+    assert sold is False
+    assert fully_closed is False
+    assert _trades(db, "GOOGL") == []
+    assert _pos_row(db, "GOOGL") == before
+
+
+def test_trim_position_partial_fill_records_filled_qty_and_decrements_state(db):
+    """_trim_position logs only the ACTUAL filled quantity and decrements
+    position_state by that amount -- never by the ordered trim quantity."""
+    _seed_position(db, entry=110.0, hwm=120.0, atr=1.0, shares=10.0)
+    client = _FakeClient(limit_submit=True, limit_fill=1.5)  # asked 4, filled 1.5
+
+    ok = mp._trim_position(
+        db, client, "GOOGL", 4.0, 100.0, "TRENDING_UP", 10_000.0,
+        pnl_pct=0.05, entry_price=110.0, pool=None,
+    )
+
+    assert ok is True
+    rows = _trades(db, "GOOGL")
+    assert len(rows) == 1
+    action, shares, _oid = rows[0]
+    assert action == "SELL_TRIM"
+    assert shares == pytest.approx(1.5)
+    after = _pos_row(db, "GOOGL")
+    assert after is not None
+    assert after[3] == pytest.approx(8.5)   # 10 - 1.5
+
+
+def test_trim_position_zero_fill_leaves_everything_unchanged(db):
+    _seed_position(db, shares=10.0)
+    before = _pos_row(db, "GOOGL")
+    client = _FakeClient(limit_submit=True, limit_fill=0.0)
+
+    ok = mp._trim_position(
+        db, client, "GOOGL", 4.0, 100.0, "TRENDING_UP", 10_000.0,
+        pnl_pct=0.05, entry_price=110.0, pool=None,
+    )
+
+    assert ok is False
     assert _trades(db, "GOOGL") == []
     assert _pos_row(db, "GOOGL") == before

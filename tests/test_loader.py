@@ -87,3 +87,28 @@ def test_load_completed_trades_still_open_position_produces_no_row(db):
 def test_load_completed_trades_empty_db_returns_empty_dataframe(db):
     df = load_completed_trades(con=db)
     assert df.empty
+
+
+def test_load_completed_trades_partial_then_remainder_is_one_round_trip(db):
+    """A partial SELL fill followed by the remainder close belongs to ONE BUY
+    and must collapse into a single completed round trip: shares and realized
+    P&L summed across both SELLs, exit price notional-weighted, and the final
+    SELL's timestamp / reason carried as the close."""
+    log_trade(db, "AAPL", "BUY", 10.0, 100.0, 1000.0, "TRENDING_UP", 10000.0, 0.0,
+              entry_price=0.0)
+    # partial: 4 shares @ 120  (realized 4 * (120-100) = 80)
+    log_trade(db, "AAPL", "SELL", 4.0, 120.0, 480.0, "TRENDING_UP", 10000.0, 0.20,
+              entry_price=100.0)
+    # remainder: 6 shares @ 130  (realized 6 * (130-100) = 180)
+    log_trade(db, "AAPL", "SELL_TIME_EXIT", 6.0, 130.0, 780.0, "TRENDING_UP", 10000.0, 0.30,
+              entry_price=100.0)
+
+    df = load_completed_trades(con=db)
+    assert len(df) == 1
+    row = df.iloc[0]
+    assert row["entry_price"] == pytest.approx(100.0)
+    assert row["exit_shares"] == pytest.approx(10.0)              # 4 + 6
+    assert row["realized_pnl"] == pytest.approx(260.0)            # 80 + 180
+    assert row["exit_price"] == pytest.approx((480.0 + 780.0) / 10.0)  # notional-weighted = 126
+    assert row["exit_reason"] == "SELL_TIME_EXIT"                 # the final close
+    assert row["pnl_pct"] == pytest.approx(0.30)                  # the final close

@@ -255,10 +255,19 @@ class ExitDecisionRecorder:
         self._kwargs = dict(portfolio_value=portfolio_value, current_price=current_price,
                             regime_name=regime_name)
 
-    def sell(self, success: bool, reason: str, pnl_pct: float = 0.0, holding_days: int = 0) -> None:
+    def sell(self, success: bool, reason: str, pnl_pct: float = 0.0, holding_days: int = 0,
+             fully_closed: bool = True) -> None:
         if success:
             record_exit_decision_safe(*self._args, "SELL", "EXECUTED", reason, **self._kwargs)
-            self._record_outcome(pnl_pct, holding_days)
+            # The SELL decision is EXECUTED as soon as any shares fill, but the
+            # decision_outcome_events row (what flips the originating BUY
+            # decision OPEN -> CLOSED) is written only once the position is
+            # actually gone. A partial fill or a drift-trim leaves shares on the
+            # book, so the caller passes fully_closed=False and the outcome is
+            # deferred to the later close. Closure is threaded in explicitly --
+            # this recorder never queries position_state to infer it.
+            if fully_closed:
+                self._record_outcome(pnl_pct, holding_days)
         else:
             record_exit_decision_safe(*self._args, "REJECT", "QUALIFIED_REJECTION",
                                       f"{reason} sell order failed to fill", **self._kwargs)

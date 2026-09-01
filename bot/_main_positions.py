@@ -234,24 +234,27 @@ def _trim_position(con: sqlite3.Connection, client: AlpacaClient, symbol: str, t
     Unlike _signal_sell, does NOT delete position_state — the position still exists."""
     result = client.sell(symbol, qty=trim_qty, limit_price=current_price)
     if result:
-        client.wait_for_fill(result["order_id"], timeout_secs=12)
-        trim_notional = trim_qty * current_price
-        log_trade(con, symbol, "SELL_TRIM", trim_qty, current_price, trim_notional,
+        trim_filled = client.wait_for_fill(result["order_id"], timeout_secs=12)
+        if trim_filled <= 0.001:
+            logger.warning(f"TRIM {symbol}: sell order did not fill — position left unchanged")
+            return False
+        trim_notional = trim_filled * current_price
+        log_trade(con, symbol, "SELL_TRIM", trim_filled, current_price, trim_notional,
                   regime_name, portfolio_value, pnl_pct, entry_price=entry_price,
                   order_id=result.get("order_id"))
         if pool:
-            cost_basis = entry_price * trim_qty if entry_price > 0 else trim_notional
+            cost_basis = entry_price * trim_filled if entry_price > 0 else trim_notional
             _pool_sell(con, pool.id, cost_basis, trim_notional, symbol=symbol)
         _pos_state = _load_position_state(con, symbol)
         if _pos_state is not None:
             _upsert_position_state(con, symbol, entry_price, _pos_state.high_water_mark,
                                     _pos_state.atr_at_entry or 0.0,
-                                    max(0.0, _pos_state.shares - trim_qty))
+                                    max(0.0, _pos_state.shares - trim_filled))
         _trim_freed_pct = trim_notional / portfolio_value * 100 if portfolio_value > 0 else 0.0
-        tg.alert_sell(symbol, trim_qty, current_price, pnl_pct,
+        tg.alert_sell(symbol, trim_filled, current_price, pnl_pct,
                       reason="drift-trim", notional=trim_notional,
                       cash_freed_pct=_trim_freed_pct)
-        logger.info(f"TRIM {symbol}: sold {trim_qty:.3f} shares @ ${current_price:.2f} "
+        logger.info(f"TRIM {symbol}: sold {trim_filled:.3f} shares @ ${current_price:.2f} "
                     f"(position drifted above {MAX_POSITION_DRIFT_PCT:.0%} of portfolio)")
         return True
     logger.warning(f"TRIM {symbol}: partial sell order failed")
@@ -263,7 +266,14 @@ def _signal_sell(con: sqlite3.Connection, client: AlpacaClient, symbol: str, pos
                  is_from_stop: bool = False, reason: str = "stop-loss",
                  pnl_pct: float = 0.0, entry_price: float = 0.0,
                  holding_days: int = 0,
-                 pool: CapitalPool | None = None) -> bool:
+                 pool: CapitalPool | None = None) -> tuple[bool, bool]:
+    """Returns (sold, fully_closed). `sold` is True when shares actually changed
+    hands (any fill > 0); `fully_closed` is True only when the whole position
+    filled. On a partial fill the SELL trade row / capital-pool debit reflect the
+    ACTUAL filled quantity and position_state is kept with the unfilled
+    remainder (entry_price / opened_at / high_water_mark / atr_at_entry
+    preserved) -- the caller must not record a decision outcome until a later
+    close finishes the position."""
     limit_order = client.sell(symbol, qty=pos_qty, limit_price=current_price)
     sell_result = limit_order
     total_filled_qty = 0.0
@@ -292,36 +302,45 @@ def _signal_sell(con: sqlite3.Connection, client: AlpacaClient, symbol: str, pos
     # hands; a zero-fill (limit timed out + cancelled, or market escalation
     # rejected) falls through to the "will retry next cycle" branch below.
     if sell_result and total_filled_qty > 0.0:
-        sell_notional = pos_qty * current_price
+        sold_qty = min(total_filled_qty, pos_qty)
+        fully_closed = total_filled_qty >= pos_qty - 0.001
+        sell_notional = sold_qty * current_price
         order_id = sell_result.get("order_id")
         if is_from_stop:
             tg.alert_stop_loss(symbol, pnl_pct, notional=sell_notional)
-            _sell_trade_id = log_trade(con, symbol, "SELL_STOP", pos_qty, current_price,
+            _sell_trade_id = log_trade(con, symbol, "SELL_STOP", sold_qty, current_price,
                                        sell_notional, regime_name, portfolio_value, pnl_pct,
                                        entry_price=entry_price, order_id=order_id,
                                        holding_days=holding_days)
         else:
             action_tag = "SELL" if reason == "signal" else f"SELL_{reason.upper().replace('-','_')}"
             _freed_pct = sell_notional / portfolio_value * 100 if portfolio_value > 0 else 0.0
-            tg.alert_sell(symbol, pos_qty, current_price, pnl_pct, reason=reason,
+            tg.alert_sell(symbol, sold_qty, current_price, pnl_pct, reason=reason,
                           notional=sell_notional, cash_freed_pct=_freed_pct)
-            _sell_trade_id = log_trade(con, symbol, action_tag, pos_qty, current_price,
+            _sell_trade_id = log_trade(con, symbol, action_tag, sold_qty, current_price,
                                        sell_notional, regime_name, portfolio_value, pnl_pct,
                                        entry_price=entry_price, order_id=order_id,
                                        holding_days=holding_days)
         _journal_close(con, symbol, _sell_trade_id, reason, pnl_pct, holding_days)
         if pool:
-            cost_basis = entry_price * pos_qty if entry_price > 0 else pos_qty * current_price
-            _pool_sell(con, pool.id, cost_basis, pos_qty * current_price, symbol=symbol)
+            cost_basis = entry_price * sold_qty if entry_price > 0 else sell_notional
+            _pool_sell(con, pool.id, cost_basis, sell_notional, symbol=symbol)
         _rec_action(con, "sell", symbol,
                     reasoning=f"Exit ({reason}): {pnl_pct:+.1%} P&L",
                     confidence=0, status="executed")
-        _delete_position_state(con, symbol)
-        return True
+        if fully_closed:
+            _delete_position_state(con, symbol)
+        else:
+            _pos = _load_position_state(con, symbol)
+            _hwm = _pos.high_water_mark if _pos else current_price
+            _atr = _pos.atr_at_entry if _pos and _pos.atr_at_entry is not None else 0.0
+            _upsert_position_state(con, symbol, entry_price, _hwm, _atr,
+                                   max(0.0, pos_qty - total_filled_qty))
+        return True, fully_closed
     if is_from_stop:
         tg.alert_sell_failed(symbol, reason=reason)
     logger.error(f"SELL ({reason}) failed for {symbol} — will retry next cycle")
-    return False
+    return False, False
 
 
 # ── Exit orchestration (moved from _main_cycle.py to keep exit logic co-located) ─
@@ -376,19 +395,30 @@ def _handle_exits(
         # leave filled_qty == 0. Persist and close position_state only after a
         # confirmed fill, the same rule c4ffed8 applied to _signal_sell.
         if sell_result and gd_filled > 0.0:
-            tg.alert_stop_loss(symbol, pnl_pct, notional=pos_qty * current_price)
-            _gd_id = log_trade(con, symbol, "SELL_GAP_DOWN", pos_qty, current_price,
-                               pos_qty * current_price, regime_name, portfolio_value, pnl_pct,
+            _gd_qty = min(gd_filled, pos_qty)
+            _gd_fully_closed = gd_filled >= pos_qty - 0.001
+            _gd_notional = _gd_qty * current_price
+            tg.alert_stop_loss(symbol, pnl_pct, notional=_gd_notional)
+            _gd_id = log_trade(con, symbol, "SELL_GAP_DOWN", _gd_qty, current_price,
+                               _gd_notional, regime_name, portfolio_value, pnl_pct,
                                entry_price=entry_price,
                                order_id=sell_result.get("order_id"),
                                holding_days=holding_days)
             _journal_close(con, symbol, _gd_id, "gap-down", pnl_pct, holding_days)
             if pool:
-                cost_basis = entry_price * pos_qty if entry_price > 0 else pos_qty * current_price
-                _pool_sell(con, pool.id, cost_basis, pos_qty * current_price, symbol=symbol)
-            _delete_position_state(con, symbol)
+                cost_basis = entry_price * _gd_qty if entry_price > 0 else _gd_notional
+                _pool_sell(con, pool.id, cost_basis, _gd_notional, symbol=symbol)
+            if _gd_fully_closed:
+                _delete_position_state(con, symbol)
+            else:
+                _gd_pos = _load_position_state(con, symbol)
+                _gd_hwm = _gd_pos.high_water_mark if _gd_pos else current_price
+                _gd_atr = _gd_pos.atr_at_entry if _gd_pos and _gd_pos.atr_at_entry is not None else 0.0
+                _upsert_position_state(con, symbol, entry_price, _gd_hwm, _gd_atr,
+                                       max(0.0, pos_qty - gd_filled))
             _maybe_record_day_trade(con, risk, symbol, True, pdt_exempt=pdt_exempt)
-            _rec.sell(True, "gap-down", pnl_pct=pnl_pct, holding_days=holding_days)
+            _rec.sell(True, "gap-down", pnl_pct=pnl_pct, holding_days=holding_days,
+                      fully_closed=_gd_fully_closed)
         else:
             _rec.sell(False, "gap-down", pnl_pct=pnl_pct, holding_days=holding_days)
         return True
@@ -406,14 +436,15 @@ def _handle_exits(
     if entry_price > 0 and current_atr > 0:
         tp_pct = _atr_tp_pct(current_atr, entry_price)
         if pnl_pct >= tp_pct:
-            success = _signal_sell(
+            success, _fully_closed = _signal_sell(
                 con, client, symbol, pos_qty, current_price,
                 regime_name, portfolio_value,
                 reason="take-profit", pnl_pct=pnl_pct, entry_price=entry_price,
                 holding_days=holding_days, pool=pool,
             )
             _maybe_record_day_trade(con, risk, symbol, success, pdt_exempt=pdt_exempt)
-            _rec.sell(success, "take-profit", pnl_pct=pnl_pct, holding_days=holding_days)
+            _rec.sell(success, "take-profit", pnl_pct=pnl_pct, holding_days=holding_days,
+                      fully_closed=_fully_closed)
             return True
 
     # ② ATR stop-loss
@@ -421,7 +452,7 @@ def _handle_exits(
                                            atr=current_atr, pnl_pct=pnl_pct)
     logger.debug(f"Stop-loss check {symbol}: pnl={pnl_pct:.1%} triggered={_stop_triggered}")
     if _stop_triggered:
-        success = _signal_sell(
+        success, _fully_closed = _signal_sell(
             con, client, symbol, pos_qty, current_price,
             regime_name, portfolio_value,
             is_from_stop=True, reason="stop-loss", pnl_pct=pnl_pct,
@@ -430,13 +461,14 @@ def _handle_exits(
         if success:
             stop_fired_today.add(symbol)
         _maybe_record_day_trade(con, risk, symbol, success, pdt_exempt=pdt_exempt)
-        _rec.sell(success, "stop-loss", pnl_pct=pnl_pct, holding_days=holding_days)
+        _rec.sell(success, "stop-loss", pnl_pct=pnl_pct, holding_days=holding_days,
+                  fully_closed=_fully_closed)
         return True
 
     # ③ Trailing stop (armed after 3% gain)
     if hwm > entry_price * (1 + TRAILING_STOP_ARM_PCT) and risk.check_trailing_stop(
             symbol, current_price, hwm, current_atr):
-        success = _signal_sell(
+        success, _fully_closed = _signal_sell(
             con, client, symbol, pos_qty, current_price,
             regime_name, portfolio_value,
             is_from_stop=True, reason="trailing-stop", pnl_pct=pnl_pct,
@@ -445,7 +477,8 @@ def _handle_exits(
         if success:
             stop_fired_today.add(symbol)
         _maybe_record_day_trade(con, risk, symbol, success, pdt_exempt=pdt_exempt)
-        _rec.sell(success, "trailing-stop", pnl_pct=pnl_pct, holding_days=holding_days)
+        _rec.sell(success, "trailing-stop", pnl_pct=pnl_pct, holding_days=holding_days,
+                  fully_closed=_fully_closed)
         return True
 
     # ④ Drift trim — partial sell if position has grown above MAX_POSITION_DRIFT_PCT
@@ -461,19 +494,21 @@ def _handle_exits(
                 )
                 _trimmed = _trim_position(con, client, symbol, round(trim_qty, 3), current_price,
                                           regime_name, portfolio_value, pnl_pct, entry_price, pool=pool)
-                _rec.sell(_trimmed, "drift-trim", pnl_pct=pnl_pct, holding_days=holding_days)
+                _rec.sell(_trimmed, "drift-trim", pnl_pct=pnl_pct, holding_days=holding_days,
+                          fully_closed=False)
                 return True
 
     # ⑤ Time-based forced exit
     if _check_time_exit(pos_state, pnl_pct):
-        success = _signal_sell(
+        success, _fully_closed = _signal_sell(
             con, client, symbol, pos_qty, current_price,
             regime_name, portfolio_value,
             reason="time-exit", pnl_pct=pnl_pct, entry_price=entry_price,
             holding_days=holding_days, pool=pool,
         )
         _maybe_record_day_trade(con, risk, symbol, success, pdt_exempt=pdt_exempt)
-        _rec.sell(success, "time-exit", pnl_pct=pnl_pct, holding_days=holding_days)
+        _rec.sell(success, "time-exit", pnl_pct=pnl_pct, holding_days=holding_days,
+                  fully_closed=_fully_closed)
         return True
 
     # ⑥ Ensemble sell signal
@@ -483,7 +518,7 @@ def _handle_exits(
             logger.warning(f"PDT limit — skipping signal sell of {symbol}")
             _rec.reject("signal sell blocked by PDT limit")
         else:
-            success = _signal_sell(
+            success, _fully_closed = _signal_sell(
                 con, client, symbol, pos_qty, current_price,
                 regime_name, portfolio_value,
                 reason="signal", pnl_pct=pnl_pct, entry_price=entry_price,
@@ -492,7 +527,8 @@ def _handle_exits(
             if success and is_day_trade and not pdt_exempt:
                 risk.record_day_trade()
                 _save_risk_state(con, risk)
-            _rec.sell(success, "signal", pnl_pct=pnl_pct, holding_days=holding_days)
+            _rec.sell(success, "signal", pnl_pct=pnl_pct, holding_days=holding_days,
+                      fully_closed=_fully_closed)
     else:
         _rec.hold()
     return True
