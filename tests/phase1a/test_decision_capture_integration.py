@@ -601,6 +601,74 @@ def test_handle_exits_stop_loss_zero_fill_does_not_set_stop_fired_today(trades_d
     assert event_type == "QUALIFIED_REJECTION"
 
 
+def test_handle_exits_gap_down_zero_fill_does_not_phantom_close(trades_db, ledger_conn, chain):
+    """The gap-down hard floor market-sells and, pre-fix, persisted + deleted
+    position_state on order *submission* (wait_for_fill discarded). A gap-down
+    market order the broker accepts but never fills (halt / LULD pause /
+    post-accept rejection) must NOT phantom-close the position: no trades row,
+    position_state intact, no PDT record, Trust-Ledger QUALIFIED_REJECTION (not
+    EXECUTED), no decision_outcome_events row, BUY decision_state still OPEN."""
+    # real BUY -> OPEN decision_state + position_state for AAPL
+    entry_ctx = _minimal_entry_ctx(
+        ledger_conn, chain, current_atr=2.0, xgb=_FakeXgb(),
+        tradeable_capital=5000.0, available_cash=5000.0, portfolio_value=10000.0,
+    )
+    _handle_entry(trades_db, client=_FakeFillClient(), risk=_AlwaysApproveRisk(), symbol="AAPL", ctx=entry_ctx)
+
+    buy_decision_id = ledger_conn.execute(
+        "SELECT decision_id FROM decision_events WHERE asset='AAPL' AND action='BUY' "
+        "ORDER BY sequence_number DESC LIMIT 1"
+    ).fetchone()[0]
+    assert ledger_conn.execute(
+        "SELECT outcome_state FROM decision_state WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == "OPEN"
+
+    entry_px, held_qty = trades_db.execute(
+        "SELECT entry_price, shares FROM position_state WHERE symbol='AAPL'"
+    ).fetchone()
+
+    ps_before = trades_db.execute("SELECT * FROM position_state WHERE symbol='AAPL'").fetchone()
+    trades_before = trades_db.execute("SELECT COUNT(*) FROM trades WHERE symbol='AAPL'").fetchone()[0]
+    outcomes_before = ledger_conn.execute("SELECT COUNT(*) FROM decision_outcome_events").fetchone()[0]
+
+    risk = _ZeroFillRisk()
+    processed = _handle_exits(
+        trades_db, client=_ZeroFillSellClient(), risk=risk, symbol="AAPL",
+        positions={"AAPL": _FakePosition(avg_entry_price=entry_px, qty=held_qty, unrealized_plpc=-0.15)},
+        sell_order_syms=set(), current_price=entry_px * 0.85, current_atr=0.0,
+        regime_name="TRENDING_UP", portfolio_value=10_000.0, action=0, pdt_exempt=False,
+        stop_fired_today=set(), ledger_ctx=_exit_ledger_ctx(ledger_conn, chain),
+    )
+
+    assert processed is True
+    # no SELL_GAP_DOWN / trade row is created
+    assert trades_db.execute(
+        "SELECT COUNT(*) FROM trades WHERE symbol='AAPL'"
+    ).fetchone()[0] == trades_before
+    assert trades_db.execute(
+        "SELECT COUNT(*) FROM trades WHERE symbol='AAPL' AND action LIKE 'SELL%'"
+    ).fetchone()[0] == 0
+    # position_state remains unchanged
+    assert trades_db.execute("SELECT * FROM position_state WHERE symbol='AAPL'").fetchone() == ps_before
+    # PDT / day_trade_log remains unchanged
+    assert risk.day_trade_log == []
+    # Trust Ledger records REJECT / QUALIFIED_REJECTION
+    _, action, event_type, _, _ = _latest_decision(ledger_conn, "AAPL")
+    assert action == "REJECT"
+    assert event_type == "QUALIFIED_REJECTION"
+    # no decision_outcome_events row is created
+    assert ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events"
+    ).fetchone()[0] == outcomes_before
+    assert ledger_conn.execute(
+        "SELECT COUNT(*) FROM decision_outcome_events WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == 0
+    # original decision_state remains OPEN
+    assert ledger_conn.execute(
+        "SELECT outcome_state FROM decision_state WHERE decision_id=?", (buy_decision_id,)
+    ).fetchone()[0] == "OPEN"
+
+
 def test_exit_decision_recorder_sell_false_writes_qualified_rejection_no_outcome(ledger_conn, chain):
     """Unit test of ExitDecisionRecorder.sell(success=False): it must append a
     REJECT / QUALIFIED_REJECTION decision_events row (reason: '<r> sell order

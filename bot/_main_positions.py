@@ -367,8 +367,15 @@ def _handle_exits(
     if pnl_pct < -GAP_DOWN_FLOOR_PCT:
         logger.warning(f"Gap-down floor: {symbol} pnl={pnl_pct:.1%} — immediate market sell")
         sell_result = client.sell_market(symbol, pos_qty)
-        if sell_result:
+        gd_filled = (
             client.wait_for_fill(sell_result["order_id"], timeout_secs=10)
+            if sell_result else 0.0
+        )
+        # A truthy sell_result only means the market order was accepted, not
+        # that it filled -- a halt / LULD pause / post-accept rejection can
+        # leave filled_qty == 0. Persist and close position_state only after a
+        # confirmed fill, the same rule c4ffed8 applied to _signal_sell.
+        if sell_result and gd_filled > 0.0:
             tg.alert_stop_loss(symbol, pnl_pct, notional=pos_qty * current_price)
             _gd_id = log_trade(con, symbol, "SELL_GAP_DOWN", pos_qty, current_price,
                                pos_qty * current_price, regime_name, portfolio_value, pnl_pct,
