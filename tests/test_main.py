@@ -1018,3 +1018,112 @@ def test_handle_entry_wrong_regime_blocks_before_any_cash_use(db):
     ctx = _minimal_entry_ctx(regime_name="TRENDING_DOWN")
     result = _handle_entry(db, client=None, risk=None, symbol="AAPL", ctx=ctx)
     assert result == ctx.available_cash
+
+
+# --- end-to-end: alpaca-py Order.id is uuid.UUID; the whole entry/exit ---
+# --- pipeline must still write its trades row and update position_state.  ---
+
+import uuid as _uuid
+from unittest.mock import MagicMock, patch
+
+
+def _fake_alpaca_client(order_id, *, filled_qty="6.0", fill_price="100.0"):
+    """A real AlpacaClient with a mocked TradingClient whose submit_order
+    returns an object with .id = order_id (a uuid.UUID, as alpaca-py 0.43.5
+    does) and whose get_order_by_id reports an immediately-filled order."""
+    from bot.execution.alpaca_client import AlpacaClient
+    with patch("bot.execution.alpaca_client.TradingClient") as mock_trading, \
+         patch("bot.execution.alpaca_client.StockHistoricalDataClient"):
+        mock_trading.return_value = MagicMock()
+        c = AlpacaClient()
+    submitted = MagicMock()
+    submitted.id = order_id
+    c.api.submit_order.return_value = submitted
+    ended = MagicMock()
+    ended.status = "filled"
+    ended.filled_qty = filled_qty
+    ended.filled_avg_price = fill_price
+    c.api.get_order_by_id.return_value = ended
+    return c
+
+
+class _FakeXGB:
+    model = object()
+    def explain(self, _row):
+        return []
+
+
+class _FakeLSTM:
+    model = object()
+    is_degraded = False
+    val_loss = None
+
+
+class _FakeRisk:
+    def approve_buy(self, *a, **k):
+        return True
+
+
+def test_exit_path_with_uuid_order_id_writes_sell_row_and_clears_position(db, monkeypatch):
+    from bot import _main_positions as mp
+
+    monkeypatch.setattr(mp, "_journal_close", lambda *a, **k: None)
+    monkeypatch.setattr(mp, "_rec_action", lambda *a, **k: None)
+    monkeypatch.setattr(mp, "tg", MagicMock())
+
+    oid = _uuid.uuid4()
+    client = _fake_alpaca_client(oid, filled_qty="5.0")
+
+    _upsert_position_state(db, "GOOGL", 110.0, 120.0, 1.0, 5.0)
+    assert db.execute("SELECT 1 FROM position_state WHERE symbol='GOOGL'").fetchone()
+
+    ok = mp._signal_sell(
+        db, client, "GOOGL", 5.0, 100.0, "TRENDING_UP", 10_000.0,
+        reason="signal", pnl_pct=-0.05, entry_price=110.0, holding_days=3, pool=None,
+    )
+
+    assert ok is True
+    rows = db.execute(
+        "SELECT action, order_id, typeof(order_id) FROM trades WHERE symbol='GOOGL'"
+    ).fetchall()
+    assert len(rows) == 1
+    action, stored_oid, oid_type = rows[0]
+    assert action == "SELL"
+    assert isinstance(stored_oid, str) and stored_oid == str(oid)
+    assert oid_type == "text"
+    assert db.execute("SELECT 1 FROM position_state WHERE symbol='GOOGL'").fetchone() is None
+
+
+def test_entry_path_with_uuid_order_id_writes_buy_row_and_position(db, monkeypatch):
+    from bot import _main_cycle as mc
+
+    monkeypatch.setattr(mc, "_journal_open", lambda *a, **k: None)
+    monkeypatch.setattr(mc, "_rec_action", lambda *a, **k: None)
+    monkeypatch.setattr(mc, "tg", MagicMock())
+
+    oid = _uuid.uuid4()
+    client = _fake_alpaca_client(oid, filled_qty="6.0", fill_price="100.0")
+
+    ctx = _minimal_entry_ctx(
+        current_atr=0.0, current_price=100.0,
+        xgb=_FakeXGB(), lstm=_FakeLSTM(),
+        sentiments={"ZZTESTSYM": 0.0},
+        trust_conn=None, candidate_event_id=None, deployment_manifest_id=None,
+        pool=None,
+    )
+
+    result = _handle_entry(db, client=client, risk=_FakeRisk(), symbol="ZZTESTSYM", ctx=ctx)
+
+    assert result == ctx.available_cash - 600.0  # notional deployed = 5000 * 0.12
+    action, stored_oid, oid_type, drivers = db.execute(
+        "SELECT action, order_id, typeof(order_id), feature_drivers FROM trades WHERE symbol='ZZTESTSYM'"
+    ).fetchone()
+    assert action == "BUY"
+    assert isinstance(stored_oid, str) and stored_oid == str(oid)
+    assert oid_type == "text"
+    assert drivers == "[]"
+
+    ps = db.execute(
+        "SELECT entry_price, shares FROM position_state WHERE symbol='ZZTESTSYM'"
+    ).fetchone()
+    assert ps == (100.0, 6.0)

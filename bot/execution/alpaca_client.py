@@ -135,7 +135,7 @@ class AlpacaClient:
                     _label=f"buy_market/{symbol}", _rate_limit_only=True,
                 )
                 logger.info(f"BUY {symbol} notional=${notional:.2f} (market) order_id={order.id}")
-            return {"order_id": order.id, "symbol": symbol, "side": "buy", "notional": notional}
+            return {"order_id": str(order.id), "symbol": symbol, "side": "buy", "notional": notional}
         except Exception as e:
             logger.error(f"BUY failed {symbol}: {e}")
             return None
@@ -182,7 +182,7 @@ class AlpacaClient:
                     _label=f"sell_market/{symbol}", _rate_limit_only=True,
                 )
                 logger.info(f"SELL {symbol} qty={qty:.4f} (market) order_id={order.id}")
-            return {"order_id": order.id, "symbol": symbol, "side": "sell", "qty": qty}
+            return {"order_id": str(order.id), "symbol": symbol, "side": "sell", "qty": qty}
         except Exception as e:
             logger.error(f"SELL failed {symbol}: {e}")
             return None
@@ -240,7 +240,7 @@ class AlpacaClient:
                 _label=f"sell_market_escalation/{symbol}", _rate_limit_only=True,
             )
             logger.warning(f"SELL MARKET {symbol} qty={qty:.4f} (stop escalation) order_id={order.id}")
-            return {"order_id": order.id, "symbol": symbol, "side": "sell", "qty": qty}
+            return {"order_id": str(order.id), "symbol": symbol, "side": "sell", "qty": qty}
         except Exception as e:
             logger.error(f"Market sell escalation failed {symbol}: {e}")
             return None

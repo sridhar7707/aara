@@ -32,6 +32,11 @@ def log_trade(
     take_profit: float | None = None,
     risk_reward_ratio: float | None = None,
 ) -> int | None:
+    # trades.order_id is a TEXT column; alpaca-py returns Order.id as a uuid.UUID,
+    # which sqlite3 cannot bind ("unsupported type"). Normalize any non-None id to
+    # str here as a second line of defence (the primary normalization is at the
+    # AlpacaClient return sites).
+    order_id = None if order_id is None else str(order_id)
     ensemble_score = ensemble_confidence(xgb_prob, lstm_prob, sentiment_score, macro_score)
     realized_pnl = shares * (price - entry_price) if "SELL" in action and entry_price > 0 else 0.0
     cur = con.execute(

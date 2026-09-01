@@ -1,3 +1,4 @@
+import uuid
 from unittest.mock import MagicMock, patch
 import pytest
 from bot.execution.alpaca_client import AlpacaClient, MIN_NOTIONAL
@@ -321,3 +322,39 @@ def test_parse_timeframe_rejects_garbage():
     from bot.execution.alpaca_client import _parse_timeframe
     with pytest.raises(ValueError):
         _parse_timeframe("garbage")
+
+
+# --- order_id normalization: alpaca-py returns Order.id as uuid.UUID ---
+
+def test_buy_normalizes_uuid_order_id_to_str(client):
+    oid = uuid.uuid4()
+    order = MagicMock()
+    order.id = oid
+    client.api.submit_order.return_value = order
+    result = client.buy("AAPL", 500.0)
+    assert isinstance(result["order_id"], str)
+    assert result["order_id"] == str(oid)
+
+
+def test_sell_normalizes_uuid_order_id_to_str(client):
+    oid = uuid.uuid4()
+    position = MagicMock()
+    position.symbol = "AAPL"
+    position.qty = "5"
+    client.api.get_all_positions.return_value = [position]
+    order = MagicMock()
+    order.id = oid
+    client.api.submit_order.return_value = order
+    result = client.sell("AAPL")
+    assert isinstance(result["order_id"], str)
+    assert result["order_id"] == str(oid)
+
+
+def test_sell_market_normalizes_uuid_order_id_to_str(client):
+    oid = uuid.uuid4()
+    order = MagicMock()
+    order.id = oid
+    client.api.submit_order.return_value = order
+    result = client.sell_market("AAPL", 5.0)
+    assert isinstance(result["order_id"], str)
+    assert result["order_id"] == str(oid)
