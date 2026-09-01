@@ -920,6 +920,27 @@ _SCOPE_NOTE_HTML = (
     "</div>"
 )
 
+# Data-source transparency note: static, decision-independent. Built once at
+# build() time like _TIMESTAMP_DISCLOSURE_HTML / _SCOPE_NOTE_HTML, never
+# wired into detail_outputs/_DetailValues/any callback. This view reads only
+# the governed decision read-model; no production decision producer is
+# connected to it, so "0 decisions" must not be read as "the platform has
+# made no decisions." Wording only -- no store, contract, or read-model
+# change.
+_NO_PRODUCER_DISCLOSURE_TITLE = "About this view"
+_NO_PRODUCER_DISCLOSURE_BODY = (
+    "Decision Center reflects the governed decision read-model. No "
+    "production decision producer is currently connected to this view. "
+    '"0 decisions" therefore means no decisions are available through this '
+    "view right now; it does not mean the platform has no decision history."
+)
+_NO_PRODUCER_DISCLOSURE_HTML = (
+    '<div class="aara-disclosure-message">'
+    f'<div class="aara-disclosure-title">{html.escape(_NO_PRODUCER_DISCLOSURE_TITLE)}</div>'
+    f'<div class="aara-disclosure-body">{html.escape(_NO_PRODUCER_DISCLOSURE_BODY)}</div>'
+    "</div>"
+)
+
 _ACTION_BADGE_CLASSES = {"BUY": "action-buy", "SELL": "action-sell", "HOLD": "action-hold"}
 
 _LIFECYCLE_STAGES = [
@@ -1003,6 +1024,10 @@ class DecisionCenterUI:
                     gr.HTML(
                         _TIMESTAMP_DISCLOSURE_HTML,
                         elem_classes=["aara-list-timestamp-disclosure"],
+                    )
+                    gr.HTML(
+                        _NO_PRODUCER_DISCLOSURE_HTML,
+                        elem_classes=["aara-list-producer-disclosure"],
                     )
                     list_output = gr.Dataframe(
                         # height/max_height (see _DATAFRAME_HEIGHT_KWARG) is a

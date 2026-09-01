@@ -31,6 +31,9 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _GOVERNANCE_ERROR_MESSAGE,
     _JOURNEY_TARGET_FOCUS_SETUP_JS,
     _LIVE_ANNOUNCER_ELEM_ID,
+    _NO_PRODUCER_DISCLOSURE_BODY,
+    _NO_PRODUCER_DISCLOSURE_HTML,
+    _NO_PRODUCER_DISCLOSURE_TITLE,
     _RISK_CONTEXT_BODY,
     _RISK_CONTEXT_HTML,
     _RISK_CONTEXT_TITLE,
@@ -2004,6 +2007,128 @@ def test_scope_note_block_is_present_in_the_built_layout():
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
     assert _SCOPE_NOTE_HTML in html_values
+
+
+# --- P0-1: data-source transparency disclosure on the Decisions area -----
+
+
+def test_no_producer_disclosure_wording_communicates_the_three_points():
+    """Static, decision-independent note so "0 decisions" is not misread as
+    "the platform has recorded no decisions". Parallel to _SCOPE_NOTE_HTML /
+    _TIMESTAMP_DISCLOSURE_HTML -- wording only, no store/read-model change."""
+    assert _NO_PRODUCER_DISCLOSURE_TITLE == "About this view"
+    # 1. reflects the governed decision read-model
+    assert "governed decision read-model" in _NO_PRODUCER_DISCLOSURE_BODY
+    # 2. no production decision producer is wired into this view
+    assert (
+        "No production decision producer is currently connected to this view"
+        in _NO_PRODUCER_DISCLOSURE_BODY
+    )
+    # 3. "0 decisions" is scoped to this view; not a claim about platform history
+    assert '"0 decisions"' in _NO_PRODUCER_DISCLOSURE_BODY
+    assert "no decisions are available through this view" in _NO_PRODUCER_DISCLOSURE_BODY
+    assert (
+        "does not mean the platform has no decision history"
+        in _NO_PRODUCER_DISCLOSURE_BODY
+    )
+    # no internal names / table names / ADR numbers exposed
+    lowered = _NO_PRODUCER_DISCLOSURE_BODY.lower()
+    for leaked in ("inmemory", "repository", "trust_ledger", "decision_events", "adr-", "adr "):
+        assert leaked not in lowered
+    assert _NO_PRODUCER_DISCLOSURE_HTML == (
+        '<div class="aara-disclosure-message">'
+        f'<div class="aara-disclosure-title">{html.escape(_NO_PRODUCER_DISCLOSURE_TITLE)}</div>'
+        f'<div class="aara-disclosure-body">{html.escape(_NO_PRODUCER_DISCLOSURE_BODY)}</div>'
+        "</div>"
+    )
+
+
+def test_no_producer_disclosure_block_is_present_in_the_built_layout():
+    controller = _FakeController()
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    demo = ui.build()
+
+    html_values = [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+    assert _NO_PRODUCER_DISCLOSURE_HTML in html_values
+
+
+def test_no_producer_disclosure_is_static_not_part_of_render_outputs():
+    """It is set as a fixed gr.HTML value at build() time (like
+    _SCOPE_NOTE_HTML), never returned by _render_screen()/_render_detail()
+    and never in _DetailValues, so no callback can change it."""
+    view = _make_view()
+    screen = DecisionCenterScreen(
+        list_area=DecisionListArea(decisions=[view]),
+        detail_area=DecisionDetailArea(decision=view),
+    )
+    controller = _FakeController(
+        screen=screen, detail_area=DecisionDetailArea(decision=view)
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    screen_values = ui._render_screen()
+    detail_values = ui._render_detail("dec-001")
+
+    for produced in (*screen_values, *detail_values):
+        assert produced != _NO_PRODUCER_DISCLOSURE_HTML
+        if isinstance(produced, str):
+            assert _NO_PRODUCER_DISCLOSURE_TITLE not in produced
+            assert "No production decision producer" not in produced
+
+
+def test_render_screen_return_shape_is_unchanged_by_the_disclosure():
+    screen = DecisionCenterScreen(
+        list_area=DecisionListArea(decisions=[]),
+        detail_area=DecisionDetailArea(decision=None),
+    )
+    ui = DecisionCenterUI(_FakeController(screen=screen), [])
+
+    assert len(ui._render_screen()) == 12  # list_rows, list_empty_html + _DetailValues (10)
+
+
+def test_render_detail_return_shape_is_unchanged_by_the_disclosure():
+    view = _make_view()
+    ui = DecisionCenterUI(
+        _FakeController(detail_area=DecisionDetailArea(decision=view)), ["dec-001"]
+    )
+
+    assert len(ui._render_detail("dec-001")) == 10  # _DetailValues
+
+
+def test_existing_zero_decision_wording_intact_alongside_the_disclosure():
+    screen = DecisionCenterScreen(
+        list_area=DecisionListArea(decisions=[]),
+        detail_area=DecisionDetailArea(decision=None),
+    )
+    ui = DecisionCenterUI(_FakeController(screen=screen), [])
+
+    (list_rows, list_empty_html, *_rest) = ui._render_screen()
+    assert list_rows == []
+    assert list_empty_html == '<div class="aara-empty-message">No decisions recorded yet.</div>'
+    assert ui._announce_screen() == "Decision Center updated. Showing 0 decisions."
+
+
+def test_gradio_view_module_imports_no_bot_dashboard_or_ledger():
+    import ast
+    import inspect
+
+    import applications.trading_intelligence.ui.decision_center.gradio_view as module
+
+    tree = ast.parse(inspect.getsource(module))
+    forbidden = ("bot", "dashboard", "ledger", "database", "scheduler")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                assert not alias.name.split(".")[0] in forbidden, alias.name
+                assert "trust_ledger" not in alias.name
+        elif isinstance(node, ast.ImportFrom):
+            root = (node.module or "").split(".")[0]
+            assert root not in forbidden, node.module
+            assert "trust_ledger" not in (node.module or "")
 
 
 def test_announce_screen_wording_for_zero_decisions():
