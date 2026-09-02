@@ -117,6 +117,72 @@ def test_get_current_prices_is_api_error_when_a_price_is_negative(monkeypatch):
     assert result.health.status is IntegrationStatus.API_ERROR
 
 
+# --- symbol/price integrity (P0-A) ------------------------------
+
+def test_rejects_a_frame_returned_for_a_different_symbol(monkeypatch):
+    """yfinance.download() assembles its result from a process-global dict
+    and, under load, can return a neighbouring request's frame. A request
+    for AMD that comes back as an AAPL frame must NEVER publish AAPL's
+    price under the AMD key -- the whole batch fails instead (this
+    module's documented fail-safe), so callers fall back to the
+    illustrative Holdings screen rather than render a wrong market value."""
+    aapl_frame = _multi_symbol_df({"AAPL": [330.0, 334.67]})
+    monkeypatch.setattr("yfinance.download", lambda *a, **kw: aapl_frame)
+
+    result = LivePriceSource().get_current_prices(("AMD",))
+
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.API_ERROR
+
+
+def test_batch_never_maps_a_neighbouring_symbols_price_onto_a_holding(monkeypatch):
+    """Deployed symptom (captured in the Space's own diagnostic logs):
+    each per-symbol download returned the PREVIOUS request's frame -- SPY
+    (fetched just before by the Morning Brief market-quote source) for the
+    first symbol, then a one-position lag for the rest -- so every holding
+    showed its neighbour's price and AAPL showed SPY's ~762. The adapter
+    must not return such a map as HEALTHY."""
+    symbols = ("AAPL", "AMD", "AMZN", "BA", "CRM", "GOOGL", "TSLA")
+    own = {
+        "SPY": 762.0, "AAPL": 324.0, "AMD": 458.0, "AMZN": 254.0,
+        "BA": 208.0, "CRM": 261.0, "GOOGL": 334.0, "TSLA": 351.0,
+    }
+    lagged = ["SPY", *symbols[:-1]]  # what each successive call actually returns
+    calls = iter(lagged)
+
+    def fake_download(ticker, *a, **kw):
+        returned = next(calls)
+        return _multi_symbol_df({returned: [own[returned] - 1.0, own[returned]]})
+
+    monkeypatch.setattr("yfinance.download", fake_download)
+
+    result = LivePriceSource().get_current_prices(symbols)
+
+    assert result.value is None
+    if result.value:  # a future partial-map impl must still never lag
+        for sym in symbols:
+            assert result.value[sym] == own[sym]
+
+
+def test_download_is_called_without_background_threads(monkeypatch):
+    """The per-symbol fetch must pass threads=False: yfinance's threaded
+    path coordinates through a reset-per-call process-global dict, and a
+    still-running thread from a prior download() (e.g. the SPY quote) can
+    satisfy the wait early and make this call return that other ticker's
+    frame. Synchronous download keeps each call's result its own."""
+    seen = {}
+    df = _multi_symbol_df({"AAPL": [330.0, 334.67]})
+
+    def fake_download(*a, **kw):
+        seen.update(kw)
+        return df
+
+    monkeypatch.setattr("yfinance.download", fake_download)
+    LivePriceSource().get_current_prices(("AAPL",))
+
+    assert seen.get("threads") is False
+
+
 # --- regression locks (unchanged) --------------------------------
 
 def test_module_imports_no_protected_package():

@@ -115,6 +115,13 @@ class LivePriceSource:
                     progress=False,
                     auto_adjust=True,
                     timeout=_FETCH_TIMEOUT_SECONDS,
+                    # Synchronous: yfinance's threaded path coordinates through a
+                    # per-call-reset process-global dict, so a still-running
+                    # thread from a prior download() (e.g. the Morning Brief SPY
+                    # quote) can satisfy this call's wait early and return that
+                    # other ticker's frame. threads=False keeps each call's
+                    # result its own.
+                    threads=False,
                 )
             except Exception as exc:
                 _diag.warning("TEMP-DIAG holdings-price: yf.download(%s) RAISED %s: %r",
@@ -137,7 +144,23 @@ class LivePriceSource:
                 # single-ticker download: "Close" is a Series on older yfinance,
                 # a 1-column (possibly MultiIndex) DataFrame on newer.
                 if hasattr(close, "columns"):
-                    series = close[symbol] if symbol in close.columns else close.iloc[:, 0]
+                    if symbol not in close.columns:
+                        # The frame is for a different ticker than requested
+                        # (yfinance handed back a neighbouring request's
+                        # result). Never fall back to column 0 -- that
+                        # silently maps another symbol's price onto this one.
+                        # Fail the whole batch, per this module's fail-safe.
+                        _diag.warning(
+                            "TEMP-DIAG holdings-price: %s frame is for %r, not requested symbol",
+                            symbol, list(close.columns)[:8],
+                        )
+                        return ReadResult.failed(
+                            IntegrationHealth.api_error(
+                                _PROVIDER,
+                                detail="price response was for a different symbol",
+                            )
+                        )
+                    series = close[symbol]
                 else:
                     series = close
                 clean = series.dropna()
