@@ -1,23 +1,28 @@
 """CSS for the Portfolio Intelligence screen -- MVP.
 
-Self-contained: does not import ui/decision_center/theme.py and does not
-require it to be present. Reuses the same AARA primitive color values
-(navy/gold/warm background) as plain literals here rather than importing
-them, per this package's "no coupling to decision_center" scope -- if the
-two screens are composed together later (see the approved TabbedInterface
-analysis), duplicated literal color values are harmless; a Python import
-between the two screen packages would not be.
+Design-system migration (Batch A): the colour `:root` entries below now
+alias the shared `--aara-*` tokens from `ui/design_system.py` (the single
+source of truth -- audit finding D-01). Each keeps its former hex as a
+`var(--aara-*, <literal>)` fallback so a standalone
+`PortfolioIntelligenceUI().build()` (no `bootstrap` composition) still
+renders identically; the composed app resolves through the shared token.
+
+Batch A also applies the shared numeric-alignment convention (audit finding
+D-03) to this screen's three data tables -- right-aligning the numeric
+columns, keeping the identifier/categorical columns left. Column indices
+are this screen's own (see `_HOLDINGS_HEADERS` / `_ALPACA_POSITIONS_HEADERS`
+/ `_ALPACA_ORDERS_HEADERS` in gradio_view.py); table *data* is unchanged.
 """
 
 CSS = """
 :root {
-  --pi-color-navy: #0B1F3A;
-  --pi-color-gold: #C8A45D;
-  --pi-color-background: #F8F7F3;
-  --pi-color-surface: #FFFFFF;
-  --pi-color-text: #1A1A1A;
-  --pi-color-text-secondary: #666666;
-  --pi-color-border: #E2E8F0;
+  --pi-color-navy: var(--aara-navy, #0B1F3A);
+  --pi-color-gold: var(--aara-gold, #C8A45D);
+  --pi-color-background: var(--aara-bg, #F8F7F3);
+  --pi-color-surface: var(--aara-surface, #FFFFFF);
+  --pi-color-text: var(--aara-text, #1A1A1A);
+  --pi-color-text-secondary: var(--aara-text-muted, #666666);
+  --pi-color-border: var(--aara-border, #E2E8F0);
 }
 
 .gradio-container {
@@ -137,6 +142,46 @@ CSS = """
 .pi-alpaca-orders-table table tbody td {
   font-family: Monaco, "Courier New", monospace;
   font-variant-numeric: tabular-nums;
+}
+
+/* Numeric-column alignment (design-system convention D-03). Identifier and
+   categorical columns keep the default left alignment; numeric columns are
+   right-aligned so values line up on the decimal for column-down scanning.
+   `th` is aligned to match its column. tabular-nums is already set above.
+   Holdings:   Symbol | Quantity | Price | Market Value | Weight %
+   Positions:  Symbol | Quantity | Avg Entry | Current Price | Market Value | Unrealized P/L | Unrealized P/L % | Side
+   Orders:     Submitted | Symbol | Side | Type | Quantity | Filled Qty | Limit Price | Status | Working | Filled At */
+.pi-holdings-table table thead th:nth-child(2),
+.pi-holdings-table table thead th:nth-child(3),
+.pi-holdings-table table thead th:nth-child(4),
+.pi-holdings-table table thead th:nth-child(5),
+.pi-holdings-table table tbody td:nth-child(2),
+.pi-holdings-table table tbody td:nth-child(3),
+.pi-holdings-table table tbody td:nth-child(4),
+.pi-holdings-table table tbody td:nth-child(5) {
+  text-align: right;
+}
+.pi-alpaca-positions-table table thead th:nth-child(2),
+.pi-alpaca-positions-table table thead th:nth-child(3),
+.pi-alpaca-positions-table table thead th:nth-child(4),
+.pi-alpaca-positions-table table thead th:nth-child(5),
+.pi-alpaca-positions-table table thead th:nth-child(6),
+.pi-alpaca-positions-table table thead th:nth-child(7),
+.pi-alpaca-positions-table table tbody td:nth-child(2),
+.pi-alpaca-positions-table table tbody td:nth-child(3),
+.pi-alpaca-positions-table table tbody td:nth-child(4),
+.pi-alpaca-positions-table table tbody td:nth-child(5),
+.pi-alpaca-positions-table table tbody td:nth-child(6),
+.pi-alpaca-positions-table table tbody td:nth-child(7) {
+  text-align: right;
+}
+.pi-alpaca-orders-table table thead th:nth-child(5),
+.pi-alpaca-orders-table table thead th:nth-child(6),
+.pi-alpaca-orders-table table thead th:nth-child(7),
+.pi-alpaca-orders-table table tbody td:nth-child(5),
+.pi-alpaca-orders-table table tbody td:nth-child(6),
+.pi-alpaca-orders-table table tbody td:nth-child(7) {
+  text-align: right;
 }
 
 .pi-empty-message {

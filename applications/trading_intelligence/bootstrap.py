@@ -122,6 +122,7 @@ from applications.trading_intelligence.services.decision_governance_query_servic
     DecisionGovernanceQueryService,
 )
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
+from applications.trading_intelligence.ui.design_system import DESIGN_SYSTEM_CSS
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
 from applications.trading_intelligence.ui.decision_center.gradio_view import DecisionCenterUI
 from applications.trading_intelligence.ui.morning_brief.gradio_view import MorningBriefUI
@@ -1100,6 +1101,10 @@ def build_trading_intelligence_app() -> gr.Blocks:
 
     merged_css = "\n".join(
         css for css in (
+            # Shared design-system vocabulary first, so every screen's own
+            # theme.py CSS (and any `var(--aara-*)` alias in it) resolves
+            # against one source of truth in the composed app.
+            DESIGN_SYSTEM_CSS,
             morning_brief_blocks.css, decision_blocks.css, portfolio_blocks.css,
             risk_blocks.css, performance_learning_blocks.css, settings_blocks.css,
             _TABBED_LAYOUT_CSS,

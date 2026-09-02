@@ -14,6 +14,7 @@ _UI_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 _MODULES = [
     "applications.trading_intelligence.ui",
+    "applications.trading_intelligence.ui.design_system",
     "applications.trading_intelligence.ui.decision_center",
     "applications.trading_intelligence.ui.decision_center.screen",
     "applications.trading_intelligence.ui.decision_center.mock_data",
