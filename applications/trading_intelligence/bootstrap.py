@@ -24,10 +24,27 @@ services and the SentinelEngine facade are still constructed below -- the
 read chain shares their ledger/projection repositories -- but nothing
 drives them now that seeding is removed.
 """
+import logging
 import os
+import sys
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
+
+# TEMP-DIAG holdings-price: temporary tracing of the Portfolio Intelligence
+# Holdings assembly path on the deployed HF Space. Shared logger name used by
+# adapters/live_price_source.py and adapters/legacy_position_source.py too;
+# configured here (imported once at startup) with an explicit stdout handler
+# so the lines always reach the HF container log regardless of framework
+# logging config. Remove once the Holdings API_ERROR root cause is confirmed.
+_hd = logging.getLogger("aara.holdings_price_diag")
+if not any(getattr(h, "_aara_diag", False) for h in _hd.handlers):
+    _h = logging.StreamHandler(sys.stdout)
+    _h._aara_diag = True
+    _h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    _hd.addHandler(_h)
+_hd.setLevel(logging.INFO)
+_hd.propagate = True
 from zoneinfo import ZoneInfo
 
 import gradio as gr
@@ -874,6 +891,8 @@ def _build_portfolio_intelligence_screen(db_path: Optional[str] = None) -> Portf
     fresh read each call, holding no state and caching nothing, so the
     screen always reflects the adapters' current answer."""
     legacy_kwargs = legacy_source_kwargs(db_path)
+    _hd.warning("TEMP-DIAG holdings-price: build screen start; db_path=%r legacy_kwargs=%r",
+                db_path, legacy_kwargs)
 
     # ADR-061 Category A / Amendment 1: adapters return ReadResult; unwrap
     # the underlying value into the existing capital/holdings fields
@@ -881,8 +900,17 @@ def _build_portfolio_intelligence_screen(db_path: Optional[str] = None) -> Portf
     # account, or None when unavailable) and record the section's
     # IntegrationHealth alongside it.
     capital_result = LegacyCapitalSource(**legacy_kwargs).get_capital_summary()
+    _hd.warning("TEMP-DIAG holdings-price: capital value_present=%s health=%s/%s",
+                capital_result.value is not None,
+                getattr(capital_result.health, "status", None),
+                getattr(capital_result.health, "detail", None))
 
     positions_result = LegacyPositionSource(**legacy_kwargs).get_open_positions()
+    _hd.warning("TEMP-DIAG holdings-price: positions value=%s count=%s health=%s/%s",
+                "None" if positions_result.value is None else "tuple",
+                None if positions_result.value is None else len(positions_result.value),
+                getattr(positions_result.health, "status", None),
+                getattr(positions_result.health, "detail", None))
     if positions_result.value is None:
         real_holdings = None
         holdings_health = positions_result.health
@@ -891,15 +919,31 @@ def _build_portfolio_intelligence_screen(db_path: Optional[str] = None) -> Portf
         holdings_health = positions_result.health
     else:
         symbols = tuple(position.symbol for position in positions_result.value)
+        _hd.warning("TEMP-DIAG holdings-price: calling LivePriceSource for symbols=%r", symbols)
         prices_result = LivePriceSource().get_current_prices(symbols)
+        _hd.warning("TEMP-DIAG holdings-price: prices value_present=%s health=%s/%s value=%r",
+                    prices_result.value is not None,
+                    getattr(prices_result.health, "status", None),
+                    getattr(prices_result.health, "detail", None),
+                    prices_result.value)
         if prices_result.value is not None:
-            real_holdings = _build_portfolio_holdings(
-                positions_result.value, prices_result.value
-            )
+            try:
+                real_holdings = _build_portfolio_holdings(
+                    positions_result.value, prices_result.value
+                )
+                _hd.warning("TEMP-DIAG holdings-price: built %d holding rows", len(real_holdings))
+            except Exception as exc:  # pragma: no cover - diagnostic only
+                _hd.warning("TEMP-DIAG holdings-price: _build_portfolio_holdings RAISED %s: %r",
+                            type(exc).__name__, exc)
+                raise
         else:
             real_holdings = None
         holdings_health = prices_result.health
 
+    _hd.warning("TEMP-DIAG holdings-price: final holdings=%s holdings_health=%s/%s",
+                "None" if real_holdings is None else "tuple[%d]" % len(real_holdings),
+                getattr(holdings_health, "status", None),
+                getattr(holdings_health, "detail", None))
     screen = PortfolioScreen(
         capital=capital_result.value,
         capital_health=capital_result.health,

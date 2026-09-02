@@ -45,11 +45,16 @@ get_open_positions() consistently reports UNAVAILABLE, and callers fall
 back to the existing illustrative Holdings screen -- this is the
 intended, safe behavior, not a bug.
 """
+import logging
 import os
 import sqlite3
 from dataclasses import dataclass
 
 from applications.platform.integrations import IntegrationHealth, ReadResult
+
+# TEMP-DIAG holdings-price: temporary tracing of position_state reads on the
+# deployed HF Space. Remove once the Holdings root cause is confirmed.
+_diag = logging.getLogger("aara.holdings_price_diag")
 
 _PROVIDER = "trades_db_positions"
 
@@ -92,6 +97,8 @@ class LegacyPositionSource:
         positions") is a legitimate HEALTHY result. UNAVAILABLE when the
         database file is absent or locked; API_ERROR when the
         position_state table is missing or a row is malformed."""
+        _diag.warning("TEMP-DIAG holdings-price: position_state read; db_path=%r exists=%s",
+                      self._db_path, os.path.exists(self._db_path))
         if not os.path.exists(self._db_path):
             return ReadResult.failed(
                 IntegrationHealth.unavailable(_PROVIDER, detail="trades.db is not present")
@@ -99,13 +106,19 @@ class LegacyPositionSource:
         try:
             conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
         except sqlite3.Error as exc:
+            _diag.warning("TEMP-DIAG holdings-price: sqlite connect failed %s: %r",
+                          type(exc).__name__, exc)
             return ReadResult.failed(_sqlite_health(exc))
         try:
             rows = conn.execute(_SELECT_OPEN_POSITIONS).fetchall()
         except sqlite3.Error as exc:
+            _diag.warning("TEMP-DIAG holdings-price: position_state query failed %s: %r",
+                          type(exc).__name__, exc)
             return ReadResult.failed(_sqlite_health(exc))
         finally:
             conn.close()
+        _diag.warning("TEMP-DIAG holdings-price: position_state rows=%d sample=%r",
+                      len(rows), rows[:5])
         try:
             parsed = tuple(
                 OpenPosition(
@@ -116,7 +129,11 @@ class LegacyPositionSource:
                 for symbol, shares, entry_price in rows
             )
         except (ValueError, TypeError) as exc:
+            _diag.warning("TEMP-DIAG holdings-price: row parse failed %s: %r",
+                          type(exc).__name__, exc)
             return ReadResult.failed(
                 IntegrationHealth.api_error(_PROVIDER, detail=type(exc).__name__)
             )
+        _diag.warning("TEMP-DIAG holdings-price: parsed %d positions: %r",
+                      len(parsed), [p.symbol for p in parsed])
         return ReadResult.healthy(parsed, _PROVIDER)
