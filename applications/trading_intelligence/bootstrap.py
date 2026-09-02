@@ -1027,9 +1027,14 @@ def _build_risk_intelligence_screen(db_path: Optional[str] = None) -> RiskScreen
 def _build_risk_intelligence_ui(db_path: Optional[str] = None) -> RiskIntelligenceUI:
     """Wire Risk Intelligence to fetch its data at render time, from the
     runtime `db_path` snapshot when one was fetched (see
-    `snapshot_bound_provider`)."""
+    `snapshot_bound_provider`). `snapshot_fetched_at_provider` surfaces the
+    snapshot's fetch instant separately from the render clock, so the UI
+    can show that Refresh re-reads the same snapshot rather than
+    re-downloading it -- same wiring as `_build_morning_brief_ui` and
+    `_build_portfolio_intelligence_ui`."""
     return RiskIntelligenceUI(
-        screen_provider=snapshot_bound_provider(_build_risk_intelligence_screen, db_path)
+        screen_provider=snapshot_bound_provider(_build_risk_intelligence_screen, db_path),
+        snapshot_fetched_at_provider=lambda: _snapshot_fetched_at(db_path),
     )
 
 

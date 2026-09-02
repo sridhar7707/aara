@@ -19,8 +19,10 @@ SPECIFICATION.md Section 2's "Required information" for Settings and
 Section 7's "evidence over emotion" UX principle: mark unbuilt
 functionality as unavailable rather than invent content to fill it. An
 area with preference_fields (User Settings, Notification Preferences)
-instead renders its allow-listed controls plus a disclosure that nothing
-there is saved between sessions -- see screen.py's module docstring.
+instead renders its allow-listed controls -- non-interactive, since
+nothing consumes their value -- plus a disclosure that they are not
+currently configurable and cannot be saved. See screen.py's module
+docstring.
 
 AARA shell consistency pass: renders the same AARA logo header + inter-
 screen nav Decision Center/Portfolio Intelligence/Risk Intelligence/
@@ -62,11 +64,17 @@ class SettingsUI:
                 if area.is_available:
                     gr.HTML(self._format_session_only_notice_html(area))
                     for pref_field in area.preference_fields:
+                        # V3 fix: no .change() handler is wired and nothing
+                        # consumes this value, so the control is rendered
+                        # non-interactive -- a truthful "not configurable
+                        # yet" state rather than a control that silently
+                        # does nothing. The session-only notice above says
+                        # so in words.
                         gr.Radio(
                             choices=list(pref_field.options),
                             value=pref_field.default,
                             label=pref_field.label,
-                            interactive=True,
+                            interactive=False,
                             elem_classes=["st-preference-control"],
                         )
                 else:

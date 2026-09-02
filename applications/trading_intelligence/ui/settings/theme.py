@@ -72,8 +72,12 @@ CSS = """
    (getComputedStyle on a real Tab-focused radio): Gradio's own base
    theme renders these with outline: none and a focus box-shadow whose
    color resolves to fully transparent (rgba(0, 0, 0, 0)), so a
-   keyboard user currently gets zero visual indication of which radio
-   is focused. !important is required, not optional, for the same
+   keyboard user would otherwise get zero visual indication of which
+   radio is focused. V3 made these controls non-interactive (see
+   gradio_view.py) -- a disabled input is not focusable, so this rule is
+   currently inert; it and its .st-preference-control hook are retained
+   so focus parity is already in place if the controls ever become
+   interactive again. !important is required, not optional, for the same
    reason ui/risk_intelligence/theme.py's own Accessibility parity pass
    needed it: this is overriding Gradio's own already-!important-or-
    equivalent-specificity base styling, not merely adding a new rule

@@ -16,9 +16,16 @@ Data is fetched at render time, not build time: the UI takes a
 which reads the operational `risk_state` table via
 adapters.legacy_risk_state_source.LegacyRiskStateSource) and re-invokes it
 on every `demo.load()` and every Refresh click, so a long-running Space
-shows data as of page load rather than app start. An "As of {timestamp}"
-line (America/Chicago, the same wall-clock convention every other Trading
-Intelligence screen uses) reflects the last fetch. The Refresh button
+shows data as of page load rather than app start. Freshness is shown at
+two levels, matching ui/portfolio_intelligence/gradio_view.py and
+ui/morning_brief/gradio_view.py: a "Rendered at {timestamp}" line (the UI
+render clock, advances on every Refresh) and an "Operational data
+snapshot: {timestamp}" line (when the ADR-055 trades.db snapshot behind
+`risk_state` was fetched for this Space process -- fixed across Refresh,
+since Refresh re-reads the same file and never re-downloads the database).
+The `risk_state` row's own `updated_at` is still shown inline beside the
+state badge as "as of {timestamp}" -- that is the data's own timestamp,
+distinct from both lines above. The Refresh button
 reuses ui/decision_center/gradio_view.py's disable -> render -> enable
 double-submit guard.
 
@@ -137,7 +144,22 @@ _SIZING_UNAVAILABLE_HTML = (
     "</div>"
 )
 
-_AS_OF_PREFIX = "As of "
+# The UI render clock -- advances every Refresh. Deliberately "Rendered
+# at" and not "As of": it is when this render ran, never a claim about the
+# risk data's freshness. Matches ui/portfolio_intelligence/gradio_view.py
+# and ui/morning_brief/gradio_view.py so all three snapshot-backed screens
+# read the same way.
+_RENDERED_AT_PREFIX = "Rendered at "
+
+# Freshness of the ADR-055 trades.db operational snapshot for this Space
+# process -- the source behind the `risk_state` read. ADR-055 pulls the
+# snapshot once per process and Refresh only re-reads the same file, so
+# this line is fixed across Refresh and only advances on a Space restart;
+# the note makes that explicit so a refreshed page is never mistaken for a
+# re-fetched one. Same wording as ui/portfolio_intelligence/gradio_view.py.
+_SNAPSHOT_PREFIX = "Operational data snapshot: "
+_SNAPSHOT_REFRESH_NOTE = " (fetched once per Space start; not re-downloaded on Refresh)"
+_SNAPSHOT_UNAVAILABLE = _SNAPSHOT_PREFIX + "unavailable"
 
 # Local primitive, not a cross-package import (same "duplicate the
 # primitive" convention ui/portfolio_intelligence/ and ui/morning_brief/
@@ -147,15 +169,40 @@ _AS_OF_PREFIX = "As of "
 _DISPLAY_TIMEZONE = ZoneInfo("America/Chicago")
 
 
-def _format_as_of_html(moment: datetime) -> str:
-    """Render-time "as of" stamp for the whole screen. Reuses the existing
+def _format_rendered_at_html(moment: datetime) -> str:
+    """Render-clock stamp for the whole screen -- when this render ran, not
+    a claim about the risk data's freshness. Reuses the existing
     `.ri-page-header .ri-subtitle` treatment (muted secondary text,
     already defined in this package's theme.py) rather than introducing a
     new styled class."""
     stamp = moment.astimezone(_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
     return (
         '<div class="ri-page-header">'
-        f'<div class="ri-subtitle">{html.escape(_AS_OF_PREFIX + stamp)}</div>'
+        f'<div class="ri-subtitle">{html.escape(_RENDERED_AT_PREFIX + stamp)}</div>'
+        "</div>"
+    )
+
+
+def _format_snapshot_line_html(moment: Optional[datetime]) -> str:
+    """Freshness of the trades.db operational snapshot (ADR-055) for the
+    current Space process, shown as a line separate from the render clock
+    so a stale snapshot is never mistaken for realtime data. Fixed across
+    Refresh clicks (Refresh re-reads the same file); only advances on a
+    Space restart. `None` (no snapshot obtained -- deployed Space today,
+    local dev, tests) renders an honest "unavailable", never a fabricated
+    timestamp. Mirrors ui/portfolio_intelligence/gradio_view.py."""
+    if moment is None:
+        return (
+            '<div class="ri-page-header">'
+            f'<div class="ri-subtitle">{html.escape(_SNAPSHOT_UNAVAILABLE)}</div>'
+            "</div>"
+        )
+    stamp = moment.astimezone(_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
+    return (
+        '<div class="ri-page-header">'
+        '<div class="ri-subtitle">'
+        f"{html.escape(_SNAPSHOT_PREFIX + stamp + _SNAPSHOT_REFRESH_NOTE)}"
+        "</div>"
         "</div>"
     )
 
@@ -215,6 +262,9 @@ class RiskIntelligenceUI:
         screen: Optional[RiskScreen] = None,
         *,
         screen_provider: Optional[Callable[[], RiskScreen]] = None,
+        snapshot_fetched_at_provider: Optional[
+            Callable[[], Optional[datetime]]
+        ] = None,
     ):
         """Render-time data model. `screen_provider` (bootstrap.py's
         `_build_risk_intelligence_screen`) is re-invoked on every
@@ -224,6 +274,16 @@ class RiskIntelligenceUI:
         supplied the provider is `RiskScreen` itself -- the explicit
         unavailable state (current is None), never a mock/illustrative
         screen.
+
+        `snapshot_fetched_at_provider` (bootstrap.py's `_snapshot_fetched_at`
+        bound to the runtime snapshot path) returns when the ADR-055
+        trades.db snapshot -- the source behind the `risk_state` read --
+        was fetched for this process, or `None` if none was. It is
+        re-called on every render but reads the same file, so its value is
+        stable across Refresh; that stability is the point. Default: a
+        provider returning `None` (pure shell / tests). Mirrors
+        ui/portfolio_intelligence/gradio_view.py and
+        ui/morning_brief/gradio_view.py.
 
         The provider is also called once here so `self._screen` describes
         the build-time snapshot. `build()` renders from that snapshot and
@@ -235,6 +295,9 @@ class RiskIntelligenceUI:
         else:
             self._screen_provider = RiskScreen
         self._screen = self._screen_provider()
+        self._snapshot_fetched_at_provider = snapshot_fetched_at_provider or (
+            lambda: None
+        )
 
     def build(self) -> gr.Blocks:
         initial = self._screen
@@ -250,7 +313,10 @@ class RiskIntelligenceUI:
             refresh_button = gr.Button(
                 "↻ Refresh", size="sm", scale=0, elem_classes=["aara-refresh-button"],
             )
-            as_of_output = gr.HTML(_format_as_of_html(self._now()))
+            rendered_at_output = gr.HTML(_format_rendered_at_html(self._now()))
+            snapshot_output = gr.HTML(
+                _format_snapshot_line_html(self._snapshot_fetched_at_provider())
+            )
 
             # Accessibility parity pass: visually hidden, screen-reader-only
             # live region -- see _LIVE_REGION_SETUP_JS above for how
@@ -303,7 +369,7 @@ class RiskIntelligenceUI:
             history_detail_output = gr.HTML(detail_value, visible=detail_visible)
 
             outputs = [
-                as_of_output, live_announcer,
+                rendered_at_output, snapshot_output, live_announcer,
                 unavailable_output, observed_output,
                 current_state_label, current_state_output,
                 history_label, history_empty_output, history_table,
@@ -355,7 +421,10 @@ class RiskIntelligenceUI:
         mock/illustrative fallback anywhere in this path."""
         screen = self._screen_provider()
         return (
-            gr.update(value=_format_as_of_html(self._now())),
+            gr.update(value=_format_rendered_at_html(self._now())),
+            gr.update(
+                value=_format_snapshot_line_html(self._snapshot_fetched_at_provider())
+            ),
             gr.update(value=self._announcement_for(screen)),
             _html_update(self._unavailable_state(screen)),
             _html_update(self._observed_note_state(screen)),

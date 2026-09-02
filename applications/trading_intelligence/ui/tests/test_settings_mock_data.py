@@ -57,14 +57,19 @@ def test_user_settings_and_notification_preferences_each_carry_exactly_one_allow
     assert screen.notification_preferences.preference_fields[0].label == "Show In-App Notifications"
 
 
-def test_available_areas_still_carry_a_non_persistence_disclosure():
+def test_available_areas_still_carry_a_non_configurable_disclosure():
     """unavailable_message stays populated -- and truthful -- even once an
-    area has preference_fields: it now explains that nothing there is
-    saved, not that the whole area has no source."""
+    area has preference_fields: it now states that the shown control is
+    not currently configurable and cannot be saved, not that the whole
+    area has no source."""
     screen = build_mock_screen()
 
-    assert "not saved" in screen.user_settings.unavailable_message.lower()
-    assert "not saved" in screen.notification_preferences.unavailable_message.lower()
+    for message in (
+        screen.user_settings.unavailable_message,
+        screen.notification_preferences.unavailable_message,
+    ):
+        assert "not currently configurable" in message.lower()
+        assert "cannot be saved" in message.lower()
 
 
 def test_build_mock_screen_contains_no_values_resembling_real_settings():

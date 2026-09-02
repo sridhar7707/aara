@@ -126,7 +126,7 @@ def test_user_settings_and_notification_preferences_render_their_allow_listed_co
     assert radios["Show In-App Notifications"].value == "On"
 
 
-def test_available_areas_render_a_session_only_notice_not_an_unavailable_message_div():
+def test_available_areas_render_a_non_configurable_notice_not_an_unavailable_message_div():
     ui = SettingsUI()
 
     demo = ui.build()
@@ -138,13 +138,29 @@ def test_available_areas_render_a_session_only_notice_not_an_unavailable_message
     ]
     assert len(session_only_html) == 2
     combined = "\n".join(session_only_html)
-    assert "not saved" in combined.lower()
+    assert "not currently configurable" in combined.lower()
+    assert "cannot be saved" in combined.lower()
+
+
+def test_preference_controls_are_rendered_non_interactive():
+    """V3 fix: the two allow-listed preference controls have no .change()
+    handler and nothing consumes their value, so they must not appear
+    changeable -- each renders non-interactive, matching the "not
+    currently configurable" notice shown alongside it."""
+    screen = build_mock_screen()
+    ui = SettingsUI(screen=screen)
+
+    demo = ui.build()
+
+    radios = [block for block in demo.blocks.values() if isinstance(block, gr.Radio)]
+    assert len(radios) == 2
+    assert all(radio.interactive is False for radio in radios)
 
 
 def test_no_save_or_submit_control_is_rendered():
-    """These preferences are UI-local for the current session only -- there
-    must be no Button implying a save/submit action, and no persistence
-    call of any kind wired to the Radio controls."""
+    """These preferences are not currently configurable -- there must be no
+    Button implying a save/submit action, and no persistence call of any
+    kind wired to the Radio controls."""
     ui = SettingsUI()
 
     demo = ui.build()

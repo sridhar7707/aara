@@ -10,10 +10,11 @@ plays for its screen -- builds a fixed SettingsScreen rather than
 illustrative values standing in for a real contract. Thresholds stays
 all-unavailable (risk/execution-adjacent configuration, out of this
 screen's authorized scope). User Settings and Notification Preferences
-each carry exactly one allow-listed, non-trading, UI-local preference
-field (display theme; in-app notification visibility) -- ordinary
-display/notification preferences that carry no persistence claim, per
-screen.py's SettingsPreferenceField docstring. Unlike
+each carry exactly one allow-listed, non-trading preference field
+(display theme; in-app notification visibility) -- rendered as a
+non-interactive control (nothing consumes its value; see gradio_view.py)
+with a disclosure that it is not currently configurable and cannot be
+saved. Unlike
 ui/portfolio_intelligence/mock_data.py's and
 ui/risk_intelligence/mock_data.py's mock data (hand-picked but fabricated
 figures standing in for real numbers), nothing here stands in for a real
@@ -31,8 +32,7 @@ from applications.trading_intelligence.ui.settings.screen import (
 _USER_SETTINGS = SettingsArea(
     title=USER_SETTINGS_TITLE,
     unavailable_message=(
-        "Not saved between sessions -- no product-layer user-settings "
-        "persistence contract is wired yet."
+        "This preference is not currently configurable and cannot be saved."
     ),
     preference_fields=(
         SettingsPreferenceField(
@@ -52,8 +52,7 @@ _THRESHOLDS = SettingsArea(
 _NOTIFICATION_PREFERENCES = SettingsArea(
     title=NOTIFICATION_PREFERENCES_TITLE,
     unavailable_message=(
-        "Not saved between sessions -- no product-layer notification-"
-        "preferences persistence contract is wired yet."
+        "This preference is not currently configurable and cannot be saved."
     ),
     preference_fields=(
         SettingsPreferenceField(

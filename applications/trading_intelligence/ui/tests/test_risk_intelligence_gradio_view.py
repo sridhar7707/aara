@@ -4,13 +4,16 @@ import gradio as gr
 
 from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import (
-    _AS_OF_PREFIX,
     _LIVE_ANNOUNCER_ELEM_ID,
     _LIVE_REGION_SETUP_JS,
     _OBSERVED_CLASSIFICATION_HTML,
+    _RENDERED_AT_PREFIX,
     _SIZING_UNAVAILABLE_HTML,
+    _SNAPSHOT_PREFIX,
+    _SNAPSHOT_UNAVAILABLE,
     _TRIGGER_REASON_UNAVAILABLE_HTML,
-    _format_as_of_html,
+    _format_rendered_at_html,
+    _format_snapshot_line_html,
     RiskIntelligenceUI,
 )
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
@@ -586,37 +589,63 @@ def test_render_returns_one_update_per_dynamic_output():
     result = ui._render()
 
     assert isinstance(result, tuple)
-    assert len(result) == 11
+    assert len(result) == 12
     assert all(isinstance(update, dict) for update in result)
 
 
-def test_render_first_update_is_the_as_of_indicator():
+def test_render_first_two_updates_are_the_render_clock_and_snapshot_lines():
     ui = RiskIntelligenceUI()
 
     result = ui._render()
 
-    assert _AS_OF_PREFIX in result[0]["value"]
+    assert _RENDERED_AT_PREFIX in result[0]["value"]
+    assert _SNAPSHOT_PREFIX in result[1]["value"] or _SNAPSHOT_UNAVAILABLE in result[1]["value"]
 
 
-def test_format_as_of_html_uses_the_america_chicago_convention():
+def test_format_rendered_at_html_uses_the_america_chicago_convention():
     from datetime import datetime, timezone
 
     moment = datetime(2026, 8, 20, 20, 3, tzinfo=timezone.utc)  # 15:03 CDT
 
-    rendered = _format_as_of_html(moment)
+    rendered = _format_rendered_at_html(moment)
 
-    assert _AS_OF_PREFIX in rendered
+    assert _RENDERED_AT_PREFIX in rendered
     assert "2026-08-20 15:03 CDT" in rendered
 
 
-def test_build_shows_an_as_of_indicator_component():
+def test_format_snapshot_line_html_renders_unavailable_for_none():
+    assert _SNAPSHOT_UNAVAILABLE in _format_snapshot_line_html(None)
+
+
+def test_format_snapshot_line_html_annotates_the_no_redownload_behaviour():
+    from datetime import datetime, timezone
+
+    moment = datetime(2026, 8, 20, 20, 3, tzinfo=timezone.utc)  # 15:03 CDT
+
+    rendered = _format_snapshot_line_html(moment)
+
+    assert _SNAPSHOT_PREFIX in rendered
+    assert "2026-08-20 15:03 CDT" in rendered
+    assert "not re-downloaded on Refresh" in rendered
+
+
+def test_default_ui_snapshot_provider_returns_none():
+    """No snapshot_fetched_at_provider supplied -> honest 'unavailable',
+    never a fabricated timestamp."""
+    ui = RiskIntelligenceUI()
+
+    assert ui._snapshot_fetched_at_provider() is None
+
+
+def test_build_shows_render_clock_and_snapshot_indicator_components():
     demo = RiskIntelligenceUI().build()
 
     html_values = [
         block.value for block in demo.blocks.values()
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
-    assert any(_AS_OF_PREFIX in value for value in html_values)
+    assert any(_RENDERED_AT_PREFIX in value for value in html_values)
+    assert any(_SNAPSHOT_UNAVAILABLE in value for value in html_values)
 
 
 def test_render_collapses_to_the_unavailable_state_when_provider_returns_unavailable():
@@ -627,10 +656,11 @@ def test_render_collapses_to_the_unavailable_state_when_provider_returns_unavail
     combined = "\n".join(update.get("value") or "" for update in result if isinstance(update.get("value"), str))
 
     assert "Risk Intelligence data is currently unavailable." in combined
+    # result[0] render clock, result[1] snapshot line, result[2] announcer;
     # unavailable message visible, current-state / history hidden
-    unavailable_update = result[2]
+    unavailable_update = result[3]
     assert unavailable_update.get("visible") is True
-    for hidden in result[3:6]:  # observed note, current label, current state
+    for hidden in result[4:7]:  # observed note, current label, current state
         assert hidden.get("visible") is False
 
 

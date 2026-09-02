@@ -17,13 +17,14 @@ unavailable, with a fixed, honest message, for that reason alone.
 User Settings and Notification Preferences may additionally carry a
 narrow, explicitly allow-listed set of ordinary, non-trading display/
 notification preferences (`preference_fields`) -- e.g. a display theme,
-an in-app notification toggle. These are UI-local only: nothing here is
-backed by a persistence or configuration contract, so a preference's
-value never survives a page reload or a new session. `unavailable_message`
-stays populated on every area (including ones with preference_fields) as
-that area's disclosure text -- for Thresholds it explains total
-unavailability; for an area with preference_fields it explains why
-nothing shown there is saved.
+an in-app notification toggle. Nothing here is backed by a persistence or
+configuration contract and nothing consumes a preference's value, so the
+control is rendered non-interactive (see gradio_view.py) rather than as a
+control that silently does nothing. `unavailable_message` stays populated
+on every area (including ones with preference_fields) as that area's
+disclosure text -- for Thresholds it explains total unavailability; for
+an area with preference_fields it states that the shown control is not
+currently configurable and cannot be saved.
 
 Area titles are exact string literals matching the frozen IA's own
 "Required information" wording verbatim.
@@ -40,9 +41,10 @@ NOTIFICATION_PREFERENCES_TITLE = "Notification Preferences"
 class SettingsPreferenceField:
     """One allow-listed, non-trading display/notification preference.
 
-    UI-local only -- see module docstring. `options` is the fixed set of
-    choices a user may pick from; `default` is shown until changed and is
-    never written anywhere."""
+    See module docstring. `options` is the fixed set of choices; `default`
+    is the option shown. The rendered control is non-interactive (see
+    gradio_view.py) -- nothing consumes the value and it is never written
+    anywhere."""
     label: str
     options: Tuple[str, ...]
     default: str
