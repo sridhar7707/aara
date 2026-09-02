@@ -67,6 +67,26 @@ def test_settings_theme_defines_local_spacing_tokens():
         )
 
 
+def test_settings_theme_aliases_the_shared_colour_tokens():
+    """Design-system migration (Batch B): theme.py's colour `:root` entries
+    resolve through the shared `--aara-*` tokens from ui/design_system.py,
+    each keeping its former hex as a `var(--aara-*, <literal>)` standalone-
+    render fallback. Mirrors test_design_system.py's own
+    test_migrated_screen_themes_alias_the_shared_colour_tokens (Batch A)."""
+    from applications.trading_intelligence.ui.settings.theme import CSS
+
+    for alias in (
+        "var(--aara-navy, #0B1F3A)",
+        "var(--aara-gold, #C8A45D)",
+        "var(--aara-bg, #F8F7F3)",
+        "var(--aara-surface, #FFFFFF)",
+        "var(--aara-text, #1A1A1A)",
+        "var(--aara-text-muted, #666666)",
+        "var(--aara-border, #E2E8F0)",
+    ):
+        assert alias in CSS, f"expected shared-token alias {alias!r} in theme.py's CSS"
+
+
 def test_settings_does_not_import_sentinel_engine_bot_or_dashboard():
     """Redundant with test_ui_structure.py's whole-tree scan, but kept
     explicit per-package (matching every other screen package's own

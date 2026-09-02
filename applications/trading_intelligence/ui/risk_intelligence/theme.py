@@ -1,27 +1,31 @@
 """CSS for the Risk Intelligence screen -- MVP.
 
-Self-contained: does not import ui/decision_center/theme.py or
-ui/portfolio_intelligence/theme.py, and does not require either to be
-present. Reuses the same AARA primitive color values (navy/gold/warm
-background) as plain literals here rather than importing them, per this
-package's no-coupling scope. State badges deliberately avoid red/green
-"stoplight" colors (brand/guidelines/FORBIDDEN_UI_PATTERNS.md's "no
-flashing/blinking price-style indicators" discipline, applied here by the
-same reasoning already used for Decision Center's BUY/SELL badges, which
-use navy/gold tints rather than green/red) -- NORMAL/WARNING/DEFENSIVE are
-distinguished by a neutral, gold, and stronger-navy tint respectively,
-each carrying its own text label so color is never the only signal.
+Design-system migration (Batch B): the colour `:root` entries below now
+alias the shared `--aara-*` tokens from `ui/design_system.py` (the single
+source of truth -- audit finding D-01). Each keeps its former hex as a
+`var(--aara-*, <literal>)` fallback so a standalone
+`RiskIntelligenceUI().build()` (no `bootstrap` composition) still renders
+identically; the composed app resolves through the shared token. The
+`--ri-space-*` spacing tokens and every `.ri-*` rule below are unchanged.
+
+State badges deliberately avoid red/green "stoplight" colors
+(brand/guidelines/FORBIDDEN_UI_PATTERNS.md's "no flashing/blinking
+price-style indicators" discipline, applied here by the same reasoning
+already used for Decision Center's BUY/SELL badges, which use navy/gold
+tints rather than green/red) -- NORMAL/WARNING/DEFENSIVE are distinguished
+by a neutral, gold, and stronger-navy tint respectively, each carrying its
+own text label so color is never the only signal.
 """
 
 CSS = """
 :root {
-  --ri-color-navy: #0B1F3A;
-  --ri-color-gold: #C8A45D;
-  --ri-color-background: #F8F7F3;
-  --ri-color-surface: #FFFFFF;
-  --ri-color-text: #1A1A1A;
-  --ri-color-text-secondary: #666666;
-  --ri-color-border: #E2E8F0;
+  --ri-color-navy: var(--aara-navy, #0B1F3A);
+  --ri-color-gold: var(--aara-gold, #C8A45D);
+  --ri-color-background: var(--aara-bg, #F8F7F3);
+  --ri-color-surface: var(--aara-surface, #FFFFFF);
+  --ri-color-text: var(--aara-text, #1A1A1A);
+  --ri-color-text-secondary: var(--aara-text-muted, #666666);
+  --ri-color-border: var(--aara-border, #E2E8F0);
 
   --ri-space-2: 2px;
   --ri-space-3: 3px;

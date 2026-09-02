@@ -65,6 +65,26 @@ def test_risk_intelligence_theme_defines_local_spacing_tokens():
         )
 
 
+def test_risk_intelligence_theme_aliases_the_shared_colour_tokens():
+    """Design-system migration (Batch B): theme.py's colour `:root` entries
+    resolve through the shared `--aara-*` tokens from ui/design_system.py,
+    each keeping its former hex as a `var(--aara-*, <literal>)` standalone-
+    render fallback. Mirrors test_design_system.py's own
+    test_migrated_screen_themes_alias_the_shared_colour_tokens (Batch A)."""
+    from applications.trading_intelligence.ui.risk_intelligence.theme import CSS
+
+    for alias in (
+        "var(--aara-navy, #0B1F3A)",
+        "var(--aara-gold, #C8A45D)",
+        "var(--aara-bg, #F8F7F3)",
+        "var(--aara-surface, #FFFFFF)",
+        "var(--aara-text, #1A1A1A)",
+        "var(--aara-text-muted, #666666)",
+        "var(--aara-border, #E2E8F0)",
+    ):
+        assert alias in CSS, f"expected shared-token alias {alias!r} in theme.py's CSS"
+
+
 def test_production_risk_modules_do_not_import_mock_data():
     """Production guarantee: the Risk Intelligence view (gradio_view.py)
     and the composition root (bootstrap.py) must not import or use
