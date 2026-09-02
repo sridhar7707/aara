@@ -66,14 +66,14 @@ def test_format_reports_a_successful_fetch_that_matched_nothing():
     assert summary == "No recent news for current holdings (AAPL, MSFT)."
 
 
-def test_format_singular_headline_names_the_latest_and_its_source():
+def test_format_singular_headline_names_the_latest_its_source_and_matched_symbol():
     news = OvernightHoldingsNews(items=(_item("Apple ships a thing"),))
 
     summary = _format_overnight_holdings_news(news, ("AAPL",))
 
     assert summary == (
         '1 recent headline for current holdings (AAPL) -- '
-        'latest: "Apple ships a thing" (Benzinga).'
+        'latest: "Apple ships a thing" (Benzinga; AAPL).'
     )
 
 
@@ -88,18 +88,59 @@ def test_format_pluralizes_and_still_names_only_the_latest():
 
     assert summary == (
         '3 recent headlines for current holdings (AAPL, MSFT) -- '
-        'latest: "Newest" (Reuters).'
+        'latest: "Newest" (Reuters; AAPL).'
     )
 
 
-def test_format_omits_source_clause_when_provider_gave_no_source():
+def test_format_lists_multiple_matched_symbols_sorted_deterministically():
+    news = OvernightHoldingsNews(items=(
+        _item("EV battery shakeup", symbols=("TSLA", "AMD")),
+    ))
+
+    summary = _format_overnight_holdings_news(news, ("AMD", "TSLA"))
+
+    # Alphabetical, not the provider's arbitrary tuple order.
+    assert 'latest: "EV battery shakeup" (Benzinga; AMD, TSLA).' in summary
+
+
+def test_format_omits_source_clause_but_still_names_the_matched_symbol():
     news = OvernightHoldingsNews(items=(_item("No source article", source=""),))
 
     summary = _format_overnight_holdings_news(news, ("AAPL",))
 
     assert summary == (
-        '1 recent headline for current holdings (AAPL) -- latest: "No source article".'
+        '1 recent headline for current holdings (AAPL) -- '
+        'latest: "No source article" (AAPL).'
     )
+
+
+def test_format_shows_source_only_when_no_holding_symbol_matched():
+    """Nothing is invented -- an item the adapter returned with no matched
+    holding symbol shows just the source, never a guessed ticker."""
+    news = OvernightHoldingsNews(items=(_item("Sector-wide piece", symbols=()),))
+
+    summary = _format_overnight_holdings_news(news, ("AAPL",))
+
+    assert summary == (
+        '1 recent headline for current holdings (AAPL) -- '
+        'latest: "Sector-wide piece" (Benzinga).'
+    )
+
+
+def test_format_caps_headline_count_wording_at_the_adapter_maximum():
+    """When the adapter returns its full cap, the UI must not imply that is
+    the exhaustive total -- it says "Up to N" instead of a bare count."""
+    from applications.trading_intelligence.bootstrap import _OVERNIGHT_NEWS_MAX_ITEMS
+
+    items = tuple(
+        _item(f"headline {i}") for i in range(_OVERNIGHT_NEWS_MAX_ITEMS)
+    )
+    summary = _format_overnight_holdings_news(OvernightHoldingsNews(items=items), ("AAPL",))
+
+    assert summary.startswith(
+        f"Up to {_OVERNIGHT_NEWS_MAX_ITEMS} recent headlines for current holdings (AAPL) -- "
+    )
+    assert f"{_OVERNIGHT_NEWS_MAX_ITEMS} recent headline " not in summary  # no bare count
 
 
 # --------------------------------------------------------------------------
@@ -157,7 +198,7 @@ def test_wires_real_alpaca_news_into_the_overnight_section(monkeypatch):
     assert section.health is not None
     assert section.available_summary == (
         '1 recent headline for current holdings (AAPL, MSFT) -- '
-        'latest: "Big AAPL story" (Benzinga).'
+        'latest: "Big AAPL story" (Benzinga; AAPL).'
     )
     assert section.title == build_mock_screen().overnight_holdings_news.title
 

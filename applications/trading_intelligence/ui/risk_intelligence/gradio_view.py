@@ -38,8 +38,8 @@ never implies the system enforced the state or blocked execution.
 ledger table, which this screen does not read), so when they are None the
 view says so plainly rather than fabricating them, and no sizing gap is
 computed. History is never fabricated -- with no history source wired it
-stays empty and the existing "No risk evaluations recorded yet." message
-is shown.
+stays empty and the "Risk evaluation history is not recorded in this data
+source." message is shown.
 
 Keyboard focus/activation uses native HTML controls only, no custom JS:
 the trigger-reason disclosure and each evaluation-history card are real

@@ -58,6 +58,7 @@ from applications.trading_intelligence.ui.integration_health_view import (
 )
 from applications.trading_intelligence.ui.morning_brief.mock_data import build_mock_screen
 from applications.trading_intelligence.ui.morning_brief.screen import (
+    PORTFOLIO_SNAPSHOT_TITLE,
     MorningBriefScreen,
     MorningBriefSection,
 )
@@ -85,6 +86,27 @@ _SNAPSHOT_UNAVAILABLE = _SNAPSHOT_PREFIX + "unavailable"
 # available_summary, so "as of" refers to that section's data, never the
 # page-level render clock (which uses `_RENDERED_AT_PREFIX`).
 _SECTION_AS_OF_PREFIX = "as of "
+
+# Always-on data-source caption for the Portfolio Snapshot section only.
+# That section reads trades.db's `portfolio_snapshots` (the freshest
+# per-cycle operational portfolio value, marked to market) -- deliberately
+# NOT the internal managed capital-pool ledger that backs Portfolio
+# Intelligence's Capital Summary. The two systems of record are tracked
+# independently and are expected to differ; this line says so plainly so
+# the Morning Brief figure is never read as the same number Portfolio
+# Intelligence shows. Same always-on caption pattern (and "-- the two are
+# different systems and may not match" phrasing) as
+# ui/portfolio_intelligence/gradio_view.py's own _CAPITAL_SOURCE_CAPTION,
+# with wording truthful for this section's actual source. Reuses the
+# existing `.mb-subtitle` treatment; no theme.py change.
+_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION = (
+    "Latest per-cycle operational portfolio snapshot, marked to market. "
+    "Tracked separately from Portfolio Intelligence's managed capital-pool "
+    "ledger -- the two are different systems and may not match."
+)
+_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML = (
+    f'<div class="mb-subtitle">{html.escape(_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION)}</div>'
+)
 
 # Local primitive, not a cross-package import (same "duplicate the
 # primitive" convention ui/portfolio_intelligence/gradio_view.py uses for
@@ -184,6 +206,11 @@ class MorningBriefUI:
             section_bodies = []
             for section in initial.sections:
                 gr.HTML(self._format_section_label_html(section))
+                if section.title == PORTFOLIO_SNAPSHOT_TITLE:
+                    # Static disclosure, shown in every state (available or
+                    # unavailable). Not a dynamic output -- not added to
+                    # `outputs`, so _render()/_OUTPUT_COUNT are unchanged.
+                    gr.HTML(_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML)
                 section_bodies.append(gr.HTML(self._section_body_html(section)))
 
             outputs = [rendered_at_output, snapshot_output, *section_bodies]

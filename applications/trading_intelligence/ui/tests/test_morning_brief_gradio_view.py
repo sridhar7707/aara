@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 
 from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.ui.morning_brief.gradio_view import (
+    _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION,
+    _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML,
     _RENDERED_AT_PREFIX,
     _SECTION_AS_OF_PREFIX,
     _SNAPSHOT_PREFIX,
@@ -97,6 +99,46 @@ def test_no_gradio_dataframe_is_rendered():
 
     dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
     assert dataframes == []
+
+
+def test_portfolio_snapshot_carries_a_data_source_caption():
+    """MB-2: the Portfolio Snapshot section discloses that it is a
+    different system of record from Portfolio Intelligence's Capital
+    Summary. Rendered once, in every state (here: the default all-
+    unavailable screen), and it must not claim the two are equivalent."""
+    combined = "\n".join(_html_values(MorningBriefUI().build()))
+
+    assert combined.count(_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML) == 1
+    assert "Tracked separately from Portfolio Intelligence" in _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION
+    assert "the two are different systems and may not match" in _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION
+    # never implies equivalence with the Capital Summary figure
+    for equivalence_claim in ("same as", "identical to", "matches portfolio intelligence"):
+        assert equivalence_claim not in _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION.lower()
+
+
+def test_portfolio_snapshot_caption_is_static_not_a_dynamic_render_output():
+    """The caption is a fixed disclosure -- it must not be wired into
+    _render()'s output list, so _OUTPUT_COUNT stays 6."""
+    ui = MorningBriefUI()
+
+    assert len(ui._render()) == _OUTPUT_COUNT  # unchanged: 6
+    combined = "\n".join(_html_values(ui.build()))
+    assert _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML in combined
+
+
+def test_source_caption_renders_with_a_real_portfolio_snapshot_too():
+    screen = build_mock_screen()
+    real_screen = replace(
+        screen,
+        portfolio_snapshot=replace(
+            screen.portfolio_snapshot,
+            available_summary="Total value $1.00 ($1.00 cash, $0.00 invested).",
+        ),
+    )
+    combined = "\n".join(_html_values(MorningBriefUI(screen=real_screen).build()))
+
+    assert combined.count(_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML) == 1
+    assert "Total value $1.00" in combined
 
 
 def test_no_illustrative_data_disclosure_is_rendered():

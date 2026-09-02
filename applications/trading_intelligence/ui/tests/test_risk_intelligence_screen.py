@@ -127,7 +127,9 @@ def test_risk_screen_is_empty_with_no_history():
     screen = RiskScreen(current=_make_snapshot())
 
     assert screen.is_empty
-    assert screen.empty_state_message == "No risk evaluations recorded yet."
+    assert screen.empty_state_message == (
+        "Risk evaluation history is not recorded in this data source."
+    )
 
 
 def test_risk_screen_is_not_empty_with_history():

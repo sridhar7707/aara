@@ -71,6 +71,7 @@ from applications.platform.registry.product_registry import Product, ProductRegi
 from applications.platform.workspaces.workspace import Workspace
 from applications.platform.workspaces.workspace_registry import WorkspaceRegistry
 from applications.trading_intelligence.adapters.alpaca_news_source import (
+    _DEFAULT_MAX_ITEMS as _OVERNIGHT_NEWS_MAX_ITEMS,
     AlpacaNewsSource,
     OvernightHoldingsNews,
 )
@@ -595,11 +596,27 @@ def _format_overnight_holdings_news(
         return f"No recent news for current holdings ({symbols_clause})."
     count = len(news.items)
     plural = "s" if count != 1 else ""
+    # The adapter caps its result at `_OVERNIGHT_NEWS_MAX_ITEMS`; when the
+    # list comes back at that cap there may be more the UI is not showing,
+    # so say "Up to N" rather than assert an exact total.
+    if count >= _OVERNIGHT_NEWS_MAX_ITEMS:
+        count_clause = f"Up to {_OVERNIGHT_NEWS_MAX_ITEMS} recent headlines"
+    else:
+        count_clause = f"{count} recent headline{plural}"
     latest = news.items[0]
-    source_clause = f" ({latest.source})" if latest.source else ""
+    # Name the holding(s) this headline was actually tagged to (Alpaca's
+    # own symbol list, intersected with current holdings by the adapter --
+    # see HoldingsNewsItem.symbols), sorted for a deterministic order.
+    # Nothing is inferred: an item with no matched symbols shows none.
+    detail_bits = []
+    if latest.source:
+        detail_bits.append(latest.source)
+    if latest.symbols:
+        detail_bits.append(", ".join(sorted(latest.symbols)))
+    detail_clause = f" ({'; '.join(detail_bits)})" if detail_bits else ""
     return (
-        f"{count} recent headline{plural} for current holdings ({symbols_clause}) -- "
-        f'latest: "{latest.headline}"{source_clause}.'
+        f"{count_clause} for current holdings ({symbols_clause}) -- "
+        f'latest: "{latest.headline}"{detail_clause}.'
     )
 
 
@@ -997,8 +1014,8 @@ def _build_risk_intelligence_screen(db_path: Optional[str] = None) -> RiskScreen
     hash-chained `risk_evaluation_events` ledger table, which this slice
     deliberately does not read -- so they are left as None and the view
     states they are not recorded in this data source. History is never
-    fabricated: it stays empty and the view shows its existing
-    "No risk evaluations recorded yet." message.
+    fabricated: it stays empty and the view shows its
+    "Risk evaluation history is not recorded in this data source." message.
 
     None from the adapter (no trades.db -- the deployed HF Space's normal
     state -- missing table/row, or an empty/invalid value) yields an

@@ -100,4 +100,9 @@ class RiskScreen:
 
     @property
     def empty_state_message(self) -> str:
-        return "No risk evaluations recorded yet."
+        # This data source (the operational risk_state table) structurally
+        # carries only the current classification, never an evaluation
+        # history -- so this is a permanent property of the source, not a
+        # "none logged yet" state. Wording mirrors the trigger-reason /
+        # sizing "not recorded in this data source" lines on the same card.
+        return "Risk evaluation history is not recorded in this data source."

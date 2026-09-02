@@ -245,7 +245,7 @@ def test_empty_message_html_renders_the_screens_own_message():
     empty_html = RiskIntelligenceUI._format_empty_message_html(screen)
 
     assert 'class="ri-empty-message"' in empty_html
-    assert "No risk evaluations recorded yet." in empty_html
+    assert "Risk evaluation history is not recorded in this data source." in empty_html
 
 
 def test_build_renders_empty_message_instead_of_a_table_when_no_history():
@@ -260,7 +260,7 @@ def test_build_renders_empty_message_instead_of_a_table_when_no_history():
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
     assert all(df.visible is False for df in dataframes)
-    assert any("No risk evaluations recorded yet." in value for value in html_values)
+    assert any("Risk evaluation history is not recorded in this data source." in value for value in html_values)
 
 
 def test_build_renders_a_dataframe_when_history_exists():
@@ -725,7 +725,7 @@ def test_partial_snapshot_screen_shows_no_history_table_or_detail_cards():
     combined = "\n".join(value for value in html_values if value)
     assert all(df.visible is False for df in dataframes)
     assert '<details class="ri-history-detail-card">' not in combined
-    assert "No risk evaluations recorded yet." in combined
+    assert "Risk evaluation history is not recorded in this data source." in combined
 
 
 def test_build_renders_the_observed_governor_classification_disclosure_when_available():
