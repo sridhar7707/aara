@@ -21,17 +21,18 @@ Where "shared" ends and "screen-specific" begins
   that screen -- Decision Center's lifecycle track / record cards, Risk
   Intelligence's state badge, Portfolio Intelligence's allocation bar, etc.
 
-Batch A migration status (foundation only -- see the batch brief):
-* Morning Brief, Performance & Learning, Portfolio Intelligence: their
-  colour `:root` entries now alias these tokens (`var(--aara-*, <literal>)`
-  -- the literal is a standalone-render fallback; the composed app resolves
-  through the shared token).
-* Decision Center, Risk Intelligence, Settings: NOT migrated yet. They
-  carry test guards keyed to literal token text (`test_theme_contrast.py`
-  hex extraction; `test_*_structure.py` `--ri-space-*` / `--st-space-*`
-  guards). Their migration -- and the matching guard updates -- is Batch B.
+Design-system migration status:
+* Morning Brief, Performance & Learning, Portfolio Intelligence (Batch A),
+  Risk Intelligence, Settings (Batch B1): their colour `:root` entries now
+  alias these tokens (`var(--aara-*, <literal>)` -- the literal is a
+  standalone-render fallback; the composed app resolves through the shared
+  token). The `--ri-space-*` / `--st-space-*` spacing guards in
+  `test_*_structure.py` are unaffected -- spacing tokens were not migrated.
+* Decision Center: NOT migrated yet. It carries test guards keyed to
+  literal token text (`test_theme_contrast.py` hex extraction). Its
+  migration -- and the matching guard updates -- is Batch B2.
 * The `.aara-*` primitive classes below are defined but wired into no
-  screen's markup yet. Batch B applies them.
+  screen's markup yet. Batch B3 applies them.
 
 Typeface decision (audit finding D-02)
 --------------------------------------
@@ -111,7 +112,7 @@ DESIGN_SYSTEM_CSS = """
    Reusable primitives.
 
    Defined here as the shared vocabulary; wired into NO screen's markup yet
-   (Batch B applies them). Adding these class rules changes nothing that
+   (Batch B3 applies them). Adding these class rules changes nothing that
    renders today.
    ========================================================================== */
 
@@ -212,7 +213,7 @@ DESIGN_SYSTEM_CSS = """
 
 /* Centred reading container (audit finding D-09). The composed app already
    has a ~1280px `.gradio-container` cap; this narrower measure is available
-   for Batch B to wrap long-form content columns. Not applied globally in
+   for Batch B3 to wrap long-form content columns. Not applied globally in
    Batch A -- the full-bleed shell header/nav depend on the existing
    container geometry. */
 .aara-content {

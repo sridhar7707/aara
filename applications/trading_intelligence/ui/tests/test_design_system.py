@@ -153,14 +153,17 @@ def test_composed_app_css_includes_the_design_system_first():
     assert ds_at < first_screen_at
 
 
-# --- migrated screens alias the shared tokens (Batch A scope) ----------------
+# --- migrated screens alias the shared tokens -------------------------------
 
 def test_migrated_screen_themes_alias_the_shared_colour_tokens():
     from applications.trading_intelligence.ui.morning_brief.theme import CSS as MB
     from applications.trading_intelligence.ui.performance_learning.theme import CSS as PL
     from applications.trading_intelligence.ui.portfolio_intelligence.theme import CSS as PI
+    from applications.trading_intelligence.ui.risk_intelligence.theme import CSS as RI
+    from applications.trading_intelligence.ui.settings.theme import CSS as ST
 
-    for css in (MB, PL, PI):
+    # Batch A: MB / PL / PI.  Batch B1: RI / ST.
+    for css in (MB, PL, PI, RI, ST):
         assert "var(--aara-navy, #0B1F3A)" in css
         assert "var(--aara-bg, #F8F7F3)" in css
         assert "var(--aara-text-muted, #666666)" in css
