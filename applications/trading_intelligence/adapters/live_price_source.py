@@ -91,47 +91,59 @@ class LivePriceSource:
                     _PROVIDER, detail="yfinance is not importable"
                 )
             )
-        _diag.warning("TEMP-DIAG holdings-price: calling yf.download for %r", symbols)
         try:
             import curl_cffi as _cc  # noqa: F401
-            _diag.warning("TEMP-DIAG holdings-price: yfinance=%s curl_cffi=%s",
+            _diag.warning("TEMP-DIAG holdings-price: fetching %d symbols one-by-one; "
+                          "yfinance=%s curl_cffi=%s", len(symbols),
                           getattr(yf, "__version__", "?"), getattr(_cc, "__version__", "?"))
         except Exception:  # pragma: no cover - diagnostic only
             pass
-        try:
-            data = yf.download(
-                " ".join(symbols),
-                period=_FETCH_PERIOD,
-                progress=False,
-                auto_adjust=True,
-                timeout=_FETCH_TIMEOUT_SECONDS,
-            )
-        except Exception as exc:
-            _diag.warning("TEMP-DIAG holdings-price: yf.download RAISED %s: %r",
-                          type(exc).__name__, exc)
-            return ReadResult.failed(classify_exception(_PROVIDER, exc))
-        _diag.warning("TEMP-DIAG holdings-price: yf.download returned type=%s shape=%s cols=%s",
-                      type(data).__name__, getattr(data, "shape", None),
-                      list(getattr(data, "columns", []))[:12])
-        if data is None or data.empty or "Close" not in data:
-            _diag.warning("TEMP-DIAG holdings-price: empty/missing response (empty=%s)",
-                          getattr(data, "empty", None))
-            return ReadResult.failed(
-                IntegrationHealth.unavailable(
-                    _PROVIDER, detail="empty or missing price response"
-                )
-            )
-        close = data["Close"]
+
         prices: Dict[str, float] = {}
         for symbol in symbols:
+            # One ticker per call. A multi-symbol yf.download() assembles its
+            # column set from yfinance's process-global shared state, so a
+            # partially-failed batch can drop a requested symbol and pull in an
+            # unrelated one another adapter fetched (e.g. SPY from the Morning
+            # Brief market-quote source) -- the caller then KeyErrors on the
+            # missing symbol. Per-symbol calls return that ticker's own frame
+            # and keep one transient failure from corrupting the rest.
             try:
-                column = close[symbol] if hasattr(close, "columns") else close
-                clean = column.dropna()
+                frame = yf.download(
+                    symbol,
+                    period=_FETCH_PERIOD,
+                    progress=False,
+                    auto_adjust=True,
+                    timeout=_FETCH_TIMEOUT_SECONDS,
+                )
+            except Exception as exc:
+                _diag.warning("TEMP-DIAG holdings-price: yf.download(%s) RAISED %s: %r",
+                              symbol, type(exc).__name__, exc)
+                return ReadResult.failed(classify_exception(_PROVIDER, exc))
+
+            if frame is None or getattr(frame, "empty", True) or "Close" not in frame:
+                _diag.warning("TEMP-DIAG holdings-price: %s empty/missing response "
+                              "(type=%s empty=%s cols=%s)", symbol, type(frame).__name__,
+                              getattr(frame, "empty", None),
+                              list(getattr(frame, "columns", []))[:8])
+                return ReadResult.failed(
+                    IntegrationHealth.unavailable(
+                        _PROVIDER, detail="empty or missing price response"
+                    )
+                )
+
+            try:
+                close = frame["Close"]
+                # single-ticker download: "Close" is a Series on older yfinance,
+                # a 1-column (possibly MultiIndex) DataFrame on newer.
+                if hasattr(close, "columns"):
+                    series = close[symbol] if symbol in close.columns else close.iloc[:, 0]
+                else:
+                    series = close
+                clean = series.dropna()
                 if clean.empty:
-                    _diag.warning("TEMP-DIAG holdings-price: no valid price for %s; "
-                                  "close cols=%s tail=%s", symbol,
-                                  list(getattr(close, "columns", []))[:12],
-                                  column.tail(3).to_dict() if hasattr(column, "tail") else column)
+                    _diag.warning("TEMP-DIAG holdings-price: %s no valid price; cols=%s",
+                                  symbol, list(getattr(close, "columns", []))[:8])
                     return ReadResult.failed(
                         IntegrationHealth.api_error(
                             _PROVIDER, detail="no valid price for a requested symbol"
@@ -139,18 +151,20 @@ class LivePriceSource:
                     )
                 price = float(clean.iloc[-1])
             except Exception as exc:
-                _diag.warning("TEMP-DIAG holdings-price: per-symbol %s extract RAISED %s: %r",
+                _diag.warning("TEMP-DIAG holdings-price: %s extract RAISED %s: %r",
                               symbol, type(exc).__name__, exc)
                 return ReadResult.failed(
                     IntegrationHealth.api_error(_PROVIDER, detail=type(exc).__name__)
                 )
+
             if not (price > 0.0):
-                _diag.warning("TEMP-DIAG holdings-price: non-positive price %s=%r", symbol, price)
+                _diag.warning("TEMP-DIAG holdings-price: %s non-positive price %r", symbol, price)
                 return ReadResult.failed(
                     IntegrationHealth.api_error(
                         _PROVIDER, detail="non-positive price for a requested symbol"
                     )
                 )
             prices[symbol] = price
+
         _diag.warning("TEMP-DIAG holdings-price: OK %s", prices)
         return ReadResult.healthy(prices, _PROVIDER)
