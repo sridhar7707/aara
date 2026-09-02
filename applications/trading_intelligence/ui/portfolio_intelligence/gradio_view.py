@@ -176,8 +176,8 @@ _UNAVAILABLE_DATA_BODY = (
 )
 _UNAVAILABLE_DATA_HTML = (
     '<div class="pi-disclosure">'
-    f'<div class="pi-disclosure-title">{html.escape(_UNAVAILABLE_DATA_TITLE)}</div>'
-    f'<div class="pi-disclosure-body">{html.escape(_UNAVAILABLE_DATA_BODY)}</div>'
+    f'<div class="pi-disclosure-title aara-disclosure-title">{html.escape(_UNAVAILABLE_DATA_TITLE)}</div>'
+    f'<div class="pi-disclosure-body aara-disclosure-body">{html.escape(_UNAVAILABLE_DATA_BODY)}</div>'
     "</div>"
 )
 
@@ -193,8 +193,8 @@ _PARTIAL_DATA_BODY = (
 )
 _PARTIAL_DATA_HTML = (
     '<div class="pi-disclosure">'
-    f'<div class="pi-disclosure-title">{html.escape(_PARTIAL_DATA_TITLE)}</div>'
-    f'<div class="pi-disclosure-body">{html.escape(_PARTIAL_DATA_BODY)}</div>'
+    f'<div class="pi-disclosure-title aara-disclosure-title">{html.escape(_PARTIAL_DATA_TITLE)}</div>'
+    f'<div class="pi-disclosure-body aara-disclosure-body">{html.escape(_PARTIAL_DATA_BODY)}</div>'
     "</div>"
 )
 
@@ -225,8 +225,8 @@ _REAL_DATA_BODY = (
 )
 _REAL_DATA_HTML = (
     '<div class="pi-disclosure">'
-    f'<div class="pi-disclosure-title">{html.escape(_REAL_DATA_TITLE)}</div>'
-    f'<div class="pi-disclosure-body">{html.escape(_REAL_DATA_BODY)}</div>'
+    f'<div class="pi-disclosure-title aara-disclosure-title">{html.escape(_REAL_DATA_TITLE)}</div>'
+    f'<div class="pi-disclosure-body aara-disclosure-body">{html.escape(_REAL_DATA_BODY)}</div>'
     "</div>"
 )
 
@@ -591,7 +591,7 @@ class PortfolioIntelligenceUI:
     def _alpaca_positions_message_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
         if screen.alpaca_is_available and len(screen.alpaca_positions) == 0:
             return (
-                f'<div class="pi-empty-message">'
+                f'<div class="pi-empty-message aara-empty">'
                 f'{html.escape(screen.alpaca_empty_state_message)}</div>',
                 True,
             )
@@ -628,7 +628,7 @@ class PortfolioIntelligenceUI:
             )
         if screen.alpaca_orders.is_empty:
             return (
-                f'<div class="pi-empty-message">'
+                f'<div class="pi-empty-message aara-empty">'
                 f'{html.escape(screen.alpaca_orders_empty_state_message)}</div>',
                 True,
             )
@@ -662,7 +662,7 @@ class PortfolioIntelligenceUI:
         ]
         metrics_html = "".join(
             '<div class="pi-metric">'
-            f'<span class="pi-metric-label">{html.escape(label)}</span>'
+            f'<span class="pi-metric-label aara-metric-label">{html.escape(label)}</span>'
             f'<span class="pi-metric-value">${value:,.2f}</span>'
             "</div>"
             for label, value in fields
@@ -699,7 +699,7 @@ class PortfolioIntelligenceUI:
 
     @staticmethod
     def _format_empty_message_html(screen: PortfolioScreen) -> str:
-        return f'<div class="pi-empty-message">{html.escape(screen.empty_state_message)}</div>'
+        return f'<div class="pi-empty-message aara-empty">{html.escape(screen.empty_state_message)}</div>'
 
     @staticmethod
     def _format_alpaca_account_html(account: AlpacaAccountSnapshot) -> str:
@@ -711,7 +711,7 @@ class PortfolioIntelligenceUI:
         ]
         metrics_html = "".join(
             '<div class="pi-metric">'
-            f'<span class="pi-metric-label">{html.escape(label)}</span>'
+            f'<span class="pi-metric-label aara-metric-label">{html.escape(label)}</span>'
             f'<span class="pi-metric-value">${value:,.2f}</span>'
             "</div>"
             for label, value in fields

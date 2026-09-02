@@ -244,7 +244,8 @@ def test_empty_message_html_renders_the_screens_own_message():
 
     empty_html = RiskIntelligenceUI._format_empty_message_html(screen)
 
-    assert 'class="ri-empty-message"' in empty_html
+    # B3 Tier 1: shared .aara-empty is wired alongside the local class.
+    assert 'class="ri-empty-message aara-empty"' in empty_html
     assert "Risk evaluation history is not recorded in this data source." in empty_html
 
 
@@ -822,7 +823,8 @@ def test_existing_current_state_and_history_rendering_is_unaffected():
 
     assert current_html == (
         '<div class="ri-current-state">'
-        '<span class="ri-state-badge state-warning">WARNING</span>'
+        '<span class="ri-state-badge aara-status-badge state-warning '
+        'aara-status-badge--warning">WARNING</span>'
         '<span style="margin-left:8px;color:var(--ri-color-text-secondary);'
         'font-size:12px;">as of 2026-08-17 09:15 UTC</span>'
         '<details class="ri-trigger-reason">'
@@ -832,15 +834,15 @@ def test_existing_current_state_and_history_rendering_is_unaffected():
         "</details>"
         '<div class="ri-sizing-metrics">'
         '<div class="ri-metric">'
-        '<span class="ri-metric-label">Recommended Sizing</span>'
+        '<span class="ri-metric-label aara-metric-label">Recommended Sizing</span>'
         '<span class="ri-metric-value">75%</span>'
         "</div>"
         '<div class="ri-metric">'
-        '<span class="ri-metric-label">Actual Sizing</span>'
+        '<span class="ri-metric-label aara-metric-label">Actual Sizing</span>'
         '<span class="ri-metric-value">70%</span>'
         "</div>"
         '<div class="ri-metric">'
-        '<span class="ri-metric-label">Gap</span>'
+        '<span class="ri-metric-label aara-metric-label">Gap</span>'
         '<span class="ri-metric-value ri-gap-nonzero">+5%</span>'
         "</div>"
         "</div>"

@@ -112,6 +112,37 @@ def test_no_pi_css_class_in_the_view_markup_is_left_unstyled():
     assert not missing, f"pi-* classes referenced but not styled in theme.py: {missing}"
 
 
+def test_portfolio_intelligence_view_wires_shared_design_system_primitives():
+    """B3 Tier 1 (additive): the view markup carries the shared `.aara-*`
+    primitives ALONGSIDE its existing screen-specific classes, so the
+    composed app consumes one source of truth while a standalone
+    `PortfolioIntelligenceUI().build()` (no DESIGN_SYSTEM_CSS) still renders
+    from the retained local rules. Mirrors the B1/B2 alias-guard pattern.
+
+    Only the approved Tier 1 pairs are wired: disclosure title/body, empty
+    states, and metric labels. The `.pi-disclosure` wrapper, `.pi-metric`
+    container, `.pi-metric-value`, `.pi-capital-summary` card, tables,
+    captions and `.pi-alpaca-badge` are deliberately NOT migrated."""
+    source = _GRADIO_VIEW.read_text(encoding="utf-8")
+
+    for local, shared in (
+        ('class="pi-disclosure-title', "pi-disclosure-title aara-disclosure-title"),
+        ('class="pi-disclosure-body', "pi-disclosure-body aara-disclosure-body"),
+        ('class="pi-empty-message', "pi-empty-message aara-empty"),
+        ('class="pi-metric-label', "pi-metric-label aara-metric-label"),
+    ):
+        assert shared in source, f"expected additive shared class: {shared!r}"
+        assert local in source, f"local class must be retained: {local!r}"
+
+    # The wrapper and the deliberately-excluded targets keep their local
+    # class ONLY (no shared class bolted on).
+    assert 'class="pi-disclosure"' in source
+    assert "pi-disclosure aara-disclosure" not in source
+    assert "pi-metric-value aara-metric-value" not in source
+    assert "pi-capital-summary aara-card" not in source
+    assert "aara-content" not in source
+
+
 def test_portfolio_intelligence_does_not_import_decision_center():
     forbidden = ("applications.trading_intelligence.ui.decision_center",)
     py_files = list(_PACKAGE_ROOT.rglob("*.py"))

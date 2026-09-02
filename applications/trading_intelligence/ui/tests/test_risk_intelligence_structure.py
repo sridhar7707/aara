@@ -85,6 +85,47 @@ def test_risk_intelligence_theme_aliases_the_shared_colour_tokens():
         assert alias in CSS, f"expected shared-token alias {alias!r} in theme.py's CSS"
 
 
+def test_risk_intelligence_view_wires_shared_design_system_primitives():
+    """B3 Tier 1 (additive): the view markup carries the shared `.aara-*`
+    primitives ALONGSIDE its existing screen-specific classes, so the
+    composed app consumes one source of truth while a standalone
+    `RiskIntelligenceUI().build()` (no DESIGN_SYSTEM_CSS) still renders from
+    the retained local rules. Mirrors the B1/B2 alias-guard pattern.
+
+    Approved Tier 1 pairs: disclosure title/body, empty states, metric
+    labels, and the state badge (WARNING/DEFENSIVE only). `state-normal` is
+    deliberately NOT mapped to `.aara-status-badge--neutral` (the
+    #666666 vs #5D5D5D foreground delta needs separate sign-off). The
+    `.ri-disclosure` wrapper, `.ri-metric-value` / `.ri-gap-nonzero`,
+    `.ri-current-state` card and the history table are NOT migrated."""
+    source = (_PACKAGE_ROOT / "gradio_view.py").read_text(encoding="utf-8")
+
+    for local, shared in (
+        ('class="ri-disclosure-title', "ri-disclosure-title aara-disclosure-title"),
+        ('class="ri-disclosure-body', "ri-disclosure-body aara-disclosure-body"),
+        ('class="ri-empty-message', "ri-empty-message aara-empty"),
+        ('class="ri-metric-label', "ri-metric-label aara-metric-label"),
+    ):
+        assert shared in source, f"expected additive shared class: {shared!r}"
+        assert local in source, f"local class must be retained: {local!r}"
+
+    # State badge: shared base + WARNING/DEFENSIVE modifiers wired; the
+    # local ri-state-badge / state-* classes are retained.
+    assert "aara-status-badge" in source
+    assert "aara-status-badge--warning" in source
+    assert "aara-status-badge--defensive" in source
+    assert "ri-state-badge" in source
+    # state-normal is NOT migrated (Tier 2, separate sign-off).
+    assert "aara-status-badge--neutral" not in source
+
+    # Deliberately-excluded targets keep their local class ONLY.
+    assert 'class="ri-disclosure"' in source
+    assert "ri-disclosure aara-disclosure" not in source
+    assert "ri-metric-value aara-metric-value" not in source
+    assert "ri-current-state aara-card" not in source
+    assert "aara-content" not in source
+
+
 def test_production_risk_modules_do_not_import_mock_data():
     """Production guarantee: the Risk Intelligence view (gradio_view.py)
     and the composition root (bootstrap.py) must not import or use

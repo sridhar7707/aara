@@ -97,6 +97,18 @@ _STATE_BADGE_CLASSES = {
     "DEFENSIVE": "state-defensive",
 }
 
+# B3 Tier 1 (additive): the shared design-system status-badge modifier
+# wired ALONGSIDE the local state-* class. `state-normal` is intentionally
+# NOT mapped -- the shared neutral modifier's foreground (#5D5D5D) differs
+# from .ri-state-badge.state-normal's (#666666) and needs separate
+# sign-off (Tier 2). The local .ri-state-badge / state-* rules stay
+# authoritative for a standalone RiskIntelligenceUI().build() (which loads
+# no DESIGN_SYSTEM_CSS).
+_SHARED_STATE_BADGE_MODIFIERS = {
+    "state-warning": "aara-status-badge--warning",
+    "state-defensive": "aara-status-badge--defensive",
+}
+
 # Rendered in place of every current-state / history / sizing element when
 # no real risk source is available (RiskScreen.is_available is False -- the
 # production default when the operational `risk_state` table cannot be
@@ -124,8 +136,8 @@ _HISTORY_SECTION_LABEL_HTML = '<div class="ri-section-label">Recent Risk Evaluat
 # the system enforced a risk state or blocked any execution.
 _OBSERVED_CLASSIFICATION_HTML = (
     '<div class="ri-disclosure">'
-    '<div class="ri-disclosure-title">Observed governor classification</div>'
-    '<div class="ri-disclosure-body">'
+    '<div class="ri-disclosure-title aara-disclosure-title">Observed governor classification</div>'
+    '<div class="ri-disclosure-body aara-disclosure-body">'
     "This risk state is read from the operational risk_state table and reflects "
     "the risk governor's most recently observed classification. It is not a "
     "confirmation that the system enforced this state or blocked any execution."
@@ -134,12 +146,12 @@ _OBSERVED_CLASSIFICATION_HTML = (
 )
 
 _TRIGGER_REASON_UNAVAILABLE_HTML = (
-    '<div class="ri-empty-message">'
+    '<div class="ri-empty-message aara-empty">'
     "Trigger reason is not recorded in this data source."
     "</div>"
 )
 _SIZING_UNAVAILABLE_HTML = (
-    '<div class="ri-empty-message">'
+    '<div class="ri-empty-message aara-empty">'
     "Sizing information (recommended vs. actual) is not recorded in this data source."
     "</div>"
 )
@@ -507,7 +519,11 @@ class RiskIntelligenceUI:
     @staticmethod
     def _format_state_badge_html(state: str) -> str:
         css_class = _STATE_BADGE_CLASSES.get(state, "state-normal")
-        return f'<span class="ri-state-badge {css_class}">{html.escape(state)}</span>'
+        classes = ["ri-state-badge", "aara-status-badge", css_class]
+        shared_modifier = _SHARED_STATE_BADGE_MODIFIERS.get(css_class)
+        if shared_modifier:
+            classes.append(shared_modifier)
+        return f'<span class="{" ".join(classes)}">{html.escape(state)}</span>'
 
     @staticmethod
     def _format_current_state_html(current: RiskSnapshot) -> str:
@@ -529,15 +545,15 @@ class RiskIntelligenceUI:
             metrics_html = (
                 '<div class="ri-sizing-metrics">'
                 '<div class="ri-metric">'
-                '<span class="ri-metric-label">Recommended Sizing</span>'
+                '<span class="ri-metric-label aara-metric-label">Recommended Sizing</span>'
                 f'<span class="ri-metric-value">{current.recommended_sizing_pct:.0f}%</span>'
                 "</div>"
                 '<div class="ri-metric">'
-                '<span class="ri-metric-label">Actual Sizing</span>'
+                '<span class="ri-metric-label aara-metric-label">Actual Sizing</span>'
                 f'<span class="ri-metric-value">{current.actual_sizing_pct:.0f}%</span>'
                 "</div>"
                 '<div class="ri-metric">'
-                '<span class="ri-metric-label">Gap</span>'
+                '<span class="ri-metric-label aara-metric-label">Gap</span>'
                 f'<span class="ri-metric-value {gap_class}">{gap:+.0f}%</span>'
                 "</div>"
                 "</div>"
@@ -620,4 +636,4 @@ class RiskIntelligenceUI:
 
     @staticmethod
     def _format_empty_message_html(screen: RiskScreen) -> str:
-        return f'<div class="ri-empty-message">{html.escape(screen.empty_state_message)}</div>'
+        return f'<div class="ri-empty-message aara-empty">{html.escape(screen.empty_state_message)}</div>'

@@ -118,10 +118,13 @@ def test_build_returns_a_gradio_blocks_instance():
 
 def test_unavailable_data_disclosure_is_the_exact_fixed_text():
     assert _UNAVAILABLE_DATA_TITLE == "Data Unavailable"
+    # B3 Tier 1: shared .aara-disclosure-title / .aara-disclosure-body are
+    # wired alongside the local classes; the .pi-disclosure wrapper is
+    # unchanged.
     assert _UNAVAILABLE_DATA_HTML == (
         '<div class="pi-disclosure">'
-        f'<div class="pi-disclosure-title">{_UNAVAILABLE_DATA_TITLE}</div>'
-        f'<div class="pi-disclosure-body">{_UNAVAILABLE_DATA_BODY}</div>'
+        f'<div class="pi-disclosure-title aara-disclosure-title">{_UNAVAILABLE_DATA_TITLE}</div>'
+        f'<div class="pi-disclosure-body aara-disclosure-body">{_UNAVAILABLE_DATA_BODY}</div>'
         "</div>"
     )
     assert "illustrative" not in _UNAVAILABLE_DATA_BODY.lower()
@@ -448,7 +451,8 @@ def test_empty_state_message_helper_still_reads_the_screens_own_message():
 
     empty_html = PortfolioIntelligenceUI._format_empty_message_html(screen)
 
-    assert 'class="pi-empty-message"' in empty_html
+    # B3 Tier 1: shared .aara-empty is wired alongside the local class.
+    assert 'class="pi-empty-message aara-empty"' in empty_html
     assert "No holdings recorded yet." in empty_html
 
 
