@@ -116,5 +116,10 @@ python-dotenv
 # "Holdings data is currently unavailable" state. Same isolated live-network
 # dependency the adapter's own docstring already records as authorized;
 # duplicates dashboard/'s yfinance.download() primitive rather than importing
-# the protected package. Unpinned, matching the root requirements.txt.
-yfinance
+# the protected package. Pinned to 0.2.58 -- the 0.2.x line the rest of the
+# repo already tracks (root requirements.txt / requirements_space.txt /
+# dashboard/requirements.txt all use yfinance>=0.2.0). An unpinned install
+# resolves to the yfinance 1.x line under the Space's Python 3.10 + base-image
+# protobuf<4 constraints, which is the suspected `import yfinance` failure
+# behind the NOT_CONFIGURED Holdings state described above.
+yfinance==0.2.58
