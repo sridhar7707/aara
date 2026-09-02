@@ -123,3 +123,13 @@ python-dotenv
 # protobuf<4 constraints, which is the suspected `import yfinance` failure
 # behind the NOT_CONFIGURED Holdings state described above.
 yfinance==0.2.58
+
+# curl_cffi is yfinance 0.2.58's HTTP backend (declared only as curl_cffi>=0.7,
+# no upper bound). Unpinned, the Space's Python 3.10 base resolves it to 0.16.2,
+# whose Session/impersonate API diverges from what yfinance 0.2.58 was written
+# against -- yf.download() then raises inside adapters/live_price_source.py and
+# Holdings reports API_ERROR ("provider returned an unexpected response").
+# 0.13.0 is the last release before the 0.14+ series (which requires Python
+# >=3.10 and carries those breaking changes); it ships an abi3 manylinux wheel
+# that installs on 3.10 and is the version verified working with yfinance 0.2.58.
+curl_cffi==0.13.0
