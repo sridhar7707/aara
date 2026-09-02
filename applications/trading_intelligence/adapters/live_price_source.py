@@ -49,6 +49,7 @@ get_current_prices() returns a non-HEALTHY result and callers must fall
 back to the existing illustrative Holdings path -- this is the intended,
 safe behavior, not a bug.
 """
+import logging
 from typing import Dict, Tuple
 
 from applications.platform.integrations import (
@@ -56,6 +57,11 @@ from applications.platform.integrations import (
     ReadResult,
     classify_exception,
 )
+
+# TEMP-DIAG holdings-price: temporary runtime logging to identify why
+# yf.download() fails on the deployed HF Space (Holdings API_ERROR). Remove
+# once the root cause is confirmed.
+_diag = logging.getLogger("aara.holdings_price_diag")
 
 _PROVIDER = "yfinance"
 
@@ -85,6 +91,13 @@ class LivePriceSource:
                     _PROVIDER, detail="yfinance is not importable"
                 )
             )
+        _diag.warning("TEMP-DIAG holdings-price: calling yf.download for %r", symbols)
+        try:
+            import curl_cffi as _cc  # noqa: F401
+            _diag.warning("TEMP-DIAG holdings-price: yfinance=%s curl_cffi=%s",
+                          getattr(yf, "__version__", "?"), getattr(_cc, "__version__", "?"))
+        except Exception:  # pragma: no cover - diagnostic only
+            pass
         try:
             data = yf.download(
                 " ".join(symbols),
@@ -94,8 +107,15 @@ class LivePriceSource:
                 timeout=_FETCH_TIMEOUT_SECONDS,
             )
         except Exception as exc:
+            _diag.warning("TEMP-DIAG holdings-price: yf.download RAISED %s: %r",
+                          type(exc).__name__, exc)
             return ReadResult.failed(classify_exception(_PROVIDER, exc))
+        _diag.warning("TEMP-DIAG holdings-price: yf.download returned type=%s shape=%s cols=%s",
+                      type(data).__name__, getattr(data, "shape", None),
+                      list(getattr(data, "columns", []))[:12])
         if data is None or data.empty or "Close" not in data:
+            _diag.warning("TEMP-DIAG holdings-price: empty/missing response (empty=%s)",
+                          getattr(data, "empty", None))
             return ReadResult.failed(
                 IntegrationHealth.unavailable(
                     _PROVIDER, detail="empty or missing price response"
@@ -108,6 +128,10 @@ class LivePriceSource:
                 column = close[symbol] if hasattr(close, "columns") else close
                 clean = column.dropna()
                 if clean.empty:
+                    _diag.warning("TEMP-DIAG holdings-price: no valid price for %s; "
+                                  "close cols=%s tail=%s", symbol,
+                                  list(getattr(close, "columns", []))[:12],
+                                  column.tail(3).to_dict() if hasattr(column, "tail") else column)
                     return ReadResult.failed(
                         IntegrationHealth.api_error(
                             _PROVIDER, detail="no valid price for a requested symbol"
@@ -115,14 +139,18 @@ class LivePriceSource:
                     )
                 price = float(clean.iloc[-1])
             except Exception as exc:
+                _diag.warning("TEMP-DIAG holdings-price: per-symbol %s extract RAISED %s: %r",
+                              symbol, type(exc).__name__, exc)
                 return ReadResult.failed(
                     IntegrationHealth.api_error(_PROVIDER, detail=type(exc).__name__)
                 )
             if not (price > 0.0):
+                _diag.warning("TEMP-DIAG holdings-price: non-positive price %s=%r", symbol, price)
                 return ReadResult.failed(
                     IntegrationHealth.api_error(
                         _PROVIDER, detail="non-positive price for a requested symbol"
                     )
                 )
             prices[symbol] = price
+        _diag.warning("TEMP-DIAG holdings-price: OK %s", prices)
         return ReadResult.healthy(prices, _PROVIDER)
