@@ -34,8 +34,15 @@ _UI_COMPONENT_FLOOR = 3.0  # WCAG 2.1 SC 1.4.11
 
 
 def _token_hex(name: str) -> str:
-    match = re.search(rf"--{re.escape(name)}:\s*(#[0-9A-Fa-f]{{6}})", CSS)
-    assert match, f"expected a solid-hex --{name} token in theme.py's CSS"
+    """The token's hex -- read directly, or from the `var(--aara-*,
+    <literal>)` fallback for the `:root` entries the Batch B2 design-system
+    migration aliased to shared tokens. The fallback literal is still the
+    effective standalone-render value and the audited WCAG-safe one, so the
+    contrast math below is unchanged."""
+    match = re.search(
+        rf"--{re.escape(name)}:\s*(?:var\(--[\w-]+,\s*)?(#[0-9A-Fa-f]{{6}})", CSS
+    )
+    assert match, f"expected a --{name} hex (solid or var() fallback) in theme.py's CSS"
     return match.group(1)
 
 

@@ -74,21 +74,31 @@ app's actual DOM (Playwright), not inferred from Gradio's source:
 
 CSS = """
 :root {
-  --color-navy-primary: #0B1F3A;
-  --color-emerald-secondary: #176B4D;
-  --color-gold-accent: #C8A45D;
+  /* Design-system migration (Batch B2): the colour entries below alias the
+     shared --aara-* tokens from ui/design_system.py (the single source of
+     truth -- audit finding D-01). Each keeps its former hex as a
+     var(--aara-*, <literal>) fallback so a standalone DecisionCenterUI()
+     .build() (no bootstrap composition) still renders identically; the
+     composed app resolves through the shared token. Spacing / radius /
+     shadow / font / transition tokens and every DC-specific --lifecycle-* /
+     --action-* semantic colour below are unchanged (they have no
+     established shared equivalent -- see this module's docstring). */
+  --color-navy-primary: var(--aara-navy, #0B1F3A);
+  --color-emerald-secondary: var(--aara-emerald, #176B4D);
+  --color-gold-accent: var(--aara-gold, #C8A45D);
   /* WCAG contrast fix (live audit): #C8A45D is ~2.2:1 against the
      surrounding surfaces it sits on as a thin boundary (focus ring, active
      underline, active lifecycle dot) -- below the 3:1 UI-component floor.
      Dedicated darker gold for those three boundary roles only; the base
      --color-gold-accent (used for larger/text contexts that already pass)
-     is untouched. */
-  --color-gold-accent-boundary: #A8823D;
-  --color-background-warm: #F8F7F3;
-  --color-surface-white: #FFFFFF;
-  --color-text-primary: #1A1A1A;
-  --color-text-secondary: #666666;
-  --color-border-subtle: #E2E8F0;
+     is untouched. The shared --aara-gold-boundary carries the same value
+     and role. */
+  --color-gold-accent-boundary: var(--aara-gold-boundary, #A8823D);
+  --color-background-warm: var(--aara-bg, #F8F7F3);
+  --color-surface-white: var(--aara-surface, #FFFFFF);
+  --color-text-primary: var(--aara-text, #1A1A1A);
+  --color-text-secondary: var(--aara-text-muted, #666666);
+  --color-border-subtle: var(--aara-border, #E2E8F0);
 
   --font-primary: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-data: Monaco, "Courier New", monospace;
@@ -824,12 +834,21 @@ footer { display: none !important; }
   padding: var(--space-xs) 0 var(--space-xs) var(--space-sm);
   border-left: 2px solid var(--color-border-subtle);
 }
-.aara-disclosure-title {
+/* The bare .aara-disclosure-title / .aara-disclosure-body primitives are
+   defined once, authoritatively, in ui/design_system.py (identical values:
+   13px / 600 / italic / --aara-text-muted). This file used to redeclare
+   those bare selectors -- a duplicate removed for audit finding R-1. The
+   two rules below are intentionally scoped to Decision Center's own
+   .aara-disclosure-message wrapper: they match nothing outside DC markup,
+   so they don't shadow the shared authority, and they keep a standalone
+   DecisionCenterUI().build() (which loads only this stylesheet, not
+   design_system.py) rendering identically to the composed app. */
+.aara-disclosure-message .aara-disclosure-title {
   font-size: 13px;
   font-weight: 600;
   color: var(--color-text-secondary);
 }
-.aara-disclosure-body {
+.aara-disclosure-message .aara-disclosure-body {
   font-size: 13px;
   font-style: italic;
   color: var(--color-text-secondary);
