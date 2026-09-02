@@ -61,6 +61,17 @@ CSS = """
   margin: 16px 0 6px 0;
 }
 
+/* One-line source/scope caption under a section heading (e.g. Capital
+   Summary's internal-ledger vs. Alpaca-account clarification). Same muted
+   italic treatment as .pi-alpaca-orders-caption; sits directly under the
+   uppercase section label, above that section's content. */
+.pi-source-caption {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--pi-color-text-secondary);
+  margin: -2px 0 6px 0;
+}
+
 .pi-capital-summary {
   display: flex;
   flex-wrap: wrap;

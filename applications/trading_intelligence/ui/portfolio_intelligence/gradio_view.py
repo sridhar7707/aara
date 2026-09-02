@@ -9,8 +9,14 @@ adapters.legacy_position_source.LegacyPositionSource,
 adapters.live_price_source.LivePriceSource and the three read-only Alpaca
 paper adapters) and re-invokes it on every `demo.load()` and every
 Refresh click, so a long-running Space shows data as of page load rather
-than app start. An "As of {timestamp}" line reflects the last fetch. The
-Refresh button reuses ui/decision_center/gradio_view.py's disable ->
+than app start. Freshness is shown at two levels, matching
+ui/morning_brief/gradio_view.py: a page-level "Rendered at {timestamp}"
+line (the render clock, advances on every Refresh) and an "Operational
+data snapshot: {timestamp}" line (when the ADR-055 trades.db snapshot
+behind Capital Summary / Allocation / Holdings' open positions was fetched
+for this Space process -- fixed across Refresh, since Refresh re-reads the
+same file; Holdings' prices are the one part fetched live each Refresh).
+The Refresh button reuses ui/decision_center/gradio_view.py's disable ->
 render -> enable double-submit guard. Any section whose real source is
 unavailable renders an explicit unavailable state -- this module never
 imports mock_data.py and the default provider (no `screen` /
@@ -112,6 +118,18 @@ _ALPACA_ORDERS_UNAVAILABLE_MESSAGE = (
 # Decision Center.
 _ALPACA_ORDERS_SCOPE_CAPTION = (
     "Broker-side observation of the paper account. Not linked to Decision Center."
+)
+
+# Also shown unconditionally under the Recent Orders heading. Every column
+# below (side, status, quantity, filled quantity, fill time) is Alpaca's
+# own value rendered unchanged (see adapters/alpaca_paper_orders_source.py),
+# so a broker state that looks contradictory at a glance -- most commonly a
+# "canceled" order that still carries a partial fill quantity and fill time
+# because it filled partly before the remainder was canceled -- is a
+# faithful display of the broker record, not a UI error.
+_ALPACA_ORDERS_STATUS_NOTE = (
+    "Status, side and quantities are shown exactly as the broker reports them; "
+    "a canceled order may still show a partial fill quantity and time."
 )
 
 # Shown only when an underlying API call hit its defensive per-call cap
@@ -219,20 +237,72 @@ _PAGE_HEADER_HTML = (
     "</div>"
 )
 
+# Shown once, directly under the Capital Summary heading, in every state.
+# Capital Summary / Allocation are the bot's own internal managed
+# capital-pool ledger (trades.db capital_pools) -- a deliberately separate
+# system of record from the "Alpaca Paper Account" block further down,
+# which is the broker's marked-to-market view. The two are tracked
+# independently and are expected to differ; this line says so plainly so
+# neither is read as authoritative over the other. Same always-on caption
+# pattern as _ALPACA_ORDERS_SCOPE_CAPTION.
+_CAPITAL_SOURCE_CAPTION = (
+    "Internal managed capital-pool ledger. Tracked separately from the Alpaca "
+    "Paper Account below -- the two are different systems and may not match."
+)
+_CAPITAL_SOURCE_CAPTION_HTML = (
+    f'<div class="pi-source-caption">{html.escape(_CAPITAL_SOURCE_CAPTION)}</div>'
+)
 
-_AS_OF_PREFIX = "As of "
+
+# The UI render clock -- advances every Refresh. Deliberately "Rendered
+# at" and not "As of": it is when this render ran, never a claim about any
+# section's data freshness. Matches ui/morning_brief/gradio_view.py's
+# _RENDERED_AT_PREFIX so the two trades.db-snapshot-backed screens read the
+# same way.
+_RENDERED_AT_PREFIX = "Rendered at "
+
+# Freshness of the ADR-055 trades.db operational snapshot for this Space
+# process -- the source behind Capital Summary, Allocation and Holdings'
+# open positions. ADR-055 pulls the snapshot once per process and Refresh
+# only re-reads the same file, so this line is fixed across Refresh and
+# only advances on a Space restart; the note makes that explicit so a
+# refreshed page is never mistaken for a re-fetched one. Holdings' prices
+# are the one part fetched live per Refresh (see the "Real Data"
+# disclosure, adapters/live_price_source.py). Same wording as
+# ui/morning_brief/gradio_view.py.
+_SNAPSHOT_PREFIX = "Operational data snapshot: "
+_SNAPSHOT_REFRESH_NOTE = " (fetched once per Space start; not re-downloaded on Refresh)"
+_SNAPSHOT_UNAVAILABLE = _SNAPSHOT_PREFIX + "unavailable"
 
 
-def _format_as_of_html(moment: datetime) -> str:
-    """Render-time "as of" stamp for the whole screen. America/Chicago in
-    the same "%Y-%m-%d %H:%M %Z" format the order timestamps already use
-    (see `_format_order_timestamp`), so the two never disagree on
-    wall-clock convention. Reuses the existing `.pi-subtitle` treatment
-    (muted secondary text, already defined in this package's theme.py and
-    used by `_PAGE_HEADER_HTML`) rather than introducing a new styled
-    class."""
+def _format_rendered_at_html(moment: datetime) -> str:
+    """Render-clock stamp for the whole screen -- when this render ran, not
+    a claim about any data's freshness. America/Chicago in the same
+    "%Y-%m-%d %H:%M %Z" format the order timestamps already use (see
+    `_format_order_timestamp`), so the two never disagree on wall-clock
+    convention. Reuses the existing `.pi-subtitle` treatment (muted
+    secondary text, already defined in this package's theme.py and used by
+    `_PAGE_HEADER_HTML`) rather than introducing a new styled class."""
     stamp = moment.astimezone(_ORDERS_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
-    return f'<div class="pi-subtitle">{html.escape(_AS_OF_PREFIX + stamp)}</div>'
+    return f'<div class="pi-subtitle">{html.escape(_RENDERED_AT_PREFIX + stamp)}</div>'
+
+
+def _format_snapshot_line_html(moment: Optional[datetime]) -> str:
+    """Freshness of the trades.db operational snapshot (ADR-055) for the
+    current Space process, shown as a line separate from the render clock
+    so a stale snapshot is never mistaken for realtime data. Fixed across
+    Refresh clicks (Refresh re-reads the same file); only advances on a
+    Space restart. `None` (no snapshot obtained -- deployed Space today,
+    local dev, tests) renders an honest "unavailable", never a fabricated
+    timestamp. Mirrors ui/morning_brief/gradio_view.py."""
+    if moment is None:
+        return f'<div class="pi-subtitle">{html.escape(_SNAPSHOT_UNAVAILABLE)}</div>'
+    stamp = moment.astimezone(_ORDERS_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
+    return (
+        '<div class="pi-subtitle">'
+        f"{html.escape(_SNAPSHOT_PREFIX + stamp + _SNAPSHOT_REFRESH_NOTE)}"
+        "</div>"
+    )
 
 
 def _html_update(state: Tuple[str, bool]) -> Dict[str, Any]:
@@ -251,6 +321,9 @@ class PortfolioIntelligenceUI:
         screen: Optional[PortfolioScreen] = None,
         *,
         screen_provider: Optional[Callable[[], PortfolioScreen]] = None,
+        snapshot_fetched_at_provider: Optional[
+            Callable[[], Optional[datetime]]
+        ] = None,
     ):
         """Render-time data model. `screen_provider` (bootstrap.py's
         `_build_portfolio_intelligence_screen`) is re-invoked on every
@@ -259,6 +332,15 @@ class PortfolioIntelligenceUI:
         (tests) is wrapped in a constant provider. When neither is
         supplied the provider is `PortfolioScreen` itself -- the explicit
         all-unavailable state, never a mock/illustrative screen.
+
+        `snapshot_fetched_at_provider` (bootstrap.py's `_snapshot_fetched_at`
+        bound to the runtime snapshot path) returns when the ADR-055
+        trades.db snapshot -- the source behind Capital Summary, Allocation
+        and Holdings' open positions -- was fetched for this process, or
+        `None` if none was. It is re-called on every render but reads the
+        same file, so its value is stable across Refresh; that stability is
+        the point. Default: a provider returning `None` (pure shell /
+        tests). Mirrors ui/morning_brief/gradio_view.py.
 
         The provider is also called once here so `self._screen` /
         `self._capital_is_real` / `self._holdings_is_real` describe the
@@ -275,6 +357,9 @@ class PortfolioIntelligenceUI:
         else:
             self._screen_provider = PortfolioScreen
         self._screen = self._screen_provider()
+        self._snapshot_fetched_at_provider = snapshot_fetched_at_provider or (
+            lambda: None
+        )
         self._capital_is_real = self._screen.capital_is_available
         self._holdings_is_real = self._screen.holdings_is_available
 
@@ -291,11 +376,15 @@ class PortfolioIntelligenceUI:
             refresh_button = gr.Button(
                 "↻ Refresh", size="sm", scale=0, elem_classes=["aara-refresh-button"],
             )
-            as_of_output = gr.HTML(_format_as_of_html(self._now()))
+            rendered_at_output = gr.HTML(_format_rendered_at_html(self._now()))
+            snapshot_output = gr.HTML(
+                _format_snapshot_line_html(self._snapshot_fetched_at_provider())
+            )
 
             disclosure_output = gr.HTML(self._format_disclosure_html(initial))
 
             gr.HTML('<div class="pi-section-label">Capital Summary</div>')
+            gr.HTML(_CAPITAL_SOURCE_CAPTION_HTML)
             capital_summary_output = gr.HTML(self._capital_summary_state(initial)[0])
 
             gr.HTML('<div class="pi-section-label">Capital Allocation</div>')
@@ -351,6 +440,10 @@ class PortfolioIntelligenceUI:
                 f'<div class="pi-alpaca-orders-caption">'
                 f'{html.escape(_ALPACA_ORDERS_SCOPE_CAPTION)}</div>'
             )
+            gr.HTML(
+                f'<div class="pi-alpaca-orders-caption">'
+                f'{html.escape(_ALPACA_ORDERS_STATUS_NOTE)}</div>'
+            )
             truncation_value, truncation_visible = self._alpaca_orders_truncation_state(initial)
             alpaca_orders_truncation_output = gr.HTML(
                 truncation_value, visible=truncation_visible,
@@ -375,7 +468,8 @@ class PortfolioIntelligenceUI:
             )
 
             outputs = [
-                as_of_output, disclosure_output, capital_summary_output, allocation_output,
+                rendered_at_output, snapshot_output,
+                disclosure_output, capital_summary_output, allocation_output,
                 holdings_message_output, holdings_table,
                 alpaca_account_output, alpaca_positions_message_output, alpaca_positions_table,
                 alpaca_orders_truncation_output, alpaca_orders_message_output,
@@ -427,7 +521,10 @@ class PortfolioIntelligenceUI:
         fallback anywhere in this path."""
         screen = self._screen_provider()
         return (
-            gr.update(value=_format_as_of_html(self._now())),
+            gr.update(value=_format_rendered_at_html(self._now())),
+            gr.update(
+                value=_format_snapshot_line_html(self._snapshot_fetched_at_provider())
+            ),
             gr.update(value=self._format_disclosure_html(screen)),
             gr.update(value=self._capital_summary_state(screen)[0]),
             gr.update(value=self._allocation_state(screen)[0]),

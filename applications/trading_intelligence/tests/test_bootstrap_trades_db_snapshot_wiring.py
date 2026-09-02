@@ -306,6 +306,39 @@ def test_morning_brief_ui_snapshot_line_unavailable_when_no_snapshot_path(offlin
     assert "Operational data snapshot: unavailable" in combined
 
 
+def test_portfolio_intelligence_ui_shows_snapshot_fetch_time_separate_from_render_clock(
+    tmp_path, offline
+):
+    """Same ADR-055 snapshot-age visibility as Morning Brief: Portfolio
+    Intelligence's Capital Summary / Allocation / Holdings positions come
+    from the fetched trades.db snapshot, so the built page carries a
+    'Rendered at ...' render clock AND a separate 'Operational data
+    snapshot: ...' line (the fetched file's mtime), annotated so a Refresh
+    is not mistaken for a re-download."""
+    snap = _make_fixture_snapshot(tmp_path)
+
+    demo = bootstrap._build_portfolio_intelligence_ui(snap).build()
+    combined = "\n".join(_html_strings(demo))
+
+    expected_stamp = (
+        datetime.fromtimestamp(os.path.getmtime(snap), timezone.utc)
+        .astimezone(ZoneInfo("America/Chicago"))
+        .strftime("%Y-%m-%d %H:%M %Z")
+    )
+
+    assert "Rendered at " in combined
+    assert f"Operational data snapshot: {expected_stamp}" in combined
+    assert "not re-downloaded on Refresh" in combined
+
+
+def test_portfolio_intelligence_ui_snapshot_line_unavailable_when_no_snapshot_path(offline):
+    demo = bootstrap._build_portfolio_intelligence_ui(None).build()
+    combined = "\n".join(_html_strings(demo))
+
+    assert "Rendered at " in combined
+    assert "Operational data snapshot: unavailable" in combined
+
+
 def test_snapshot_fetched_at_helper_reads_the_file_mtime(tmp_path):
     snap = _make_fixture_snapshot(tmp_path)
     result = bootstrap._snapshot_fetched_at(snap)

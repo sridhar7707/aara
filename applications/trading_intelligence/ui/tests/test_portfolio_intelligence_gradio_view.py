@@ -5,18 +5,22 @@ import gradio as gr
 from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
     _ALPACA_ORDERS_SCOPE_CAPTION,
+    _ALPACA_ORDERS_STATUS_NOTE,
     _ALPACA_ORDERS_TRUNCATION_NOTE,
     _ALPACA_ORDERS_UNAVAILABLE_MESSAGE,
     _ALPACA_ORDERS_WORKING_MARKER,
     _ALPACA_PAPER_BADGE_TEXT,
     _ALPACA_UNAVAILABLE_MESSAGE,
-    _AS_OF_PREFIX,
+    _CAPITAL_SOURCE_CAPTION,
     _CAPITAL_UNAVAILABLE_MESSAGE,
     _HOLDINGS_UNAVAILABLE_MESSAGE,
     _PARTIAL_DATA_BODY,
     _PARTIAL_DATA_HTML,
     _PARTIAL_DATA_TITLE,
     _REAL_DATA_HTML,
+    _RENDERED_AT_PREFIX,
+    _SNAPSHOT_PREFIX,
+    _SNAPSHOT_UNAVAILABLE,
     _UNAVAILABLE_DATA_BODY,
     _UNAVAILABLE_DATA_HTML,
     _UNAVAILABLE_DATA_TITLE,
@@ -708,7 +712,7 @@ def test_default_screen_renders_zero_visible_dataframes():
 # --- Render-time fetch: Refresh button, demo.load, "as of" indicator ----
 
 
-_OUTPUT_COUNT = 12  # see PortfolioIntelligenceUI.build()'s `outputs` list
+_OUTPUT_COUNT = 13  # see PortfolioIntelligenceUI.build()'s `outputs` list
 
 
 def _refresh_button(demo):
@@ -812,11 +816,11 @@ def test_render_reflects_a_fresh_screen_from_the_provider_each_call():
     ui = PortfolioIntelligenceUI(screen_provider=provider)
 
     first = ui._render()
-    # disclosure is output index 1
-    assert first[1]["value"] == _REAL_DATA_HTML
+    # disclosure is output index 2 (rendered-at, snapshot line, then disclosure)
+    assert first[2]["value"] == _REAL_DATA_HTML
 
     second = ui._render()  # provider now repeats the last screen
-    assert second[1]["value"] == _REAL_DATA_HTML
+    assert second[2]["value"] == _REAL_DATA_HTML
     assert len(calls) == 3  # 1 in __init__ + 2 explicit _render calls
 
 
@@ -830,10 +834,11 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
     ui = PortfolioIntelligenceUI(screen_provider=PortfolioScreen)
     updates = ui._render()
 
-    as_of, disclosure, capital_summary, allocation, holdings_msg, holdings_tbl, \
-        alpaca_acct, alpaca_pos_msg, alpaca_pos_tbl, orders_trunc, orders_msg, \
-        orders_tbl = updates
+    rendered_at, snapshot, disclosure, capital_summary, allocation, \
+        holdings_msg, holdings_tbl, alpaca_acct, alpaca_pos_msg, alpaca_pos_tbl, \
+        orders_trunc, orders_msg, orders_tbl = updates
 
+    assert _SNAPSHOT_UNAVAILABLE in snapshot["value"]
     assert disclosure["value"] == _UNAVAILABLE_DATA_HTML
     assert _CAPITAL_UNAVAILABLE_MESSAGE in capital_summary["value"]
     assert _CAPITAL_UNAVAILABLE_MESSAGE in allocation["value"]
@@ -850,13 +855,81 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
     assert f"${mock.capital.allocated_amount:,.2f}" not in rendered
 
 
-def test_as_of_indicator_is_present_at_build_and_refreshed_by_render():
+def test_rendered_at_indicator_is_present_at_build_and_refreshed_by_render():
     demo = PortfolioIntelligenceUI().build()
-    assert any(_AS_OF_PREFIX in v for v in _html_values(demo))
+    assert any(_RENDERED_AT_PREFIX in v for v in _html_values(demo))
 
-    as_of_update = PortfolioIntelligenceUI()._render()[0]  # output index 0
-    assert _AS_OF_PREFIX in as_of_update["value"]
-    assert "CDT" in as_of_update["value"] or "CST" in as_of_update["value"]
+    rendered_at_update = PortfolioIntelligenceUI()._render()[0]  # output index 0
+    assert _RENDERED_AT_PREFIX in rendered_at_update["value"]
+    assert "CDT" in rendered_at_update["value"] or "CST" in rendered_at_update["value"]
+
+
+def test_snapshot_line_defaults_to_unavailable_and_is_separate_from_the_render_clock():
+    """The page shows the ADR-055 operational-snapshot fetch time on its own
+    line, distinct from the render clock, so a Refresh (which only re-reads
+    the same snapshot) is never mistaken for a re-fetch. With no provider
+    wired the snapshot line is an honest 'unavailable', never a timestamp."""
+    demo = PortfolioIntelligenceUI().build()
+    html_values = _html_values(demo)
+
+    assert any(_SNAPSHOT_UNAVAILABLE in v for v in html_values)
+    # render clock and snapshot line are two different lines
+    assert any(_RENDERED_AT_PREFIX in v and _SNAPSHOT_PREFIX not in v for v in html_values)
+
+
+def test_snapshot_line_shows_the_provider_time_and_is_stable_across_render():
+    fetched = datetime(2026, 9, 2, 13, 40, tzinfo=timezone.utc)
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital()),
+        snapshot_fetched_at_provider=lambda: fetched,
+    )
+
+    build_html = "\n".join(_html_values(ui.build()))
+    assert f"{_SNAPSHOT_PREFIX}2026-09-02 08:40 CDT" in build_html
+    assert "not re-downloaded on Refresh" in build_html
+
+    # output index 1 is the snapshot line; unchanged on a second render
+    assert ui._render()[1]["value"] == ui._render()[1]["value"]
+    assert _SNAPSHOT_PREFIX in ui._render()[1]["value"]
+
+
+def test_capital_summary_carries_the_internal_ledger_source_caption_in_every_state():
+    """Capital Summary / Allocation are the bot's internal managed
+    capital-pool ledger, a separate system of record from the Alpaca Paper
+    Account below; the caption saying so renders in the unavailable, real
+    and partial states alike."""
+    unavailable = PortfolioIntelligenceUI(PortfolioScreen()).build()
+    real = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=(_make_holding(),))
+    ).build()
+    partial = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=None)
+    ).build()
+
+    for demo in (unavailable, real, partial):
+        assert any(_CAPITAL_SOURCE_CAPTION in v for v in _html_values(demo))
+    assert "Alpaca Paper Account" in _CAPITAL_SOURCE_CAPTION
+    assert "may not match" in _CAPITAL_SOURCE_CAPTION
+
+
+def test_orders_section_carries_the_verbatim_status_note_in_every_state():
+    """A 'canceled' order that still shows a partial fill quantity/time is a
+    faithful display of the broker record; the note saying so renders
+    unconditionally."""
+    for screen in (
+        PortfolioScreen(capital=_make_capital()),
+        PortfolioScreen(
+            capital=_make_capital(),
+            alpaca_orders=AlpacaOrdersSnapshot(orders=(), truncated=False),
+        ),
+        PortfolioScreen(
+            capital=_make_capital(),
+            alpaca_orders=AlpacaOrdersSnapshot(orders=(_make_order(),), truncated=False),
+        ),
+    ):
+        demo = PortfolioIntelligenceUI(screen=screen).build()
+        assert any(_ALPACA_ORDERS_STATUS_NOTE in v for v in _html_values(demo))
+    assert "exactly as the broker reports them" in _ALPACA_ORDERS_STATUS_NOTE
 
 
 def test_no_screen_and_no_provider_uses_the_all_unavailable_screen():
@@ -864,4 +937,4 @@ def test_no_screen_and_no_provider_uses_the_all_unavailable_screen():
 
     assert ui._screen.capital is None
     assert ui._screen.holdings is None
-    assert ui._render()[1]["value"] == _UNAVAILABLE_DATA_HTML
+    assert ui._render()[2]["value"] == _UNAVAILABLE_DATA_HTML
