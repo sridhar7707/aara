@@ -1085,12 +1085,86 @@ def test_feature_drivers_evidence_renders_actual_values_key_sorted():
 
 
 def test_feature_drivers_list_form_renders_each_item():
+    """Non-pair list items keep the single 'Driver' row fallback."""
     entry = _make_entry(evidence_type="FEATURE_DRIVERS", source="aara-bot", data={
         "drivers": ["alpha", "beta"],
     })
     out = _trades_evidence_html(entry)
     assert "alpha" in out and "beta" in out
     assert "['alpha', 'beta']" not in out
+    assert out.count("Driver") >= 2
+
+
+def test_feature_drivers_production_pair_list_renders_name_colon_value():
+    """Production shape: a JSON array of [name, value] pairs. Each pair
+    renders as 'name: value' in source order -- not a Python list repr."""
+    entry = _make_entry(evidence_type="FEATURE_DRIVERS", source="aara-bot", data={
+        "drivers": [["atr_pct", 0.2085], ["rs_vs_spy_63d", -0.0579], ["bb_width", 0.0384]],
+    })
+    out = _trades_evidence_html(entry)
+
+    assert '<details class="aara-payload-disclosure">' in out
+    for name, value in (("atr_pct", "0.2085"), ("rs_vs_spy_63d", "-0.0579"), ("bb_width", "0.0384")):
+        assert f'<span class="record-label">{name}</span>' in out
+        assert f'<span class="record-value">{value}</span>' in out
+    # no list repr, no fabricated "Driver" label for pairs
+    assert "['atr_pct'" not in out and "[&#x27;atr_pct&#x27;" not in out
+    assert "Driver" not in out
+    # deterministic source order preserved
+    assert out.index("atr_pct") < out.index("rs_vs_spy_63d") < out.index("bb_width")
+
+
+def test_feature_drivers_pair_names_and_values_are_html_escaped():
+    entry = _make_entry(evidence_type="FEATURE_DRIVERS", source="aara-bot", data={
+        "drivers": [["<b>feat</b>", "<img src=x onerror=alert(1)>"]],
+    })
+    out = _trades_evidence_html(entry)
+    assert "<img" not in out
+    assert "<b>feat</b>" not in out
+    assert "&lt;b&gt;feat&lt;/b&gt;" in out
+    assert "&lt;img" in out
+
+
+def test_feature_drivers_malformed_pair_items_do_not_crash():
+    """Mixed list: a real pair, a 1-item list, a 3-item list, a bare scalar,
+    None, and a tuple pair -- render without raising; non-pairs fall back to
+    the 'Driver' row, the string-named pairs render as name: value."""
+    entry = _make_entry(evidence_type="FEATURE_DRIVERS", source="aara-bot", data={
+        "drivers": [
+            ["ok_pair", 1.5],
+            ["only_one"],
+            ["a", "b", "c"],
+            42,
+            None,
+            ("tuple_pair", -0.1),
+        ],
+    })
+    out = _trades_evidence_html(entry)
+
+    assert f'<span class="record-label">ok_pair</span>' in out
+    assert f'<span class="record-value">1.5</span>' in out
+    assert f'<span class="record-label">tuple_pair</span>' in out
+    assert f'<span class="record-value">-0.1</span>' in out
+    # the non-pair items each fall back to a "Driver" row, no exception
+    assert out.count('<span class="record-label">Driver</span>') == 4
+
+
+def test_feature_drivers_pair_with_non_string_name_falls_back_to_driver_row():
+    entry = _make_entry(evidence_type="FEATURE_DRIVERS", source="aara-bot", data={
+        "drivers": [[0, 0.5]],
+    })
+    out = _trades_evidence_html(entry)
+    assert '<span class="record-label">Driver</span>' in out
+
+
+def test_feature_drivers_dict_form_still_key_sorted_after_pair_support():
+    entry = _make_entry(evidence_type="FEATURE_DRIVERS", source="aara-bot", data={
+        "drivers": {"zeta": 0.9, "alpha": 0.1},
+    })
+    out = _trades_evidence_html(entry)
+    assert f'<span class="record-label">alpha</span>' in out
+    assert f'<span class="record-value">0.1</span>' in out
+    assert out.index("alpha") < out.index("zeta")
 
 
 def test_ai_rationale_evidence_renders_the_text():

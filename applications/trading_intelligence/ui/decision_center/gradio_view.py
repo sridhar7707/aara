@@ -1619,11 +1619,13 @@ class DecisionCenterUI:
         drawn only from EvidenceEntry.data -- nothing recomputed, nothing
         invented. MODEL_ENSEMBLE: the present keys in _MODEL_ENSEMBLE_FIELD_
         LABELS order. FEATURE_DRIVERS: data["drivers"] -- a dict renders as
-        key-sorted label/value rows, a list as "Driver" rows; anything else
-        (or empty) -> no rows. AI_RATIONALE: data["text"] as a single
-        "Rationale" row, or no rows when blank/absent (the caller then emits
-        no disclosure, matching _format_evidence_detail_html's own contract
-        for 'nothing to show')."""
+        key-sorted label/value rows; a list renders in source order, with a
+        ``[name, value]`` pair (2 items, string name -- the shape the bot
+        actually persists) shown as ``name: value`` and any other item
+        shown as a single "Driver" row; anything else (or empty) -> no rows.
+        AI_RATIONALE: data["text"] as a single "Rationale" row, or no rows
+        when blank/absent (the caller then emits no disclosure, matching
+        _format_evidence_detail_html's own contract for 'nothing to show')."""
         data = entry.data or {}
         if entry.evidence_type == "MODEL_ENSEMBLE":
             return [
@@ -1639,10 +1641,21 @@ class DecisionCenterUI:
                     for key, value in sorted(drivers.items(), key=lambda kv: str(kv[0]))
                 ]
             if isinstance(drivers, list):
-                return [
-                    ("Driver", DecisionCenterUI._format_evidence_value(item))
-                    for item in drivers
-                ]
+                rows: List[Tuple[str, str]] = []
+                for item in drivers:
+                    if (
+                        isinstance(item, (list, tuple))
+                        and len(item) == 2
+                        and isinstance(item[0], str)
+                    ):
+                        rows.append(
+                            (item[0], DecisionCenterUI._format_evidence_value(item[1]))
+                        )
+                    else:
+                        rows.append(
+                            ("Driver", DecisionCenterUI._format_evidence_value(item))
+                        )
+                return rows
             return []
         if entry.evidence_type == "AI_RATIONALE":
             text = data.get("text")
