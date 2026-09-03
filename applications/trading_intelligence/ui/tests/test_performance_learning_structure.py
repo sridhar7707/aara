@@ -2,9 +2,12 @@
 
 test_ui_structure.py already scans every file under ui/ (including this
 package) for bot/dashboard/scheduler/sentinel_engine imports -- not
-repeated here. This file covers the requirements unique to this package:
-no coupling to any sibling screen package, and no outcome/attribution/
-calibration contract of any kind (this backlog slice's own scope rule).
+repeated here. This file covers the requirement unique to this package:
+no coupling to any sibling screen package, and no direct
+bot/dashboard/scheduler/database/ledger/sentinel_engine import. Wave 2B's
+Outcome History is fed by the composition root (bootstrap.py) from the
+Wave 2A DecisionOutcomeQueryService; this package itself makes no service
+call.
 """
 import ast
 import importlib

@@ -123,6 +123,9 @@ from applications.trading_intelligence.adapters.trades_db_decision_adapters impo
 from applications.trading_intelligence.adapters.trades_db_decision_source import (
     TradesDbDecisionReader,
 )
+from applications.trading_intelligence.adapters.trades_db_outcome_source import (
+    TradesDbOutcomeReader,
+)
 from applications.trading_intelligence.adapters.trades_db_snapshot import fetch_trades_db_snapshot
 from applications.trading_intelligence.bootstrap_trades_db_snapshot import (
     legacy_source_kwargs,
@@ -139,6 +142,15 @@ from applications.trading_intelligence.services.decision_evidence_query_service 
 from applications.trading_intelligence.services.decision_governance_query_service import (
     DecisionGovernanceQueryService,
 )
+from applications.trading_intelligence.contracts.decision_outcome_contract import (
+    ExcludedSellReason,
+    ExitBasis,
+    OutcomeLineage,
+    OutcomeStatus,
+)
+from applications.trading_intelligence.services.decision_outcome_query_service import (
+    DecisionOutcomeQueryService,
+)
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.ui.design_system import DESIGN_SYSTEM_CSS
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
@@ -150,6 +162,13 @@ from applications.trading_intelligence.ui.morning_brief.mock_data import (
 from applications.trading_intelligence.ui.morning_brief.screen import MorningBriefScreen
 from applications.trading_intelligence.ui.performance_learning.gradio_view import (
     PerformanceLearningUI,
+)
+from applications.trading_intelligence.ui.performance_learning.mock_data import (
+    build_mock_screen as build_performance_learning_shell,
+)
+from applications.trading_intelligence.ui.performance_learning.screen import (
+    OutcomeHistoryRow,
+    PerformanceLearningScreen,
 )
 from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
     PortfolioIntelligenceUI,
@@ -1113,6 +1132,151 @@ def _build_risk_intelligence_ui(db_path: Optional[str] = None) -> RiskIntelligen
     )
 
 
+_OUTCOME_STATUS_LABELS = {
+    OutcomeStatus.OPEN: "OPEN",
+    OutcomeStatus.PARTIAL: "PARTIAL",
+    OutcomeStatus.CLOSED: "CLOSED",
+    OutcomeStatus.AMBIGUOUS: "AMBIGUOUS",
+}
+_EXIT_BASIS_LABELS = {
+    ExitBasis.BOT_FILL: "Bot fill",
+    ExitBasis.RECONCILIATION_MARK: "Reconciliation mark",
+}
+_EXCLUDED_REASON_LABELS = {
+    ExcludedSellReason.PHANTOM_RECONCILE_SUPPRESSED: "phantom-reconcile-suppressed",
+    ExcludedSellReason.ORPHAN_NO_BUY: "orphan",
+    ExcludedSellReason.UNATTRIBUTED_IN_WINDOW: "unattributed",
+}
+
+# Per-screen display timezone, matching `_MB_SECTION_DISPLAY_TIMEZONE` and
+# `_RISK_STATE_DISPLAY_TIMEZONE` -- the "%Y-%m-%d %H:%M %Z" America/Chicago
+# wall-clock convention every Trading Intelligence timestamp uses.
+_PL_OUTCOME_DISPLAY_TIMEZONE = ZoneInfo("America/Chicago")
+
+
+def _format_outcome_timestamp(raw: Optional[str]) -> str:
+    """Display-only: the raw ISO string on a Wave 2A DecisionOutcome ->
+    the "%Y-%m-%d %H:%M %Z" America/Chicago wall-clock string every other
+    Trading Intelligence timestamp uses. Naive values are treated as UTC
+    (the bot's own convention). An unparseable value passes through
+    unchanged. No arithmetic on the value itself."""
+    if not raw:
+        return ""
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return raw
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(_PL_OUTCOME_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
+
+
+def _outcome_history_row(outcome) -> OutcomeHistoryRow:
+    """Map ONE frozen Wave 2A DecisionOutcome to the P&L-owned
+    OutcomeHistoryRow. Every value is passed through verbatim or given
+    display formatting only -- P&L, P&L %, holding days, exit price, and
+    outcome direction all come straight from Wave 2A, which owns those
+    semantics. Columns that do not apply to the outcome's state are left
+    as empty strings, never a placeholder."""
+    resolved = outcome.status in (OutcomeStatus.CLOSED, OutcomeStatus.PARTIAL)
+    pnl_usd = ""
+    pnl_pct = ""
+    if resolved and outcome.realized_pnl_usd is not None:
+        pnl_usd = f"{outcome.realized_pnl_usd:,.2f}"
+    if resolved and outcome.realized_pnl_pct is not None:
+        pnl_pct = f"{outcome.realized_pnl_pct:.2%}"
+    direction = ""
+    if outcome.status is OutcomeStatus.CLOSED and outcome.outcome_direction is not None:
+        direction = outcome.outcome_direction.name
+    return OutcomeHistoryRow(
+        decision=f"{outcome.symbol} BUY · {outcome.decision_id}",
+        entry_date=_format_outcome_timestamp(outcome.entry_timestamp),
+        status=_OUTCOME_STATUS_LABELS.get(outcome.status, outcome.status.name),
+        exit_date=_format_outcome_timestamp(outcome.exit_timestamp) if resolved else "",
+        holding_days=(
+            str(outcome.holding_days)
+            if resolved and outcome.holding_days is not None
+            else ""
+        ),
+        realized_pnl_usd=pnl_usd,
+        realized_pnl_pct=pnl_pct,
+        exit_basis=_EXIT_BASIS_LABELS.get(outcome.exit_basis, "") if resolved else "",
+        pairing_method=outcome.pairing_method.name,
+        pairing_confidence=outcome.pairing_confidence.name,
+        direction=direction,
+    )
+
+
+def _outcome_history_summary(lineage: OutcomeLineage) -> str:
+    """Factual count line, computed from the returned OutcomeLineage --
+    never hard-coded. Excluded-SELL breakdown is derived from
+    ExcludedSell.reason."""
+    decisions = lineage.decisions
+    n_closed = sum(1 for o in decisions if o.status is OutcomeStatus.CLOSED)
+    n_partial = sum(1 for o in decisions if o.status is OutcomeStatus.PARTIAL)
+    n_open = sum(1 for o in decisions if o.status is OutcomeStatus.OPEN)
+    n_ambiguous = sum(1 for o in decisions if o.status is OutcomeStatus.AMBIGUOUS)
+    summary = (
+        f"{len(decisions)} BUY decisions — "
+        f"{n_closed} CLOSED · {n_partial} PARTIAL · "
+        f"{n_open} OPEN · {n_ambiguous} AMBIGUOUS."
+    )
+    excluded = lineage.excluded_sells
+    if excluded:
+        parts = []
+        for reason, label in _EXCLUDED_REASON_LABELS.items():
+            count = sum(1 for e in excluded if e.reason is reason)
+            if count:
+                parts.append(f"{count} {label}")
+        summary += f" {len(excluded)} SELL rows excluded ({', '.join(parts)})."
+    return summary
+
+
+def _build_performance_learning_screen(db_path: Optional[str] = None) -> PerformanceLearningScreen:
+    """Assemble the Performance & Learning screen's Outcome History area
+    from the verified Wave 2A trades-only decision-outcome lineage
+    (`DecisionOutcomeQueryService` over the ADR-055 trades.db snapshot).
+
+    Attribution Breakdown and Model Confidence Calibration keep their
+    existing honest-unavailable messages -- Wave 2A produces no attribution
+    or calibration data and none is fabricated here.
+
+    A non-HEALTHY read (no snapshot -- the deployed Space's normal state --
+    missing table, malformed row) carries `outcome_health` with the reason
+    and no rows; the view renders its explicit unavailable state. A HEALTHY
+    read with zero BUY decisions yields an empty Outcome History with an
+    honest empty-state message. Never fabricated outcomes; never a
+    re-derived pairing (Wave 2A owns that, consumed unchanged).
+
+    Mirrors `_build_risk_intelligence_screen` -- read source -> screen
+    dataclass -- except this slice renders once at build (no Refresh /
+    demo.load), so `_build_performance_learning_ui` binds it as a
+    single-shot provider."""
+    shell = build_performance_learning_shell()
+    reader = TradesDbOutcomeReader(**legacy_source_kwargs(db_path))
+    result = DecisionOutcomeQueryService(reader).get_lineage()
+    if result.value is None:
+        return replace(shell, outcome_health=result.health)
+    lineage = result.value
+    return replace(
+        shell,
+        outcome_rows=tuple(_outcome_history_row(o) for o in lineage.decisions),
+        outcome_health=result.health,
+        summary=_outcome_history_summary(lineage),
+    )
+
+
+def _build_performance_learning_ui(db_path: Optional[str] = None) -> PerformanceLearningUI:
+    """Wire Performance & Learning's Outcome History to the Wave 2A
+    decision-outcome lineage, from the runtime `db_path` snapshot when one
+    was fetched (see `snapshot_bound_provider`). This slice renders once at
+    build time -- no Refresh button, no `demo.load()` -- so the provider is
+    invoked a single time by `PerformanceLearningUI.__init__`."""
+    return PerformanceLearningUI(
+        screen_provider=snapshot_bound_provider(_build_performance_learning_screen, db_path),
+    )
+
+
 def build_trading_intelligence_app() -> gr.Blocks:
     """Composes every Trading Intelligence screen into one tabbed app via
     gr.TabbedInterface -- the smallest wiring that reaches multiple
@@ -1157,7 +1321,7 @@ def build_trading_intelligence_app() -> gr.Blocks:
     decision_blocks = build_application_from_trades_snapshot(snapshot_db_path).build()
     portfolio_blocks = _build_portfolio_intelligence_ui(snapshot_db_path).build()
     risk_blocks = _build_risk_intelligence_ui(snapshot_db_path).build()
-    performance_learning_blocks = PerformanceLearningUI().build()
+    performance_learning_blocks = _build_performance_learning_ui(snapshot_db_path).build()
     settings_blocks = SettingsUI().build()
 
     merged_css = "\n".join(

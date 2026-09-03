@@ -1,29 +1,36 @@
-"""Performance & Learning screen structure -- shell MVP.
+"""Performance & Learning screen structure.
 
-Framework-independent dataclasses (no gradio import), mirroring
-ui/morning_brief/screen.py's and ui/settings/screen.py's pattern. Like
-those two, and unlike ui/portfolio_intelligence/screen.py and
-ui/risk_intelligence/screen.py, this package never carries a "populated"
-branch: per docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md
-Section 2, Performance & Learning's three required areas -- Outcome
-History, Attribution Breakdown, Model Confidence Calibration -- name only
-a future, unwired Sentinel Engine input (`DECISION_OUTCOME_RECORDED`,
-explicitly "BUY-scoped only... a UI must not imply every decision gets an
-outcome") and no adapter for it exists in this application. Inventing
-illustrative performance numbers, outcomes, or attribution figures here
-would misrepresent an unbuilt data path as a populated one, and could be
-read as real trading performance. Every area is therefore always
-unavailable, with a fixed, honest message.
+Framework-independent dataclasses (no gradio import). Two of the three
+frozen IA areas -- Attribution Breakdown, Model Confidence Calibration --
+still have no wired data source and stay on a fixed, honest unavailable
+message (Wave 2A produces no attribution or calibration data and none is
+fabricated here).
+
+Wave 2B wires the first real source into the third area, **Outcome
+History**: the verified trades-only decision-outcome lineage produced by
+`services/decision_outcome_query_service.DecisionOutcomeQueryService`
+(Wave 2A, frozen and consumed unchanged). The composition root
+(bootstrap.py) reads that lineage and maps each `DecisionOutcome` to an
+`OutcomeHistoryRow` here -- a P&L-owned presentation shape, never the
+Wave 2A contract type itself, so this UI stays decoupled from the
+contract's enums. Nothing here recomputes P&L, holding period, exit
+price, or outcome direction; Wave 2A owns those semantics.
 
 Area titles are exact string literals matching the frozen IA's own
 "Required information" wording verbatim.
 """
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
+
+from applications.platform.integrations import IntegrationHealth
 
 OUTCOME_HISTORY_TITLE = "Outcome History"
 ATTRIBUTION_BREAKDOWN_TITLE = "Attribution Breakdown"
 MODEL_CONFIDENCE_CALIBRATION_TITLE = "Model Confidence Calibration"
+
+_OUTCOME_HISTORY_EMPTY_MESSAGE = (
+    "No BUY decisions are present in the current trades snapshot."
+)
 
 
 @dataclass(frozen=True)
@@ -33,10 +40,43 @@ class PerformanceLearningSection:
 
 
 @dataclass(frozen=True)
+class OutcomeHistoryRow:
+    """One Outcome History table row -- the P&L-owned presentation shape
+    for one Wave 2A ``DecisionOutcome``.
+
+    Every field is a display string the composition root formatted from
+    the frozen ``DecisionOutcome``; nothing here is recomputed. An empty
+    string means "not applicable to this outcome's state" (e.g. the exit
+    columns of an OPEN decision, or ``direction`` for anything other than
+    CLOSED), never "unknown".
+    """
+
+    decision: str
+    entry_date: str
+    status: str
+    exit_date: str
+    holding_days: str
+    realized_pnl_usd: str
+    realized_pnl_pct: str
+    exit_basis: str
+    pairing_method: str
+    pairing_confidence: str
+    direction: str
+
+
+@dataclass(frozen=True)
 class PerformanceLearningScreen:
     outcome_history: PerformanceLearningSection
     attribution_breakdown: PerformanceLearningSection
     model_confidence_calibration: PerformanceLearningSection
+    # Wave 2B: populated by the composition root from the Wave 2A
+    # OutcomeLineage. `outcome_health` carries the DecisionOutcomeQueryService
+    # ReadResult health (None only in a standalone no-provider build);
+    # `outcome_rows` is one row per DecisionOutcome; `summary` is the
+    # factual count line derived from the lineage.
+    outcome_rows: Tuple[OutcomeHistoryRow, ...] = ()
+    outcome_health: Optional[IntegrationHealth] = None
+    summary: Optional[str] = None
 
     @property
     def sections(self) -> Tuple[PerformanceLearningSection, ...]:
@@ -48,12 +88,26 @@ class PerformanceLearningScreen:
         )
 
     @property
+    def outcome_history_available(self) -> bool:
+        """True only when a HEALTHY outcome read produced this screen. Rows
+        may still be empty (HEALTHY, but no BUY decisions in the snapshot)."""
+        return self.outcome_health is not None and self.outcome_health.is_healthy
+
+    @property
+    def outcome_history_is_empty(self) -> bool:
+        return len(self.outcome_rows) == 0
+
+    @property
+    def outcome_history_empty_message(self) -> str:
+        return _OUTCOME_HISTORY_EMPTY_MESSAGE
+
+    @property
     def is_empty(self) -> bool:
-        """Always True in this shell -- no area has a wired data source
-        yet. Kept as an explicit property (rather than a bare constant)
-        to match MorningBriefScreen's/SettingsScreen's/DecisionListArea's
-        own is_empty convention."""
-        return True
+        """True when no Outcome History table is shown -- either the source
+        was non-HEALTHY (unavailable state) or it was HEALTHY with zero BUY
+        decisions (empty state). Attribution and Model Confidence
+        Calibration are always unavailable and never make this False."""
+        return (not self.outcome_history_available) or self.outcome_history_is_empty
 
     @property
     def empty_state_message(self) -> str:

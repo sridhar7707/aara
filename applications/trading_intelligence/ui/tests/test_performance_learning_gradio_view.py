@@ -75,16 +75,20 @@ def test_all_three_sections_render_their_own_unavailable_message():
         assert section.unavailable_message in combined
 
 
-def test_no_gradio_dataframe_is_rendered():
-    """Unlike Portfolio/Risk Intelligence (which render a gr.Dataframe once
-    holdings/history exist), Performance & Learning has no populated-data
-    branch at all -- there must never be a table to render."""
+def test_outcome_history_dataframe_is_present_but_hidden_when_unavailable():
+    """Wave 2B: the Outcome History table is part of the stable component
+    tree (like Risk Intelligence's history Dataframe), created once and
+    hidden until a HEALTHY read with decisions exists. The no-provider
+    default screen is unavailable, so the table must be present and
+    `visible is False`."""
     ui = PerformanceLearningUI()
 
     demo = ui.build()
 
     dataframes = [block for block in demo.blocks.values() if isinstance(block, gr.Dataframe)]
-    assert dataframes == []
+    assert len(dataframes) == 1
+    assert dataframes[0].visible is False
+    assert "pl-outcome-table" in (dataframes[0].elem_classes or [])
 
 
 def test_no_illustrative_data_disclosure_is_rendered():
