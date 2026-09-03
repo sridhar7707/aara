@@ -1023,6 +1023,183 @@ def test_evidence_card_renders_no_detail_disclosure_when_metadata_is_empty():
     assert '<details class="aara-payload-disclosure">' not in evidence_html
 
 
+# --- Wave 1.x: trades.db-backed evidence-card detail rendering -------------
+# The trades.db Decision Center source (adapters/trade_decision_derivation.py)
+# puts its values as TOP-LEVEL EvidenceEntry.data keys, not under
+# data["metadata"]; gradio_view._evidence_detail_html routes the three
+# trades evidence_type values to their own formatter and leaves every other
+# type on the unchanged ADR-037 metadata path.
+
+
+def _trades_evidence_html(*entries):
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, evidence=tuple(entries))
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+    *_, evidence_html, _g, _a, _au = ui._render_detail("dec-001")
+    return evidence_html
+
+
+def test_model_ensemble_evidence_renders_its_data_values():
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot", data={
+        "ensemble": 0.5222463399916888, "threshold": 0.52,
+        "xgb": 0.5385, "lstm": 0.4375,
+        "sentiment": 0.0936, "macro": 0.6403, "regime": "HIGH_VOLATILITY",
+    })
+    out = _trades_evidence_html(entry)
+
+    assert '<details class="aara-payload-disclosure">' in out
+    assert "XGB" in out and "0.5385" in out
+    assert "LSTM" in out and "0.4375" in out
+    assert "Ensemble" in out and "0.5222" in out
+    assert "Threshold" in out and "0.52" in out
+    assert "Regime" in out and "HIGH_VOLATILITY" in out
+    # fixed label order: XGB, LSTM, ... Ensemble, Threshold, Regime
+    _assert_index_order(out, "XGB", "LSTM", "Ensemble", "Threshold", "Regime")
+
+
+def test_model_ensemble_omits_absent_keys_instead_of_rendering_none():
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot", data={
+        "ensemble": 0.55, "threshold": 0.52,
+    })
+    out = _trades_evidence_html(entry)
+
+    assert "Ensemble" in out and "Threshold" in out
+    assert "XGB" not in out
+    assert "Regime" not in out
+    assert "None" not in out
+
+
+def test_feature_drivers_evidence_renders_actual_values_key_sorted():
+    entry = _make_entry(evidence_type="FEATURE_DRIVERS", source="aara-bot", data={
+        "drivers": {"momentum": 0.41, "trend": "up"},
+    })
+    out = _trades_evidence_html(entry)
+
+    assert '<details class="aara-payload-disclosure">' in out
+    assert "momentum" in out and "0.41" in out
+    assert "trend" in out and "up" in out
+    assert out.index("momentum") < out.index("trend")
+    assert "{'momentum'" not in out  # not a raw dict repr
+
+
+def test_feature_drivers_list_form_renders_each_item():
+    entry = _make_entry(evidence_type="FEATURE_DRIVERS", source="aara-bot", data={
+        "drivers": ["alpha", "beta"],
+    })
+    out = _trades_evidence_html(entry)
+    assert "alpha" in out and "beta" in out
+    assert "['alpha', 'beta']" not in out
+
+
+def test_ai_rationale_evidence_renders_the_text():
+    entry = _make_entry(evidence_type="AI_RATIONALE", source="aara-bot", data={
+        "text": "Ensemble cleared the BUY threshold on strengthening momentum.",
+    })
+    out = _trades_evidence_html(entry)
+    assert '<details class="aara-payload-disclosure">' in out
+    assert "Ensemble cleared the BUY threshold on strengthening momentum." in out
+
+
+def test_ai_rationale_preserves_line_breaks_as_br():
+    entry = _make_entry(evidence_type="AI_RATIONALE", source="aara-bot", data={
+        "text": "Line one.\nLine two.",
+    })
+    out = _trades_evidence_html(entry)
+    assert "Line one.<br>Line two." in out
+
+
+def test_ai_rationale_html_is_escaped_and_cannot_inject_markup():
+    entry = _make_entry(evidence_type="AI_RATIONALE", source="aara-bot", data={
+        "text": "<script>alert(1)</script><img src=x onerror=alert(1)>",
+    })
+    out = _trades_evidence_html(entry)
+    assert "<script>" not in out
+    assert "<img" not in out
+    assert "&lt;script&gt;" in out
+
+
+def test_feature_driver_values_are_html_escaped():
+    entry = _make_entry(evidence_type="FEATURE_DRIVERS", source="aara-bot", data={
+        "drivers": {"note": "<b>x</b><img src=x onerror=alert(1)>"},
+    })
+    out = _trades_evidence_html(entry)
+    assert "<img" not in out
+    assert "<b>x</b>" not in out
+    assert "&lt;b&gt;x&lt;/b&gt;" in out
+
+
+def test_ai_rationale_blank_text_renders_no_disclosure():
+    entry = _make_entry(evidence_type="AI_RATIONALE", source="aara-bot", data={"text": "   "})
+    out = _trades_evidence_html(entry)
+    assert '<details class="aara-payload-disclosure">' not in out
+
+
+def test_feature_drivers_empty_or_missing_renders_no_disclosure():
+    for data in ({"drivers": {}}, {"drivers": []}, {}, {"drivers": None}):
+        entry = _make_entry(evidence_type="FEATURE_DRIVERS", source="aara-bot", data=data)
+        out = _trades_evidence_html(entry)
+        assert '<details class="aara-payload-disclosure">' not in out
+
+
+def test_all_three_trades_evidence_cards_render_together():
+    entries = (
+        _make_entry(evidence_id="e1", evidence_type="MODEL_ENSEMBLE", source="aara-bot",
+                    data={"ensemble": 0.5222, "threshold": 0.52, "xgb": 0.5385,
+                          "lstm": 0.4375, "regime": "HIGH_VOLATILITY"}),
+        _make_entry(evidence_id="e2", evidence_type="FEATURE_DRIVERS", source="aara-bot",
+                    data={"drivers": {"momentum": 0.41}}),
+        _make_entry(evidence_id="e3", evidence_type="AI_RATIONALE", source="aara-bot",
+                    data={"text": "Cleared the threshold."}),
+    )
+    out = _trades_evidence_html(*entries)
+    assert "MODEL_ENSEMBLE" in out and "FEATURE_DRIVERS" in out and "AI_RATIONALE" in out
+    assert "0.5385" in out and "momentum" in out and "Cleared the threshold." in out
+
+
+def test_trades_evidence_detail_shows_no_risk_or_outcome_fields():
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot", data={
+        "ensemble": 0.5222, "threshold": 0.52, "xgb": 0.5385, "lstm": 0.4375,
+        "regime": "HIGH_VOLATILITY",
+    })
+    out = _trades_evidence_html(entry)
+    for banned in (
+        "stop_loss", "take_profit", "risk_reward", "Stop Loss", "Take Profit",
+        "P&L", "PnL", "realized", "Realized", "outcome", "Outcome", "holding",
+    ):
+        assert banned not in out
+
+
+def test_adr037_evidence_types_still_route_through_the_metadata_path():
+    """A non-trades evidence_type with data["metadata"] renders exactly as
+    before; MODEL_ENSEMBLE-style top-level keys on such an entry are NOT
+    rendered -- proving the routing is by evidence_type, not by data shape."""
+    entry = _make_entry(evidence_type="NEWS_SENTIMENT", source="newsapi", data={
+        "metadata": {"raw_score": 0.42, "headlines": ["Earnings beat"]},
+        "xgb": 0.99,  # a top-level key only the trades path would ever render
+    })
+    out = _trades_evidence_html(entry)
+    assert "Earnings beat" in out and "0.42" in out
+    assert "XGB" not in out and "0.99" not in out
+
+
+def test_evidence_read_error_still_shows_unavailable_message_not_a_disclosure():
+    view = _make_view()
+    controller = _FakeController(detail_area=DecisionDetailArea(
+        decision=view, evidence=(), evidence_status=ReadStatus.ERROR,
+    ))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+    *_, evidence_html, _g, _a, _au = ui._render_detail("dec-001")
+    assert _EVIDENCE_ERROR_MESSAGE in evidence_html
+    assert '<details class="aara-payload-disclosure">' not in evidence_html
+
+
+def test_risk_context_placeholder_is_unchanged_by_wave_1x():
+    assert _RISK_CONTEXT_TITLE == "Risk context not yet available"
+    assert "has not yet been implemented" in _RISK_CONTEXT_BODY
+
+
 def test_render_detail_renders_a_single_governance_card():
     view = _make_view()
     entry = _make_governance_entry(policy_id="pol-max-pos", enabled=True)

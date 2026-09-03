@@ -982,6 +982,34 @@ _AUDIT_PAYLOAD_ALLOWED_KEYS = frozenset({
     "approval_id", "status", "approved_by",
 })
 
+# Wave 1.x evidence-detail rendering: the trades.db-backed Decision Center
+# source (adapters/trade_decision_derivation.py) puts its values as
+# TOP-LEVEL keys on EvidenceEntry.data -- NOT inside the ADR-037
+# data["metadata"] sub-dict that _format_evidence_detail_html reads -- so
+# without an explicit path they were derived but never shown. These three
+# evidence_type strings are the only ones that source emits; every other
+# type still routes through the unchanged ADR-037 metadata path. Both paths
+# render into the same <details class="aara-payload-disclosure"> +
+# aara-record-field markup, so no new CSS and no layout change. Values are
+# display-only: nothing is recomputed, and no stop_loss / take_profit /
+# risk_reward_ratio / outcome field is ever present in this data to begin
+# with (see the derivation module's own docstring).
+_TRADES_EVIDENCE_TYPES = frozenset({"MODEL_ENSEMBLE", "FEATURE_DRIVERS", "AI_RATIONALE"})
+
+# Fixed render order + human labels for MODEL_ENSEMBLE's data keys. A key is
+# rendered only when actually present in EvidenceEntry.data (the derivation
+# already omits zero/absent model sub-scores and a missing regime), so a
+# missing value is simply skipped -- never rendered as "None".
+_MODEL_ENSEMBLE_FIELD_LABELS = (
+    ("xgb", "XGB"),
+    ("lstm", "LSTM"),
+    ("sentiment", "Sentiment"),
+    ("macro", "Macro"),
+    ("ensemble", "Ensemble"),
+    ("threshold", "Threshold"),
+    ("regime", "Regime"),
+)
+
 
 class DecisionCenterUI:
     def __init__(self, controller: DecisionCenterController, decision_ids: List[str]):
@@ -1554,11 +1582,107 @@ class DecisionCenterUI:
                     ("Attached", format_display_timestamp(entry.attached_at), True),
                 ],
                 "neutral",
-                DecisionCenterUI._format_evidence_detail_html(entry.data.get("metadata", {})),
+                DecisionCenterUI._evidence_detail_html(entry),
             )
             for entry in detail_area.evidence
         ]
         return DecisionCenterUI._record_list_html(cards, _EVIDENCE_EMPTY_MESSAGE, "evidence")
+
+    @staticmethod
+    def _evidence_detail_html(entry: EvidenceEntry) -> str:
+        """Pick the detail-disclosure builder for one evidence entry by
+        type: the three trades.db-backed types (see _TRADES_EVIDENCE_TYPES)
+        render their own top-level EvidenceEntry.data keys; every other type
+        keeps the unchanged ADR-037 data["metadata"] path
+        (_format_evidence_detail_html), byte-for-byte."""
+        if entry.evidence_type in _TRADES_EVIDENCE_TYPES:
+            return DecisionCenterUI._format_trades_evidence_detail_html(entry)
+        return DecisionCenterUI._format_evidence_detail_html(entry.data.get("metadata", {}))
+
+    @staticmethod
+    def _format_evidence_value(value: Any) -> str:
+        """Display formatting for one trades.db evidence value. Bools ->
+        Yes/No; floats -> at most 4 decimals with trailing zeros trimmed
+        (0.52 -> "0.52", 0.5385 -> "0.5385", 0.0 -> "0"); everything else ->
+        str(). The caller html.escape()s the result -- this never emits
+        markup."""
+        if isinstance(value, bool):
+            return "Yes" if value else "No"
+        if isinstance(value, float):
+            text = f"{value:.4f}".rstrip("0").rstrip(".")
+            return text or "0"
+        return str(value)
+
+    @staticmethod
+    def _trades_evidence_rows(entry: EvidenceEntry) -> List[Tuple[str, str]]:
+        """(label, value) pairs for a trades.db evidence entry's disclosure,
+        drawn only from EvidenceEntry.data -- nothing recomputed, nothing
+        invented. MODEL_ENSEMBLE: the present keys in _MODEL_ENSEMBLE_FIELD_
+        LABELS order. FEATURE_DRIVERS: data["drivers"] -- a dict renders as
+        key-sorted label/value rows, a list as "Driver" rows; anything else
+        (or empty) -> no rows. AI_RATIONALE: data["text"] as a single
+        "Rationale" row, or no rows when blank/absent (the caller then emits
+        no disclosure, matching _format_evidence_detail_html's own contract
+        for 'nothing to show')."""
+        data = entry.data or {}
+        if entry.evidence_type == "MODEL_ENSEMBLE":
+            return [
+                (label, DecisionCenterUI._format_evidence_value(data[key]))
+                for key, label in _MODEL_ENSEMBLE_FIELD_LABELS
+                if key in data
+            ]
+        if entry.evidence_type == "FEATURE_DRIVERS":
+            drivers = data.get("drivers")
+            if isinstance(drivers, dict):
+                return [
+                    (str(key), DecisionCenterUI._format_evidence_value(value))
+                    for key, value in sorted(drivers.items(), key=lambda kv: str(kv[0]))
+                ]
+            if isinstance(drivers, list):
+                return [
+                    ("Driver", DecisionCenterUI._format_evidence_value(item))
+                    for item in drivers
+                ]
+            return []
+        if entry.evidence_type == "AI_RATIONALE":
+            text = data.get("text")
+            if text is None or not str(text).strip():
+                return []
+            return [("Rationale", str(text).strip())]
+        return []
+
+    @staticmethod
+    def _format_trades_evidence_detail_html(entry: EvidenceEntry) -> str:
+        """Expandable disclosure for the three trades.db evidence types.
+        Same <details class="aara-payload-disclosure"> + aara-record-field /
+        record-label / record-value markup as _format_evidence_detail_html,
+        so no new CSS. Returns "" (no disclosure at all) when there is
+        nothing to show, exactly like that function. Every interpolated
+        value is html.escape()d; for AI_RATIONALE only, newlines in the
+        already-escaped text become <br> so a multi-line rationale stays
+        readable -- escape-first, then insert literal <br>, so nothing in
+        the source text can become executable markup."""
+        rows = DecisionCenterUI._trades_evidence_rows(entry)
+        if not rows:
+            return ""
+        allow_line_breaks = entry.evidence_type == "AI_RATIONALE"
+        fields = []
+        for label, value in rows:
+            safe_value = html.escape(value)
+            if allow_line_breaks:
+                safe_value = safe_value.replace("\n", "<br>")
+            fields.append(
+                '<div class="aara-record-field">'
+                f'<span class="record-label">{html.escape(label)}</span>'
+                f'<span class="record-value">{safe_value}</span>'
+                "</div>"
+            )
+        return (
+            '<details class="aara-payload-disclosure">'
+            "<summary>Details</summary>"
+            f'<div class="aara-record-card-fields">{"".join(fields)}</div>'
+            "</details>"
+        )
 
     @staticmethod
     def _format_evidence_detail_html(metadata: Dict[str, Any]) -> str:
