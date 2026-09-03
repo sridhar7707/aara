@@ -15,14 +15,23 @@ not in sentinel_engine/, purely so build_application() has something
 concrete to wire today; they are expected to be replaced once ADR-004 is
 resolved.
 
-No seed data: Decision Center renders only real decisions. No production
-decision source is wired yet (ADR-004 defers the ledger backend), so
-build_application() hands DecisionCenterUI an empty decision-id
-collection and the screen shows its existing "No decisions recorded yet."
-empty state until a governed real producer exists. The write-path
-services and the SentinelEngine facade are still constructed below -- the
-read chain shares their ledger/projection repositories -- but nothing
-drives them now that seeding is removed.
+Two Decision Center composition paths, coexisting:
+
+* build_application() -- the Sentinel path. No production decision source
+  is wired into it (ADR-004 defers the ledger backend), so it hands
+  DecisionCenterUI an empty decision-id collection and the screen shows
+  its existing "No decisions recorded yet." empty state. The write-path
+  services and the SentinelEngine facade are still constructed there --
+  the read chain shares their ledger/projection repositories -- but
+  nothing drives them. Unchanged, and still exercised by
+  tests/test_bootstrap.py.
+* build_application_from_trades_snapshot() -- the deployed path. Reads the
+  trading bot's own BUY execution history from the ADR-055 trades.db
+  snapshot via the trades-backed read sources (adapters/
+  trades_db_decision_source.py + adapters/trade_decision_derivation.py),
+  behind the same query-service/controller/UI chain. build_trading_
+  intelligence_app() uses this one; no sentinel_engine object is
+  constructed on it.
 """
 import logging
 import os
@@ -104,6 +113,15 @@ from applications.trading_intelligence.adapters.sentinel_governance_source impor
 )
 from applications.trading_intelligence.adapters.sentinel_projection_decision_source import (
     SentinelProjectionDecisionSource,
+)
+from applications.trading_intelligence.adapters.trades_db_decision_adapters import (
+    TradesDbAuditSource,
+    TradesDbDecisionSource,
+    TradesDbEvidenceSource,
+    TradesDbGovernanceSource,
+)
+from applications.trading_intelligence.adapters.trades_db_decision_source import (
+    TradesDbDecisionReader,
 )
 from applications.trading_intelligence.adapters.trades_db_snapshot import fetch_trades_db_snapshot
 from applications.trading_intelligence.bootstrap_trades_db_snapshot import (
@@ -293,6 +311,45 @@ def build_application() -> DecisionCenterUI:
     )
 
     return DecisionCenterUI(controller, [])
+
+
+def build_application_from_trades_snapshot(db_path: Optional[str]) -> DecisionCenterUI:
+    """Compose the deployed Decision Center over the trading bot's own
+    execution history (the ADR-055 ``trades.db`` snapshot) instead of the
+    empty in-memory Sentinel projection graph.
+
+    Coexistence, not replacement: ``build_application()`` above and its
+    Sentinel read chain are unchanged and still exercised by
+    ``tests/test_bootstrap.py``. This entrypoint wires the trades-backed
+    read sources (Task 1A reader + Task 1B derivation, behind the SAME
+    ``DecisionSource`` / ``EvidenceSource`` / ``GovernanceSource`` contracts)
+    into the SAME, unmodified query services / controller / UI. No
+    ``SentinelEngine`` / ``LedgerRepository`` / ``ProjectionRepository`` /
+    ``DecisionQuery`` is constructed here.
+
+    ``db_path`` is the runtime snapshot path from
+    ``fetch_trades_db_snapshot()`` (ADR-055), or ``None`` -- local dev
+    without a local ``trades.db``, CI, or a Space where the fetch failed. On
+    ``None`` (via ``legacy_source_kwargs``) the reader keeps its own
+    ``"trades.db"`` default; when that file is absent every read reports
+    UNAVAILABLE, ``list_decision_ids()`` yields ``()``, and the screen shows
+    its existing "No decisions recorded yet." empty state. CI-safe by
+    construction -- no HF token, no network, no write path.
+    """
+    reader = TradesDbDecisionReader(**legacy_source_kwargs(db_path))
+
+    ids_result = reader.list_decision_ids()
+    decision_ids = list(ids_result.value) if ids_result.value else []
+
+    query_service = DecisionQueryService(TradesDbDecisionSource(reader))
+    evidence_query_service = DecisionEvidenceQueryService(TradesDbEvidenceSource(reader))
+    governance_query_service = DecisionGovernanceQueryService(TradesDbGovernanceSource(reader))
+    audit_source = TradesDbAuditSource(reader)
+
+    controller = DecisionCenterController(
+        query_service, evidence_query_service, governance_query_service, audit_source,
+    )
+    return DecisionCenterUI(controller, decision_ids)
 
 
 # Composition-only fix for a regression found in live verification: Decision
@@ -1087,13 +1144,17 @@ def build_trading_intelligence_app() -> gr.Blocks:
     # ReadResult; unwrap its value (a local path, or None on any failure --
     # no HF_TOKEN, no network, 404, malformed file). On None the legacy
     # adapters keep their `"trades.db"` default and every section stays on
-    # its existing honest-unavailable / illustrative fallback. Only the
-    # three legacy-trades.db-backed screens receive it; Decision Center
-    # (build_application()) reads no trades.db and is untouched.
+    # its existing honest-unavailable / illustrative fallback. The four
+    # legacy-trades.db-backed screens receive it: the three Morning Brief /
+    # Portfolio / Risk screens, plus the Decision Center, which now reads
+    # the bot's own BUY execution history from the same snapshot via
+    # build_application_from_trades_snapshot() (coexistence -- the Sentinel
+    # build_application() path is unchanged and still tested, just not what
+    # this composed app renders).
     snapshot_db_path = fetch_trades_db_snapshot().value
 
     morning_brief_blocks = _build_morning_brief_ui(snapshot_db_path).build()
-    decision_blocks = build_application().build()
+    decision_blocks = build_application_from_trades_snapshot(snapshot_db_path).build()
     portfolio_blocks = _build_portfolio_intelligence_ui(snapshot_db_path).build()
     risk_blocks = _build_risk_intelligence_ui(snapshot_db_path).build()
     performance_learning_blocks = PerformanceLearningUI().build()

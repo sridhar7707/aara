@@ -922,17 +922,19 @@ _SCOPE_NOTE_HTML = (
 
 # Data-source transparency note: static, decision-independent. Built once at
 # build() time like _TIMESTAMP_DISCLOSURE_HTML / _SCOPE_NOTE_HTML, never
-# wired into detail_outputs/_DetailValues/any callback. This view reads only
-# the governed decision read-model; no production decision producer is
-# connected to it, so "0 decisions" must not be read as "the platform has
-# made no decisions." Wording only -- no store, contract, or read-model
-# change.
+# wired into detail_outputs/_DetailValues/any callback. The deployed
+# Decision Center reads the trading bot's own execution history (the ADR-055
+# trades.db snapshot) via the trades-backed read sources -- decision-time
+# evidence for BUY trades the bot already made, NOT a governed Sentinel
+# decision producer and NOT a live order-control surface. Wording only --
+# no store, contract, or read-model change.
 _NO_PRODUCER_DISCLOSURE_TITLE = "About this view"
 _NO_PRODUCER_DISCLOSURE_BODY = (
-    "Decision Center reflects the governed decision read-model. No "
-    "production decision producer is currently connected to this view. "
-    '"0 decisions" therefore means no decisions are available through this '
-    "view right now; it does not mean the platform has no decision history."
+    "Decisions shown here are sourced from the trading bot's execution "
+    "history (trades database snapshot). This is historical decision-time "
+    "evidence, not a live order-control surface. An empty list means the "
+    "snapshot currently exposes no BUY decisions to this view; it does not "
+    "mean the platform has no decision history."
 )
 _NO_PRODUCER_DISCLOSURE_HTML = (
     '<div class="aara-disclosure-message">'

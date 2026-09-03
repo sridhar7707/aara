@@ -2013,26 +2013,28 @@ def test_scope_note_block_is_present_in_the_built_layout():
 
 
 def test_no_producer_disclosure_wording_communicates_the_three_points():
-    """Static, decision-independent note so "0 decisions" is not misread as
-    "the platform has recorded no decisions". Parallel to _SCOPE_NOTE_HTML /
-    _TIMESTAMP_DISCLOSURE_HTML -- wording only, no store/read-model change."""
+    """Static, decision-independent note. Wave 1: the deployed Decision
+    Center reads the trading bot's own execution history (the trades.db
+    snapshot), so this states that truthfully -- historical decision-time
+    evidence, not a live order-control surface, and not a Sentinel decision
+    producer. Wording only, no store/read-model change."""
     assert _NO_PRODUCER_DISCLOSURE_TITLE == "About this view"
-    # 1. reflects the governed decision read-model
-    assert "governed decision read-model" in _NO_PRODUCER_DISCLOSURE_BODY
-    # 2. no production decision producer is wired into this view
-    assert (
-        "No production decision producer is currently connected to this view"
-        in _NO_PRODUCER_DISCLOSURE_BODY
-    )
-    # 3. "0 decisions" is scoped to this view; not a claim about platform history
-    assert '"0 decisions"' in _NO_PRODUCER_DISCLOSURE_BODY
-    assert "no decisions are available through this view" in _NO_PRODUCER_DISCLOSURE_BODY
+    # 1. sourced from the trading bot's execution history / trades snapshot
+    assert "trading bot's execution history" in _NO_PRODUCER_DISCLOSURE_BODY
+    assert "trades database snapshot" in _NO_PRODUCER_DISCLOSURE_BODY
+    # 2. scope distinction: decision-time evidence, not live order control
+    assert "historical decision-time evidence" in _NO_PRODUCER_DISCLOSURE_BODY
+    assert "not a live order-control surface" in _NO_PRODUCER_DISCLOSURE_BODY
+    # 3. an empty list is scoped to this view; not a claim about platform history
+    assert "empty list means" in _NO_PRODUCER_DISCLOSURE_BODY
     assert (
         "does not mean the platform has no decision history"
         in _NO_PRODUCER_DISCLOSURE_BODY
     )
-    # no internal names / table names / ADR numbers exposed
+    # must not claim Sentinel produced these decisions
     lowered = _NO_PRODUCER_DISCLOSURE_BODY.lower()
+    assert "sentinel" not in lowered
+    # no internal names / table names / ADR numbers exposed
     for leaked in ("inmemory", "repository", "trust_ledger", "decision_events", "adr-", "adr "):
         assert leaked not in lowered
     assert _NO_PRODUCER_DISCLOSURE_HTML == (
@@ -2077,7 +2079,7 @@ def test_no_producer_disclosure_is_static_not_part_of_render_outputs():
         assert produced != _NO_PRODUCER_DISCLOSURE_HTML
         if isinstance(produced, str):
             assert _NO_PRODUCER_DISCLOSURE_TITLE not in produced
-            assert "No production decision producer" not in produced
+            assert "trading bot's execution history" not in produced
 
 
 def test_render_screen_return_shape_is_unchanged_by_the_disclosure():
