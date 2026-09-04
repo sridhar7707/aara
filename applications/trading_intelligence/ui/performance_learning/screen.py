@@ -23,10 +23,23 @@ from dataclasses import dataclass
 from typing import Optional, Tuple
 
 from applications.platform.integrations import IntegrationHealth
+from applications.trading_intelligence.contracts.candidate_decision_inspection_contract import (
+    CandidateDecisionInspection,
+    LedgerFunnelSummary,
+)
 
 OUTCOME_HISTORY_TITLE = "Outcome History"
 ATTRIBUTION_BREAKDOWN_TITLE = "Attribution Breakdown"
 MODEL_CONFIDENCE_CALIBRATION_TITLE = "Model Confidence Calibration"
+
+# Wave 3C (ADR-064): an additive section fed by the Wave 3A read-side
+# source + Wave 3B query service through the composition root. Decision-time
+# inspection only -- no outcome / P&L / trade linkage on this surface.
+DECISION_LEDGER_INSPECTION_TITLE = "Decision Ledger Inspection"
+_LEDGER_EMPTY_MESSAGE = "No decision ledger records available."
+_LEDGER_UNAVAILABLE_FALLBACK = (
+    "The decision ledger snapshot is not available in this environment."
+)
 
 _OUTCOME_HISTORY_EMPTY_MESSAGE = (
     "No BUY decisions are present in the current trades snapshot."
@@ -77,6 +90,21 @@ class PerformanceLearningScreen:
     outcome_rows: Tuple[OutcomeHistoryRow, ...] = ()
     outcome_health: Optional[IntegrationHealth] = None
     summary: Optional[str] = None
+    # Wave 3C (ADR-064): the composition root reads the published Trust
+    # Ledger snapshot through the Wave 3A source + Wave 3B query service and
+    # attaches the result here. `ledger_health` carries the
+    # CandidateDecisionQueryService ReadResult health (None only in a
+    # standalone no-provider build); `ledger_inspection` is the frozen
+    # grouped inspection (None on a non-HEALTHY read). Nothing outcome /
+    # P&L / trade-linked is carried -- decision-time inspection only.
+    ledger_health: Optional[IntegrationHealth] = None
+    ledger_inspection: Optional[CandidateDecisionInspection] = None
+    # Wave 3D (ADR-064, no scope expansion): the composition root also
+    # attaches the count-only funnel aggregation derived from the same
+    # inspection (`build_ledger_funnel_summary`). None on a non-HEALTHY
+    # read, or in a standalone build with no provider. Factual counts
+    # only -- no percentage, ratio, causal claim, outcome, or trade field.
+    ledger_funnel_summary: Optional[LedgerFunnelSummary] = None
 
     @property
     def sections(self) -> Tuple[PerformanceLearningSection, ...]:
@@ -108,6 +136,38 @@ class PerformanceLearningScreen:
         decisions (empty state). Attribution and Model Confidence
         Calibration are always unavailable and never make this False."""
         return (not self.outcome_history_available) or self.outcome_history_is_empty
+
+    # --- Wave 3C: Decision Ledger Inspection state (ADR-064 Section 2.11) ---
+
+    @property
+    def ledger_available(self) -> bool:
+        """True only when a HEALTHY Wave 3B inspection produced this screen.
+        The inspection may still be empty (HEALTHY, zero candidate rows)."""
+        return self.ledger_health is not None and self.ledger_health.is_healthy
+
+    @property
+    def ledger_is_empty(self) -> bool:
+        """True on a HEALTHY read that held no candidate rows."""
+        inspection = self.ledger_inspection
+        return inspection is None or inspection.is_empty
+
+    @property
+    def ledger_empty_message(self) -> str:
+        return _LEDGER_EMPTY_MESSAGE
+
+    @property
+    def ledger_unavailable_fallback(self) -> str:
+        return _LEDGER_UNAVAILABLE_FALLBACK
+
+    @property
+    def ledger_funnel_available(self) -> bool:
+        """True when a factual funnel summary can be shown: a HEALTHY,
+        non-empty inspection with its derived summary attached."""
+        return (
+            self.ledger_available
+            and not self.ledger_is_empty
+            and self.ledger_funnel_summary is not None
+        )
 
     @property
     def empty_state_message(self) -> str:

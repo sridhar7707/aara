@@ -127,6 +127,12 @@ from applications.trading_intelligence.adapters.trades_db_outcome_source import 
     TradesDbOutcomeReader,
 )
 from applications.trading_intelligence.adapters.trades_db_snapshot import fetch_trades_db_snapshot
+from applications.trading_intelligence.adapters.trust_ledger_inspection_source import (
+    TrustLedgerInspectionReader,
+)
+from applications.trading_intelligence.adapters.trust_ledger_snapshot import (
+    fetch_trust_ledger_db_snapshot,
+)
 from applications.trading_intelligence.bootstrap_trades_db_snapshot import (
     legacy_source_kwargs,
     snapshot_bound_provider,
@@ -150,6 +156,10 @@ from applications.trading_intelligence.contracts.decision_outcome_contract impor
 )
 from applications.trading_intelligence.services.decision_outcome_query_service import (
     DecisionOutcomeQueryService,
+)
+from applications.trading_intelligence.services.candidate_decision_query_service import (
+    CandidateDecisionQueryService,
+    build_ledger_funnel_summary,
 )
 from applications.trading_intelligence.services.decision_query_service import DecisionQueryService
 from applications.trading_intelligence.ui.design_system import DESIGN_SYSTEM_CSS
@@ -1232,7 +1242,9 @@ def _outcome_history_summary(lineage: OutcomeLineage) -> str:
     return summary
 
 
-def _build_performance_learning_screen(db_path: Optional[str] = None) -> PerformanceLearningScreen:
+def _build_performance_learning_screen(
+    db_path: Optional[str] = None, ledger_db_path: Optional[str] = None
+) -> PerformanceLearningScreen:
     """Assemble the Performance & Learning screen's Outcome History area
     from the verified Wave 2A trades-only decision-outcome lineage
     (`DecisionOutcomeQueryService` over the ADR-055 trades.db snapshot).
@@ -1256,25 +1268,57 @@ def _build_performance_learning_screen(db_path: Optional[str] = None) -> Perform
     reader = TradesDbOutcomeReader(**legacy_source_kwargs(db_path))
     result = DecisionOutcomeQueryService(reader).get_lineage()
     if result.value is None:
-        return replace(shell, outcome_health=result.health)
-    lineage = result.value
+        screen = replace(shell, outcome_health=result.health)
+    else:
+        lineage = result.value
+        screen = replace(
+            shell,
+            outcome_rows=tuple(_outcome_history_row(o) for o in lineage.decisions),
+            outcome_health=result.health,
+            summary=_outcome_history_summary(lineage),
+        )
+
+    # Wave 3C (ADR-064): attach the Decision Ledger Inspection result --
+    # published trust_ledger.db snapshot -> Wave 3A read-only source ->
+    # Wave 3B query service. `ledger_db_path` is the runtime Trust Ledger
+    # snapshot path (or None -- local dev / CI / a Space where the fetch
+    # failed, in which case the reader's own default path is absent and the
+    # read fails closed to UNAVAILABLE). No trades.db / outcome linkage.
+    ledger_reader = TrustLedgerInspectionReader(
+        **({"db_path": ledger_db_path} if ledger_db_path else {})
+    )
+    ledger_result = CandidateDecisionQueryService().inspect(
+        ledger_reader.read_inspection()
+    )
+    # Wave 3D: derive the count-only funnel summary from the same
+    # already-materialized inspection -- no extra read, no new source.
+    ledger_funnel_summary = (
+        build_ledger_funnel_summary(ledger_result.value)
+        if ledger_result.value is not None
+        else None
+    )
     return replace(
-        shell,
-        outcome_rows=tuple(_outcome_history_row(o) for o in lineage.decisions),
-        outcome_health=result.health,
-        summary=_outcome_history_summary(lineage),
+        screen,
+        ledger_health=ledger_result.health,
+        ledger_inspection=ledger_result.value,
+        ledger_funnel_summary=ledger_funnel_summary,
     )
 
 
-def _build_performance_learning_ui(db_path: Optional[str] = None) -> PerformanceLearningUI:
-    """Wire Performance & Learning's Outcome History to the Wave 2A
-    decision-outcome lineage, from the runtime `db_path` snapshot when one
-    was fetched (see `snapshot_bound_provider`). This slice renders once at
-    build time -- no Refresh button, no `demo.load()` -- so the provider is
-    invoked a single time by `PerformanceLearningUI.__init__`."""
-    return PerformanceLearningUI(
-        screen_provider=snapshot_bound_provider(_build_performance_learning_screen, db_path),
-    )
+def _build_performance_learning_ui(
+    db_path: Optional[str] = None, ledger_db_path: Optional[str] = None
+) -> PerformanceLearningUI:
+    """Wire Performance & Learning's Outcome History (Wave 2A lineage) and
+    its Decision Ledger Inspection section (Wave 3A source + Wave 3B query
+    service over the published Trust Ledger snapshot), both from the runtime
+    snapshot paths. This screen renders once at build time -- no Refresh
+    button, no `demo.load()` -- so the provider is invoked a single time by
+    `PerformanceLearningUI.__init__`."""
+
+    def _provider() -> PerformanceLearningScreen:
+        return _build_performance_learning_screen(db_path, ledger_db_path=ledger_db_path)
+
+    return PerformanceLearningUI(screen_provider=_provider)
 
 
 def build_trading_intelligence_app() -> gr.Blocks:
@@ -1317,11 +1361,20 @@ def build_trading_intelligence_app() -> gr.Blocks:
     # this composed app renders).
     snapshot_db_path = fetch_trades_db_snapshot().value
 
+    # ADR-064 Section 2.1: obtain a read-only, ephemeral local snapshot of
+    # the bot's already-published `trust_ledger.db` dataset once per
+    # process (Space runtime only; fail-closed). `None` -- no HF_TOKEN, not
+    # in a Space, network / 404 / malformed file -- leaves the Decision
+    # Ledger Inspection section on its honest UNAVAILABLE state.
+    ledger_snapshot_path = fetch_trust_ledger_db_snapshot().value
+
     morning_brief_blocks = _build_morning_brief_ui(snapshot_db_path).build()
     decision_blocks = build_application_from_trades_snapshot(snapshot_db_path).build()
     portfolio_blocks = _build_portfolio_intelligence_ui(snapshot_db_path).build()
     risk_blocks = _build_risk_intelligence_ui(snapshot_db_path).build()
-    performance_learning_blocks = _build_performance_learning_ui(snapshot_db_path).build()
+    performance_learning_blocks = _build_performance_learning_ui(
+        snapshot_db_path, ledger_db_path=ledger_snapshot_path
+    ).build()
     settings_blocks = SettingsUI().build()
 
     merged_css = "\n".join(

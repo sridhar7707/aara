@@ -33,3 +33,14 @@ def neutralize_trades_db_snapshot(monkeypatch):
             IntegrationHealth.not_configured("hf_trades_db_snapshot")
         ),
     )
+    # Wave 3C: same defence for the ADR-064 Trust Ledger snapshot fetch
+    # (already SPACE_ID-gated + fail-closed, but pinned here so a stray
+    # SPACE_ID in some environment can never trigger a real download).
+    # Tests that exercise the fetch itself monkeypatch it back.
+    monkeypatch.setattr(
+        bootstrap,
+        "fetch_trust_ledger_db_snapshot",
+        lambda: ReadResult.failed(
+            IntegrationHealth.not_configured("hf_trust_ledger_db_snapshot")
+        ),
+    )
