@@ -28,9 +28,11 @@ from bot.strategy.sentiment import get_cached_headlines
 from bot.trust_ledger.ids import new_decision_id
 from sentinel_engine.adapters.evidence_adapter import to_evidence_records
 from sentinel_engine.adapters.governance_adapter import to_policy_id
+from sentinel_engine.adapters.recommendation_adapter import recommend_entry_action
 from sentinel_engine.composition.decision_lifecycle import get_decision_service
 from sentinel_engine.composition.evidence import get_evidence_service
 from sentinel_engine.composition.governance import get_governance_service
+from sentinel_engine.domain.action_source import ActionSource
 from sentinel_engine.domain.decision import Decision
 
 
@@ -159,11 +161,29 @@ class EntryDecisionRecorder:
         # write_decision_event() falls back to its own new_decision_id(asset)
         # exactly as before.
         self.decision_id = new_decision_id(self.symbol)
+        # ADR-069 (B2): Sentinel forms its own recommendation from the three
+        # existing MODEL_OUTPUT signals -- three-model unanimity (SS5.3), the
+        # sole authorized rule -- and authors Decision.action ("BUY" concur /
+        # "WAIT" abstain, both action_source="SENTINEL"). Failure-isolated in
+        # the same ADR-067 SS9 spirit: if the recommendation cannot be formed,
+        # fall back to the upstream strategy's own BUY candidate with explicit
+        # "STRATEGY" provenance (SS8.4). The recommendation is fully determined
+        # before create_decision(); B2 is non-gating and never touches the gate
+        # sequence, risk.approve_buy(), client.buy(), or the Trust Ledger write.
+        try:
+            _b2_action, _b2_source = recommend_entry_action(self.model_outputs)
+        except Exception as e:
+            logger.warning(
+                f"sentinel B2 recommendation failed for {self.symbol}, "
+                f"using upstream strategy provenance: {e}"
+            )
+            _b2_action, _b2_source = "BUY", ActionSource.STRATEGY.value
         try:
             get_decision_service().create_decision(Decision(
                 decision_id=self.decision_id,
                 symbol=self.symbol,
-                action="BUY",  # ADR-066 DecisionAction.BUY -- the entry candidate
+                action=_b2_action,          # ADR-069 B2: Sentinel-selected {BUY, WAIT}
+                action_source=_b2_source,   # "SENTINEL", or (fallback) "STRATEGY"
                 timestamp=datetime.now(timezone.utc),
                 confidence=self.final_confidence,
                 evidence_reference=self.candidate_event_id or "pending",

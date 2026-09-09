@@ -129,6 +129,22 @@ def test_create_decision_preserves_batch_2_optional_fields_in_event_payload():
     assert payload["counterfactual"] == "Yes."
 
 
+def test_create_decision_carries_action_source_into_the_event_payload():
+    """ADR-069: provenance is observable in the causal lifecycle via the
+    DECISION_CREATED payload passthrough (same treatment ADR-066 gave the
+    optional fields). The DecisionProjection is intentionally unchanged."""
+    service, ledger_repository, _ = _make_service()
+
+    service.create_decision(_make_decision(decision_id="dec-sentinel", action_source="SENTINEL"))
+    service.create_decision(_make_decision(decision_id="dec-strategy", action_source="STRATEGY"))
+    service.create_decision(_make_decision(decision_id="dec-legacy"))  # no action_source
+
+    by_id = {e.payload["decision_id"]: e.payload for e in ledger_repository.get_events()}
+    assert by_id["dec-sentinel"]["action_source"] == "SENTINEL"
+    assert by_id["dec-strategy"]["action_source"] == "STRATEGY"
+    assert by_id["dec-legacy"]["action_source"] is None
+
+
 def test_wait_decision_produces_an_ordinary_decision_created_event():
     """WAIT is a recommendation/decision outcome, never an execution order
     -- DecisionService depends only on LedgerRepository/ProjectionRepository

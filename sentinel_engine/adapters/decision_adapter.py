@@ -12,9 +12,15 @@ Decision itself stays a trusting domain object, matching every other field
 here. The six new optional Decision fields are validated only when present
 in the input, and are otherwise omitted so Decision falls back to its own
 defaults -- this adapter never invents a value for them.
+
+ADR-069 (B2): `action_source`, when present, is validated against the fixed
+ActionSource vocabulary ("STRATEGY" / "SENTINEL"), the same boundary
+treatment `action` gets. Absent or None -> omitted, so Decision keeps its
+own `None` default (legacy / unknown provenance).
 """
 from datetime import datetime
 
+from sentinel_engine.domain.action_source import ActionSource
 from sentinel_engine.domain.decision import Decision
 from sentinel_engine.domain.decision_action import DecisionAction
 
@@ -78,6 +84,15 @@ def to_decision(data: dict) -> Decision:
             if not isinstance(value, (int, float)) or isinstance(value, bool):
                 raise ValueError(f"{field} must be numeric when provided")
             optional_kwargs[field] = float(value)
+
+    if data.get("action_source") is not None:
+        action_source = data["action_source"]
+        if not isinstance(action_source, str) or not ActionSource.has_value(action_source):
+            allowed = ", ".join(member.value for member in ActionSource)
+            raise ValueError(
+                f"action_source must be one of ({allowed}) when provided, got {action_source!r}"
+            )
+        optional_kwargs["action_source"] = action_source
 
     return Decision(
         decision_id=decision_id,

@@ -4,6 +4,7 @@ import dataclasses
 
 import pytest
 
+from sentinel_engine.domain.action_source import ActionSource
 from sentinel_engine.domain.decision import Decision
 from sentinel_engine.domain.decision_action import DecisionAction
 
@@ -49,8 +50,8 @@ def test_decision_requires_all_fields():
 
 
 def test_decision_optional_fields_default_to_none():
-    """Batch 2 additive fields must not break existing callers that
-    construct a Decision without them."""
+    """Batch 2 + ADR-069 additive fields must not break existing callers that
+    construct a Decision without them (legacy / unknown provenance)."""
     decision = _make_decision()
     assert decision.horizon is None
     assert decision.desired_allocation is None
@@ -58,6 +59,33 @@ def test_decision_optional_fields_default_to_none():
     assert decision.uncertainty is None
     assert decision.thesis is None
     assert decision.counterfactual is None
+    assert decision.action_source is None
+
+
+@pytest.mark.parametrize("source", [ActionSource.STRATEGY.value, ActionSource.SENTINEL.value])
+def test_decision_accepts_action_source_when_provided(source):
+    decision = _make_decision(action_source=source)
+    assert decision.action_source == source
+
+
+def test_decision_action_source_is_immutable():
+    decision = _make_decision(action_source=ActionSource.SENTINEL.value)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        decision.action_source = ActionSource.STRATEGY.value
+
+
+def test_legacy_decision_construction_without_action_source_still_valid():
+    # no action_source kwarg -- exactly how every pre-ADR-069 caller builds one
+    decision = Decision(
+        decision_id="dec-legacy",
+        symbol="AAPL",
+        action="BUY",
+        timestamp=datetime.datetime(2026, 8, 4, 12, 0, 0),
+        confidence=0.5,
+        evidence_reference="e",
+        risk_reference="r",
+    )
+    assert decision.action_source is None
 
 
 def test_decision_preserves_all_batch_2_fields_when_provided():

@@ -7,6 +7,7 @@ import pytest
 
 from sentinel_engine.adapters import decision_adapter
 from sentinel_engine.adapters.decision_adapter import to_decision
+from sentinel_engine.domain.action_source import ActionSource
 from sentinel_engine.domain.decision import Decision
 from sentinel_engine.domain.decision_action import DecisionAction
 
@@ -126,6 +127,26 @@ def test_to_decision_optional_fields_default_to_none_when_absent():
     assert result.uncertainty is None
     assert result.thesis is None
     assert result.counterfactual is None
+    assert result.action_source is None
+
+
+@pytest.mark.parametrize("source", [ActionSource.STRATEGY.value, ActionSource.SENTINEL.value])
+def test_to_decision_accepts_valid_action_source(source):
+    result = to_decision(_valid_input(action_source=source))
+
+    assert result.action_source == source
+
+
+@pytest.mark.parametrize("bad_source", ["sentinel", "SENTINEL_CONCUR", "NONE", "", "REJECT", 1])
+def test_to_decision_rejects_action_source_outside_the_vocabulary(bad_source):
+    with pytest.raises(ValueError):
+        to_decision(_valid_input(action_source=bad_source))
+
+
+def test_to_decision_omits_action_source_when_none_so_domain_default_applies():
+    result = to_decision(_valid_input(action_source=None))
+
+    assert result.action_source is None
 
 
 @pytest.mark.parametrize("field", ["horizon", "thesis", "counterfactual"])

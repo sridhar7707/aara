@@ -1,14 +1,19 @@
-"""ADR-067: the pre-gate causal Sentinel Decision lifecycle wired into
-bot/_main_trust_decisions.py.
+"""ADR-067 + ADR-069: the pre-gate causal Sentinel Decision lifecycle wired
+into bot/_main_trust_decisions.py, and the ADR-069 (B2) recommendation the
+pre-gate Decision is now born with.
 
 Proves: a stable decision_id is generated in EntryDecisionRecorder.__init__()
-before any entry gate; one Sentinel Decision(action="BUY") is created pre-gate
-on the shared composition pair; the SAME decision_id reaches the Trust Ledger
-decision_events row, evidence association, and governance evaluation; a Sentinel
-failure never propagates into the trading path; absence falls back to
-write_decision_event()'s own new_decision_id(); RiskManager / PaperExecutor /
-bot/main.py / EntryContext / _handle_entry()'s gate sequence are untouched;
-and no production record_approval() / register_policy() call is introduced.
+before any entry gate; one Sentinel Decision is created pre-gate on the shared
+composition pair, with action / action_source authored by the ADR-069 B2
+three-model unanimity rule (SS5.3) -- "BUY"/"SENTINEL" when xgboost, lstm and
+finbert all signal BUY, otherwise "WAIT"/"SENTINEL"; a B2-recommendation
+failure falls back to "BUY"/"STRATEGY" (SS8.4) without touching the trading
+path; the SAME decision_id reaches the Trust Ledger decision_events row,
+evidence association, and governance evaluation; a Sentinel failure never
+propagates into the trading path; absence falls back to write_decision_event()'s
+own new_decision_id(); RiskManager / PaperExecutor / bot/main.py / EntryContext
+/ _handle_entry()'s gate sequence are untouched; and no production
+record_approval() / register_policy() call is introduced.
 """
 from __future__ import annotations
 
@@ -26,10 +31,12 @@ import ledger.ledger as ledger_svc  # noqa: E402
 import bot.trust_ledger.candidates as candidates  # noqa: E402
 import bot._main_trust_decisions as mtd  # noqa: E402
 from bot._main_trust_decisions import EntryDecisionRecorder, record_decision_safe  # noqa: E402
+from sentinel_engine.adapters.recommendation_adapter import recommend_entry_action  # noqa: E402
 from sentinel_engine.composition.decision_lifecycle import (  # noqa: E402
     get_decision_service,
     _ledger_repository as _lifecycle_ledger,
 )
+from sentinel_engine.domain.action_source import ActionSource  # noqa: E402
 from sentinel_engine.domain.decision_state import DecisionState  # noqa: E402
 from sentinel_engine.events.event_types import EventType  # noqa: E402
 
@@ -78,13 +85,24 @@ def chain(ledger_conn):
     return {"manifest_id": "mani_v1", "candidate_event_id": row["candidate_event_id"]}
 
 
-def _make_recorder(candidate_event_id="cand-x", manifest_id="mani_v1", symbol="AAPL", trust_conn=None):
+def _make_recorder(candidate_event_id="cand-x", manifest_id="mani_v1", symbol="AAPL", trust_conn=None,
+                   xgb_prob=0.7, lstm_prob=0.6, sentiment=0.1):
+    # defaults: xgb 0.7 -> BUY, lstm 0.6 -> BUY, sentiment 0.1 -> BUY  => unanimous
     return EntryDecisionRecorder(
         trust_conn, candidate_event_id, manifest_id, symbol,
-        xgb_prob=0.7, lstm_prob=0.6, sentiment=0.1, macro_score=0.5,
+        xgb_prob=xgb_prob, lstm_prob=lstm_prob, sentiment=sentiment, macro_score=0.5,
         regime_name="TRENDING_UP", portfolio_value=10000.0, available_cash=5000.0,
         price_data_timestamp="2026-09-08T13:00:00Z",
     )
+
+
+def _created_payload(decision_id):
+    """The DECISION_CREATED event payload for this decision_id on the shared
+    causal-lifecycle ledger (ADR-069 provenance rides here -- SS8.4)."""
+    for e in _lifecycle_ledger.get_events():
+        if e.event_type == EventType.DECISION_CREATED and e.payload.get("decision_id") == decision_id:
+            return e.payload
+    return None
 
 
 # -- 1-4: decision_id genesis + pre-gate Decision(action="BUY") ------------
@@ -103,11 +121,150 @@ def test_recorder_decision_id_is_stable_for_the_life_of_the_instance():
 
 
 def test_construction_seeds_one_sentinel_decision_with_action_buy():
+    # ADR-069: default recorder inputs are unanimous BUY, so the B2 rule
+    # concurs -- action stays "BUY", now authored by Sentinel.
     rec = _make_recorder()
     proj = get_decision_service().get_projection(rec.decision_id)
     assert proj is not None
     assert proj.action == "BUY"
     assert proj.status == DecisionState.DECISION_CREATED
+    payload = _created_payload(rec.decision_id)
+    assert payload is not None
+    assert payload["action"] == "BUY"
+    assert payload["action_source"] == ActionSource.SENTINEL.value
+
+
+# -- ADR-069 (B2): the pre-gate Decision is now a Sentinel recommendation ----
+
+def test_b2_unanimous_buy_signals_concur_buy_sentinel():
+    rec = _make_recorder(xgb_prob=0.7, lstm_prob=0.6, sentiment=0.2)  # all BUY
+    payload = _created_payload(rec.decision_id)
+    assert (payload["action"], payload["action_source"]) == ("BUY", "SENTINEL")
+    assert get_decision_service().get_projection(rec.decision_id).action == "BUY"
+
+
+@pytest.mark.parametrize("xgb,lstm,sent", [
+    (0.4, 0.6, 0.1),    # xgboost SELL
+    (0.7, 0.4, 0.1),    # lstm SELL
+    (0.7, 0.6, -0.1),   # finbert SELL
+    (0.5, 0.6, 0.1),    # xgboost HOLD (prob == 0.5)
+    (0.7, 0.6, 0.0),    # finbert HOLD (score == 0.0)
+])
+def test_b2_any_non_buy_signal_abstains_wait_sentinel(xgb, lstm, sent):
+    rec = _make_recorder(xgb_prob=xgb, lstm_prob=lstm, sentiment=sent)
+    payload = _created_payload(rec.decision_id)
+    assert (payload["action"], payload["action_source"]) == ("WAIT", "SENTINEL")
+    # the projection reflects the same authored action; WAIT is an inert label
+    assert get_decision_service().get_projection(rec.decision_id).action == "WAIT"
+
+
+def test_b2_recommendation_matches_the_pure_rule_over_this_recorders_model_outputs():
+    rec = _make_recorder(xgb_prob=0.7, lstm_prob=0.4, sentiment=0.1)
+    expected = recommend_entry_action(rec.model_outputs)  # ("WAIT", "SENTINEL")
+    payload = _created_payload(rec.decision_id)
+    assert (payload["action"], payload["action_source"]) == expected
+
+
+def test_b2_recommendation_failure_falls_back_to_buy_strategy_without_touching_the_trade(monkeypatch):
+    def _boom(*_a, **_k):
+        raise RuntimeError("b2 down")
+
+    monkeypatch.setattr(mtd, "recommend_entry_action", _boom)
+    rec = _make_recorder()  # must not raise
+    assert isinstance(rec.decision_id, str) and rec.decision_id.startswith("DEC-")
+    payload = _created_payload(rec.decision_id)
+    assert (payload["action"], payload["action_source"]) == ("BUY", ActionSource.STRATEGY.value)
+
+
+def test_b2_never_authors_sell_buy_more_or_hold_for_any_recorder_input():
+    seen = set()
+    for xgb in (0.2, 0.5, 0.8):
+        for lstm in (0.2, 0.5, 0.8):
+            for sent in (-0.3, 0.0, 0.3):
+                rec = _make_recorder(symbol="AAPL", xgb_prob=xgb, lstm_prob=lstm, sentiment=sent)
+                seen.add(_created_payload(rec.decision_id)["action"])
+    assert seen <= {"BUY", "WAIT"}
+
+
+def test_b2_recommendation_is_determined_before_create_decision(monkeypatch):
+    """The Decision must be born with the final recommendation -- create_decision()
+    receives the already-decided action, never a placeholder later corrected."""
+    captured = {}
+
+    class _Capturing:
+        def create_decision(self, decision):
+            captured["action"] = decision.action
+            captured["action_source"] = decision.action_source
+            return None
+
+    monkeypatch.setattr(mtd, "get_decision_service", lambda: _Capturing())
+    _make_recorder(xgb_prob=0.7, lstm_prob=0.4, sentiment=0.1)  # -> WAIT
+    assert captured == {"action": "WAIT", "action_source": "SENTINEL"}
+
+
+def test_b2_preserves_one_decision_identity_no_second_create_decision(ledger_conn, chain):
+    rec = _make_recorder(
+        candidate_event_id=chain["candidate_event_id"],
+        manifest_id=chain["manifest_id"],
+        trust_conn=ledger_conn,
+        xgb_prob=0.7, lstm_prob=0.4, sentiment=0.1,   # -> WAIT/SENTINEL
+    )
+    did = rec.decision_id
+    created = [
+        e for e in _lifecycle_ledger.get_events()
+        if e.event_type == EventType.DECISION_CREATED and e.payload.get("decision_id") == did
+    ]
+    assert len(created) == 1
+    record_decision_safe(
+        ledger_conn, chain["candidate_event_id"], chain["manifest_id"],
+        "AAPL", "REJECT", "QUALIFIED_REJECTION",
+        rec.portfolio_snapshot, rec.market_context, rec.model_outputs,
+        {"gate_trace": []}, rec.final_confidence,
+        mtd.decisions.build_intent("REJECT"), rec.data_completeness,
+        decision_id=did,
+    )
+    # same single identity flows on -- evidence + governance keyed off it, no new Decision
+    still_one = [
+        e for e in _lifecycle_ledger.get_events()
+        if e.event_type == EventType.DECISION_CREATED and e.payload.get("decision_id") == did
+    ]
+    assert len(still_one) == 1
+    ledger_row_id = ledger_conn.execute(
+        "SELECT decision_id FROM decision_events WHERE asset='AAPL' ORDER BY sequence_number DESC LIMIT 1"
+    ).fetchone()[0]
+    assert ledger_row_id == did
+
+
+def test_b2_recommendation_adapter_is_only_wired_into_entry_decision_recorder_init():
+    """ADR-069 SS13.2: the sole authorized bot-side production change is
+    EntryDecisionRecorder.__init__(). recommend_entry_action must be imported
+    into exactly one bot module and called from exactly one place."""
+    import ast
+    bot_root = _REPO_ROOT / "bot"
+    importing = []
+    for path in bot_root.rglob("*.py"):
+        if path.name.startswith("test_") or "/tests/" in path.as_posix():
+            continue
+        src = path.read_text(encoding="utf-8")
+        if "recommend_entry_action" in src:
+            importing.append(path.relative_to(_REPO_ROOT).as_posix())
+    assert importing == ["bot/_main_trust_decisions.py"]
+
+    src = (bot_root / "_main_trust_decisions.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    calls = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "recommend_entry_action"
+    ]
+    assert len(calls) == 1
+    # and that call is inside EntryDecisionRecorder.__init__
+    for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef) and n.name == "EntryDecisionRecorder"):
+        init = next(f for f in cls.body if isinstance(f, ast.FunctionDef) and f.name == "__init__")
+        init_calls = [
+            n for n in ast.walk(init)
+            if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "recommend_entry_action"
+        ]
+        assert len(init_calls) == 1
 
 
 def test_two_recorders_seed_two_distinct_decision_ids():

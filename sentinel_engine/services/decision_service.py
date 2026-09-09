@@ -43,6 +43,7 @@ class DecisionService:
                 "uncertainty": decision.uncertainty,
                 "thesis": decision.thesis,
                 "counterfactual": decision.counterfactual,
+                "action_source": decision.action_source,
             },
         )
         self._ledger_repository.save_event(event)

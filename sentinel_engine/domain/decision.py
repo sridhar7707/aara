@@ -14,6 +14,14 @@ vocabularies are actually enforced, at the system boundary.
 representation -- no bounds enforcement or distributional model is
 introduced here; see the P0 contract Section 12/15 for why that stays
 deferred.
+
+`action_source` is additive per ADR-069 (B2): it records whether `action`
+was authored by the upstream strategy ("STRATEGY"), by Sentinel's B2
+recommendation rule ("SENTINEL"), or is unspecified (None -- legacy /
+unknown, never rewritten). Plain str here, matching the no-validation-in-
+the-domain-object convention; the vocabulary lives in
+sentinel_engine.domain.action_source.ActionSource and is enforced at the
+adapter boundary.
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -35,3 +43,4 @@ class Decision:
     uncertainty: Optional[float] = None
     thesis: Optional[str] = None
     counterfactual: Optional[str] = None
+    action_source: Optional[str] = None
