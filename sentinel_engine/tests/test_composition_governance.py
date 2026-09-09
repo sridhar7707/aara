@@ -151,14 +151,19 @@ def test_governance_service_from_accessor_evaluate_policy_writes_to_dedicated_le
     assert after[-1].event_type == EventType.GOVERNANCE_EVALUATED
 
 
-# -- Independence from the Evidence composition boundary (ADR-014 SS8) ------
+# -- Shared repository pair since ADR-067 SS3.C / SS12 ---------------------
+# ADR-067 SS12 narrowly supersedes ADR-014 SS8 / ADR-013 SS7 / ADR-045 SS2.1's
+# dedicated-instance language for the causal-lifecycle pair only: governance and
+# evidence now share ONE LedgerRepository/ProjectionRepository so a single
+# DecisionProjection can walk DECISION_CREATED -> ... -> DECISION_EXECUTED.
+# The service *instances* remain distinct (GovernanceService vs EvidenceService).
 
-def test_governance_composition_does_not_reuse_evidence_composition_repositories():
-    assert governance._ledger_repository is not evidence_composition._ledger_repository
-    assert governance._projection_repository is not evidence_composition._projection_repository
+def test_governance_composition_shares_the_lifecycle_repository_pair():
+    assert governance._ledger_repository is evidence_composition._ledger_repository
+    assert governance._projection_repository is evidence_composition._projection_repository
 
 
-def test_governance_composition_does_not_reuse_evidence_service_instance():
+def test_governance_service_instance_is_still_distinct_from_the_evidence_service():
     assert get_governance_service() is not evidence_composition.get_evidence_service()
 
 

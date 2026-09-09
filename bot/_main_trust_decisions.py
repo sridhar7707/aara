@@ -25,10 +25,13 @@ from bot.risk.risk_manager import RiskManager
 from bot.strategy.ensemble import ensemble_confidence
 from bot.strategy.model_output_adapter import build_model_outputs
 from bot.strategy.sentiment import get_cached_headlines
+from bot.trust_ledger.ids import new_decision_id
 from sentinel_engine.adapters.evidence_adapter import to_evidence_records
 from sentinel_engine.adapters.governance_adapter import to_policy_id
+from sentinel_engine.composition.decision_lifecycle import get_decision_service
 from sentinel_engine.composition.evidence import get_evidence_service
 from sentinel_engine.composition.governance import get_governance_service
+from sentinel_engine.domain.decision import Decision
 
 
 @dataclass
@@ -59,6 +62,7 @@ def record_decision_safe(
     portfolio_snapshot: dict, market_context: dict, model_outputs: dict,
     risk_checks: dict, final_confidence: float, intent: dict, data_completeness: dict,
     risk: RiskManager | None = None,
+    decision_id: str | None = None,
 ) -> None:
     if candidate_event_id is None or deployment_manifest_id is None:
         logger.warning(
@@ -80,6 +84,7 @@ def record_decision_safe(
             trust_conn, candidate_event_id, asset, action, event_type,
             portfolio_snapshot, market_context, model_outputs, risk_checks,
             final_confidence, deployment_manifest_id, intent, data_completeness,
+            decision_id=decision_id,
         )
         try:
             constitution.check_and_log(trust_conn, decision_row, risk)
@@ -138,6 +143,37 @@ class EntryDecisionRecorder:
         self.portfolio_snapshot = {"portfolio_value": portfolio_value, "available_cash": available_cash}
         self.data_completeness = decisions.build_data_completeness(lstm_is_degraded=lstm_is_degraded)
 
+        # ADR-067 SS3.A: pre-gate causal Sentinel Decision. The decision_id is
+        # generated here -- before any entry gate runs -- by reusing
+        # new_decision_id() verbatim, and is threaded unchanged through the
+        # Trust Ledger decision write, evidence association, governance
+        # evaluation, and execution-outcome reporting, so one DecisionProjection
+        # walks the whole lifecycle. One identity space; no second identifier;
+        # candidate_event_id keeps its own distinct meaning.
+        #
+        # Causally ordered, NOT causally gating: this block is failure-isolated
+        # (ADR-067 SS9) -- a failure logs a warning and never blocks, delays,
+        # retries, or alters the gate sequence, risk.approve_buy(), client.buy(),
+        # or the Trust Ledger write. self.decision_id is retained regardless of
+        # whether create_decision() succeeds; if the whole block is skipped,
+        # write_decision_event() falls back to its own new_decision_id(asset)
+        # exactly as before.
+        self.decision_id = new_decision_id(self.symbol)
+        try:
+            get_decision_service().create_decision(Decision(
+                decision_id=self.decision_id,
+                symbol=self.symbol,
+                action="BUY",  # ADR-066 DecisionAction.BUY -- the entry candidate
+                timestamp=datetime.now(timezone.utc),
+                confidence=self.final_confidence,
+                evidence_reference=self.candidate_event_id or "pending",
+                risk_reference="pending",  # risk evaluation runs later, at Gate 8f
+            ))
+        except Exception as e:
+            logger.warning(
+                f"sentinel causal decision creation failed for {self.symbol}: {e}"
+            )
+
     def reject(self, gate_name: str, detail: str) -> None:
         """Called at every gate's early-return point -- including gates the
         symbol passed on the way to a later failure, via the trace already
@@ -150,6 +186,7 @@ class EntryDecisionRecorder:
             self.portfolio_snapshot, self.market_context, self.model_outputs,
             {"gate_trace": self.trace}, self.final_confidence,
             decisions.build_intent("REJECT"), self.data_completeness, risk=self.risk,
+            decision_id=self.decision_id,
         )
 
     def record_executed(
@@ -195,6 +232,7 @@ class EntryDecisionRecorder:
              "fill_shares": fill_shares},
             self.final_confidence, intent,
             self.data_completeness, risk=self.risk,
+            decision_id=self.decision_id,
         )
 
     def record_order_not_filled(self, reason: str) -> None:
@@ -208,6 +246,7 @@ class EntryDecisionRecorder:
             self.portfolio_snapshot, self.market_context, self.model_outputs,
             {"gate_trace": self.trace}, self.final_confidence,
             decisions.build_intent("REJECT"), self.data_completeness, risk=self.risk,
+            decision_id=self.decision_id,
         )
 
 

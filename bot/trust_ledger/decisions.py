@@ -135,9 +135,14 @@ def write_decision_event(
     intent: dict,
     data_completeness: dict,
     timestamp: str | None = None,
+    decision_id: str | None = None,
 ) -> dict:
+    # ADR-067 SS3.B: use the caller-supplied causal decision_id when present
+    # (the pre-gate id generated in EntryDecisionRecorder.__init__). Every
+    # existing caller passes nothing and keeps the original generation path,
+    # byte-for-byte unchanged.
     return ledger_svc.append_ledger_row(conn, "decision_events", {
-        "decision_id": new_decision_id(asset),
+        "decision_id": decision_id or new_decision_id(asset),
         "candidate_event_id": candidate_event_id,
         "timestamp": timestamp or _utc_now(),
         "asset": asset,

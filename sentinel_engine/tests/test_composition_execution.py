@@ -115,13 +115,19 @@ def test_record_execution_from_accessor_writes_to_dedicated_ledger():
     assert after[-1].event_type == EventType.DECISION_EXECUTED
 
 
-# -- Independence from the Evidence/Governance composition boundaries -------
+# -- Shared repository pair since ADR-067 SS3.C / SS12 ---------------------
+# ADR-067 SS12 narrowly supersedes the dedicated-instance language of
+# ADR-013 SS7 / ADR-014 SS8 / ADR-045 SS2.1 for the causal-lifecycle pair only:
+# execution-outcome reporting now lands on the SAME
+# LedgerRepository/ProjectionRepository the causal lifecycle created and
+# advanced, so record_execution() advances the real DecisionProjection instead
+# of no-opping against a never-seeded one.
 
-def test_execution_composition_does_not_reuse_other_compositions_repositories():
-    assert execution._ledger_repository is not evidence_composition._ledger_repository
-    assert execution._ledger_repository is not governance_composition._ledger_repository
-    assert execution._projection_repository is not evidence_composition._projection_repository
-    assert execution._projection_repository is not governance_composition._projection_repository
+def test_execution_composition_shares_the_lifecycle_repository_pair():
+    assert execution._ledger_repository is evidence_composition._ledger_repository
+    assert execution._ledger_repository is governance_composition._ledger_repository
+    assert execution._projection_repository is evidence_composition._projection_repository
+    assert execution._projection_repository is governance_composition._projection_repository
 
 
 def test_execution_composition_module_does_not_import_other_compositions():

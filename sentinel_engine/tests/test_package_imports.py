@@ -58,6 +58,7 @@ _MODULES = [
     "sentinel_engine.adapters.decision_adapter",
     "sentinel_engine.adapters.execution_adapter",
     "sentinel_engine.composition",
+    "sentinel_engine.composition.decision_lifecycle",
     "sentinel_engine.composition.evidence",
     "sentinel_engine.composition.governance",
     "sentinel_engine.composition.execution",

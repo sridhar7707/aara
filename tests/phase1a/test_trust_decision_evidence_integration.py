@@ -192,7 +192,7 @@ def test_record_exit_decision_safe_passes_symbol_and_preserves_headlines(conn, r
     def _fake_record_decision_safe(trust_conn, candidate_event_id, deployment_manifest_id,
                                     asset, action, event_type, portfolio_snapshot, market_context,
                                     model_outputs, risk_checks, final_confidence, intent,
-                                    data_completeness, risk=None):
+                                    data_completeness, risk=None, decision_id=None):
         captured["model_outputs"] = model_outputs
 
     monkeypatch.setattr(main_trust_decisions, "record_decision_safe", _fake_record_decision_safe)
@@ -227,7 +227,7 @@ def test_record_executed_preserves_finbert_headlines_when_xgb_drivers_rebuilds_m
     def _fake_record_decision_safe(trust_conn, candidate_event_id, deployment_manifest_id,
                                     asset, action, event_type, portfolio_snapshot, market_context,
                                     model_outputs, risk_checks, final_confidence, intent,
-                                    data_completeness, risk=None):
+                                    data_completeness, risk=None, decision_id=None):
         captured["model_outputs"] = model_outputs
 
     monkeypatch.setattr(main_trust_decisions, "record_decision_safe", _fake_record_decision_safe)
