@@ -46,6 +46,85 @@ def format_display_timestamp(moment: datetime) -> str:
     return aware.astimezone(_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
 
 
+# ---------------------------------------------------------------------------
+# ADR-070 Sprint 3 Batch 2 -- recommendation-surfacing presentation semantics.
+#
+# Pure, deterministic formatting over the Batch 1 read-model fields
+# (DecisionView.action_source, DecisionView.action, DecisionView.confidence,
+# EvidenceEntry.polarity). Nothing here re-forms a recommendation, recomputes
+# or calibrates confidence, aggregates evidence, or implies execution /
+# approval / scheduling. Provenance is authoritative: a decision is only
+# ever called a "Sentinel recommendation" when action_source is exactly
+# "SENTINEL" -- never inferred from action, confidence, evidence, status, or
+# symbol.
+# ---------------------------------------------------------------------------
+
+SENTINEL_RECOMMENDATION_LABEL = "Sentinel recommendation"
+INTERPRETED_STRATEGY_DECISION_LABEL = "interpreted strategy decision"
+SENTINEL_NON_CONCURRENCE_STATEMENT = "Sentinel does not concur at this time."
+CONFIDENCE_QUALIFIER = "Uncalibrated ensemble model score"
+EVIDENCE_POLARITY_SUPPORTED_LABEL = "Supported the BUY"
+EVIDENCE_POLARITY_CONTRADICTED_LABEL = "Contradicted the BUY"
+EVIDENCE_POLARITY_UNAVAILABLE_LABEL = "Polarity unavailable"
+
+_SENTINEL_ACTION_SOURCE = "SENTINEL"
+_WAIT_ACTION = "WAIT"
+_SUPPORTING_POLARITY = "SUPPORTING"
+_CONTRADICTING_POLARITY = "CONTRADICTING"
+
+
+def provenance_label(action_source: Optional[str]) -> str:
+    """"Sentinel recommendation" iff ``action_source`` is exactly
+    ``"SENTINEL"``; every other value -- ``"STRATEGY"``, ``None``, or any
+    unexpected string -- is an "interpreted strategy decision" (ADR-070 §6).
+    Provenance is never inferred from any other field."""
+    if action_source == _SENTINEL_ACTION_SOURCE:
+        return SENTINEL_RECOMMENDATION_LABEL
+    return INTERPRETED_STRATEGY_DECISION_LABEL
+
+
+def is_sentinel_recommendation(action_source: Optional[str]) -> bool:
+    """True only for the exact literal ``"SENTINEL"``. An unexpected
+    action_source value is never treated as Sentinel-authored."""
+    return action_source == _SENTINEL_ACTION_SOURCE
+
+
+def sentinel_non_concurrence_statement(
+    action: str, action_source: Optional[str]
+) -> Optional[str]:
+    """The exact inert line "Sentinel does not concur at this time." only
+    when Sentinel authored a WAIT (``action_source == "SENTINEL"`` and
+    ``action == "WAIT"``); otherwise ``None``. The line carries no
+    rejection, veto, execution-block, schedule, timer, notification, alert,
+    future-BUY, or "check back" meaning (ADR-070 §7). A STRATEGY / None /
+    unknown WAIT does not receive this wording."""
+    if action_source == _SENTINEL_ACTION_SOURCE and action == _WAIT_ACTION:
+        return SENTINEL_NON_CONCURRENCE_STATEMENT
+    return None
+
+
+def evidence_polarity_label(polarity: Optional[str]) -> str:
+    """Per-record only. ``"SUPPORTING"`` -> "Supported the BUY";
+    ``"CONTRADICTING"`` -> "Contradicted the BUY"; ``None`` / missing / any
+    other value -> "Polarity unavailable" (ADR-070 §9). No count, majority,
+    unanimity, net polarity, or score is derived from these anywhere."""
+    if polarity == _SUPPORTING_POLARITY:
+        return EVIDENCE_POLARITY_SUPPORTED_LABEL
+    if polarity == _CONTRADICTING_POLARITY:
+        return EVIDENCE_POLARITY_CONTRADICTED_LABEL
+    return EVIDENCE_POLARITY_UNAVAILABLE_LABEL
+
+
+@dataclass(frozen=True)
+class EvidencePolarityRow:
+    """One evidence record's identity/source plus its own polarity label --
+    per record, never combined with any other record's. Same
+    framework-independent, testable shape as EvidenceEntry / GovernanceEntry."""
+    evidence_id: str
+    source: str
+    polarity_label: str
+
+
 class ReadStatus(Enum):
     """Distinguishes a successful read (possibly empty) from a read that
     could not be completed. AVAILABLE-vs-EMPTY is never ambiguous here --
@@ -108,6 +187,62 @@ class DecisionDetailArea:
         if self.decision is None:
             return None
         return format_display_timestamp(self.decision.updated_at)
+
+    # --- ADR-070 Batch 2: recommendation-surfacing presentation semantics ---
+
+    @property
+    def recommendation_provenance_display(self) -> Optional[str]:
+        """"Sentinel recommendation" iff DecisionView.action_source is
+        exactly "SENTINEL"; otherwise "interpreted strategy decision".
+        None when no decision is selected."""
+        if self.decision is None:
+            return None
+        return provenance_label(self.decision.action_source)
+
+    @property
+    def is_sentinel_recommendation(self) -> bool:
+        """Whether Sentinel's B2 rule authored this decision's action.
+        Purely a provenance read -- it confers no execution authority on
+        the decision and is not derived from action/confidence/evidence."""
+        return self.decision is not None and is_sentinel_recommendation(
+            self.decision.action_source
+        )
+
+    @property
+    def sentinel_non_concurrence_display(self) -> Optional[str]:
+        """The exact inert line "Sentinel does not concur at this time."
+        only for a Sentinel-authored WAIT; None otherwise (including a
+        STRATEGY / None / unknown WAIT, and every non-WAIT action)."""
+        if self.decision is None:
+            return None
+        return sentinel_non_concurrence_statement(
+            self.decision.action, self.decision.action_source
+        )
+
+    @property
+    def confidence_qualifier(self) -> Optional[str]:
+        """The fixed semantic qualifier for the number confidence_display
+        shows -- an uncalibrated ensemble model score, never a probability
+        or a calibrated / recommendation confidence. The numeric value in
+        confidence_display is unchanged and unre-computed."""
+        if self.decision is None:
+            return None
+        return CONFIDENCE_QUALIFIER
+
+    @property
+    def evidence_polarity_rows(self) -> Tuple[EvidencePolarityRow, ...]:
+        """One row per evidence record, in the order evidence was loaded,
+        each carrying that record's own identity/source and its individual
+        polarity label. No aggregate, count, majority, unanimity, net
+        polarity, or score is produced here or anywhere downstream."""
+        return tuple(
+            EvidencePolarityRow(
+                evidence_id=entry.evidence_id,
+                source=entry.source,
+                polarity_label=evidence_polarity_label(entry.polarity),
+            )
+            for entry in self.evidence
+        )
 
 
 @dataclass(frozen=True)

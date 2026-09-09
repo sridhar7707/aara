@@ -1,6 +1,7 @@
 """Tests for applications.trading_intelligence.ui.decision_center.screen."""
 import datetime
 import dataclasses
+import inspect
 
 import pytest
 
@@ -10,11 +11,20 @@ from applications.trading_intelligence.projections.decision_view import Decision
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 from applications.trading_intelligence.ui.decision_center.screen import (
+    CONFIDENCE_QUALIFIER,
     DecisionCenterScreen,
     DecisionDetailArea,
     DecisionListArea,
+    EvidencePolarityRow,
+    INTERPRETED_STRATEGY_DECISION_LABEL,
     ReadStatus,
+    SENTINEL_NON_CONCURRENCE_STATEMENT,
+    SENTINEL_RECOMMENDATION_LABEL,
+    evidence_polarity_label,
     format_display_timestamp,
+    is_sentinel_recommendation,
+    provenance_label,
+    sentinel_non_concurrence_statement,
 )
 
 
@@ -352,3 +362,264 @@ def test_decision_center_screen_composes_list_and_detail_areas():
 
     assert screen.list_area is list_area
     assert screen.detail_area is detail_area
+
+
+# ===========================================================================
+# ADR-070 Sprint 3 Batch 2 -- recommendation-surfacing presentation semantics.
+# ===========================================================================
+
+# Words/phrases that must never describe the confidence number. ("calibrated"
+# is checked separately below -- "uncalibrated" legitimately contains it and
+# is exactly the disclaimer ADR-070 §8 requires.)
+_FORBIDDEN_CONFIDENCE_WORDS = (
+    "probability", "likelihood", "certainty",
+    "win probability", "chance of success", "confidence in success",
+    "recommendation confidence", "probability of success",
+    "calibrated confidence",
+)
+# Wording that would make the inert WAIT line imply a future event / urgency.
+_FORBIDDEN_WAIT_WORDS = (
+    "check back", "watch this", "opportunity", "wait for", "reassess",
+    "will change", "later", "soon", "timer", "notification", "alert",
+    "schedule", "re-evaluat", "reevaluat", "act now", "don't miss", "coming",
+)
+
+
+# --- provenance terminology (ADR-070 §6) ------------------------------------
+
+def test_provenance_label_sentinel_is_a_sentinel_recommendation():
+    assert provenance_label("SENTINEL") == "Sentinel recommendation"
+    assert SENTINEL_RECOMMENDATION_LABEL == "Sentinel recommendation"
+
+
+def test_provenance_label_strategy_is_an_interpreted_strategy_decision():
+    assert provenance_label("STRATEGY") == "interpreted strategy decision"
+    assert INTERPRETED_STRATEGY_DECISION_LABEL == "interpreted strategy decision"
+
+
+def test_provenance_label_none_is_an_interpreted_strategy_decision():
+    assert provenance_label(None) == "interpreted strategy decision"
+
+
+def test_provenance_label_unexpected_value_is_an_interpreted_strategy_decision():
+    for unexpected in ("sentinel", "Sentinel", "SENTINEL ", "AI", "", "STRATEGY_V2"):
+        assert provenance_label(unexpected) == "interpreted strategy decision"
+
+
+def test_is_sentinel_recommendation_is_exact_literal_only():
+    assert is_sentinel_recommendation("SENTINEL") is True
+    for other in ("STRATEGY", None, "sentinel", "SENTINEL ", "unknown"):
+        assert is_sentinel_recommendation(other) is False
+
+
+def test_provenance_is_not_inferred_from_action():
+    """A BUY (or a WAIT) with no Sentinel provenance is still an interpreted
+    strategy decision -- action never implies authorship."""
+    buy_strategy = DecisionDetailArea(decision=_make_view(action="BUY", action_source="STRATEGY"))
+    wait_legacy = DecisionDetailArea(decision=_make_view(action="WAIT", action_source=None))
+
+    assert buy_strategy.recommendation_provenance_display == "interpreted strategy decision"
+    assert buy_strategy.is_sentinel_recommendation is False
+    assert wait_legacy.recommendation_provenance_display == "interpreted strategy decision"
+    assert wait_legacy.is_sentinel_recommendation is False
+
+
+def test_detail_area_provenance_display_none_when_no_decision():
+    area = DecisionDetailArea(decision=None)
+    assert area.recommendation_provenance_display is None
+    assert area.is_sentinel_recommendation is False
+
+
+def test_detail_area_sentinel_buy_is_a_sentinel_recommendation():
+    area = DecisionDetailArea(decision=_make_view(action="BUY", action_source="SENTINEL"))
+    assert area.recommendation_provenance_display == "Sentinel recommendation"
+    assert area.is_sentinel_recommendation is True
+
+
+# --- Sentinel WAIT (ADR-070 §7) -------------------------------------------
+
+def test_sentinel_wait_produces_the_exact_inert_statement():
+    area = DecisionDetailArea(decision=_make_view(action="WAIT", action_source="SENTINEL"))
+    assert area.sentinel_non_concurrence_display == "Sentinel does not concur at this time."
+    assert SENTINEL_NON_CONCURRENCE_STATEMENT == "Sentinel does not concur at this time."
+
+
+def test_strategy_wait_does_not_get_the_sentinel_wait_wording():
+    area = DecisionDetailArea(decision=_make_view(action="WAIT", action_source="STRATEGY"))
+    assert area.sentinel_non_concurrence_display is None
+
+
+def test_legacy_wait_does_not_get_the_sentinel_wait_wording():
+    area = DecisionDetailArea(decision=_make_view(action="WAIT", action_source=None))
+    assert area.sentinel_non_concurrence_display is None
+
+
+def test_unexpected_provenance_wait_does_not_get_the_sentinel_wait_wording():
+    area = DecisionDetailArea(decision=_make_view(action="WAIT", action_source="sentinel"))
+    assert area.sentinel_non_concurrence_display is None
+
+
+def test_sentinel_buy_gets_no_non_concurrence_statement():
+    area = DecisionDetailArea(decision=_make_view(action="BUY", action_source="SENTINEL"))
+    assert area.sentinel_non_concurrence_display is None
+
+
+def test_sentinel_wait_helper_matches_the_property():
+    assert sentinel_non_concurrence_statement("WAIT", "SENTINEL") == (
+        "Sentinel does not concur at this time."
+    )
+    assert sentinel_non_concurrence_statement("BUY", "SENTINEL") is None
+    assert sentinel_non_concurrence_statement("WAIT", "STRATEGY") is None
+    assert sentinel_non_concurrence_statement("WAIT", None) is None
+
+
+def test_sentinel_wait_statement_contains_no_scheduling_or_future_language():
+    text = SENTINEL_NON_CONCURRENCE_STATEMENT.lower()
+    for banned in _FORBIDDEN_WAIT_WORDS:
+        assert banned not in text
+    # It is a single, present-tense sentence -- nothing more.
+    assert SENTINEL_NON_CONCURRENCE_STATEMENT == "Sentinel does not concur at this time."
+
+
+# --- confidence semantics (ADR-070 §8) -----------------------------------
+
+def test_confidence_numeric_value_is_preserved_exactly():
+    area = DecisionDetailArea(decision=_make_view(confidence=0.78))
+    assert area.confidence_display == "78%"  # unchanged from before Batch 2
+
+
+def test_confidence_qualifier_is_the_uncalibrated_ensemble_score_wording():
+    area = DecisionDetailArea(decision=_make_view(confidence=0.78))
+    assert area.confidence_qualifier == "Uncalibrated ensemble model score"
+    assert CONFIDENCE_QUALIFIER == "Uncalibrated ensemble model score"
+
+
+def test_confidence_qualifier_is_none_when_no_decision():
+    assert DecisionDetailArea(decision=None).confidence_qualifier is None
+
+
+def test_confidence_qualifier_uses_no_probability_or_certainty_language():
+    text = CONFIDENCE_QUALIFIER.lower()
+    for banned in _FORBIDDEN_CONFIDENCE_WORDS:
+        assert banned not in text
+    # It must disclaim calibration, never claim it: the only permitted
+    # occurrence of "calibrated" is inside "uncalibrated".
+    assert "calibrated" not in text.replace("uncalibrated", "")
+    assert "uncalibrated" in text
+
+
+def test_confidence_display_and_qualifier_do_not_add_a_second_number():
+    area = DecisionDetailArea(decision=_make_view(confidence=0.6123))
+    # Only confidence_display carries a number; the qualifier is pure words.
+    assert area.confidence_display == "61%"
+    assert not any(ch.isdigit() for ch in area.confidence_qualifier)
+
+
+# --- evidence polarity (ADR-070 §9) ------------------------------------
+
+def test_evidence_polarity_label_supporting():
+    assert evidence_polarity_label("SUPPORTING") == "Supported the BUY"
+
+
+def test_evidence_polarity_label_contradicting():
+    assert evidence_polarity_label("CONTRADICTING") == "Contradicted the BUY"
+
+
+def test_evidence_polarity_label_none_missing_or_unknown_is_unavailable():
+    for value in (None, "", "HOLD", "NEUTRAL", "supporting", "SUPPORTING "):
+        assert evidence_polarity_label(value) == "Polarity unavailable"
+
+
+def test_evidence_polarity_rows_are_per_record_and_keep_identity():
+    area = DecisionDetailArea(
+        decision=_make_view(action="BUY", action_source="SENTINEL"),
+        evidence=(
+            _make_entry(evidence_id="ev-xgb", source="xgboost", polarity="SUPPORTING"),
+            _make_entry(evidence_id="ev-lstm", source="lstm", polarity="CONTRADICTING"),
+            _make_entry(evidence_id="ev-fin", source="finbert", polarity=None),
+        ),
+    )
+
+    rows = area.evidence_polarity_rows
+
+    assert rows == (
+        EvidencePolarityRow("ev-xgb", "xgboost", "Supported the BUY"),
+        EvidencePolarityRow("ev-lstm", "lstm", "Contradicted the BUY"),
+        EvidencePolarityRow("ev-fin", "finbert", "Polarity unavailable"),
+    )
+    # One row per evidence record -- nothing collapsed, nothing added.
+    assert len(rows) == 3
+
+
+def test_evidence_polarity_rows_empty_when_no_evidence():
+    area = DecisionDetailArea(decision=_make_view())
+    assert area.evidence_polarity_rows == ()
+
+
+def test_detail_area_exposes_no_polarity_aggregate():
+    """No count / majority / unanimity / net polarity / score / vote is
+    reachable on the view-model, by attribute or by the polarity rows."""
+    area = DecisionDetailArea(
+        decision=_make_view(action="BUY", action_source="SENTINEL"),
+        evidence=(
+            _make_entry(evidence_id="ev-1", source="xgboost", polarity="SUPPORTING"),
+            _make_entry(evidence_id="ev-2", source="lstm", polarity="SUPPORTING"),
+            _make_entry(evidence_id="ev-3", source="finbert", polarity="CONTRADICTING"),
+        ),
+    )
+
+    for forbidden in (
+        "supporting_count", "contradicting_count", "polarity_count",
+        "net_polarity", "polarity_score", "evidence_score", "corroboration",
+        "corroboration_score", "unanimity", "unanimity_score", "majority",
+        "vote", "vote_tally", "models_agree", "support_percentage",
+        "recommendation_strength", "signal_strength",
+    ):
+        assert not hasattr(area, forbidden)
+
+    rows = area.evidence_polarity_rows
+    # The rows are plain per-record labels: only the three defined phrasings.
+    assert {row.polarity_label for row in rows} <= {
+        "Supported the BUY", "Contradicted the BUY", "Polarity unavailable",
+    }
+    # No row carries a numeric or aggregate field.
+    for row in rows:
+        assert set(vars(row).keys()) == {"evidence_id", "source", "polarity_label"}
+
+
+# --- regression / boundary ---------------------------------------------
+
+def test_batch2_properties_do_not_disturb_existing_core_formatting():
+    area = DecisionDetailArea(
+        decision=_make_view(
+            action="WAIT", action_source="SENTINEL",
+            confidence=0.78, status=DecisionState.DECISION_CREATED,
+        ),
+        evidence=(_make_entry(polarity="SUPPORTING"),),
+    )
+
+    # Pre-Batch-2 behavior, unchanged:
+    assert area.confidence_display == "78%"
+    assert area.status_display == "Decision Created"
+    assert area.timestamp_display == "2026-08-04 07:00 CDT"
+    # Batch 2 additions, alongside:
+    assert area.recommendation_provenance_display == "Sentinel recommendation"
+    assert area.sentinel_non_concurrence_display == "Sentinel does not concur at this time."
+    assert area.confidence_qualifier == "Uncalibrated ensemble model score"
+
+
+def test_batch2_presentation_helpers_are_pure_and_import_no_execution_deps():
+    import applications.trading_intelligence.ui.decision_center.screen as screen_mod
+
+    # Check import statements only -- the module docstring legitimately names
+    # some of these words when stating the boundary it keeps.
+    import_lines = [
+        line for line in inspect.getsource(screen_mod).splitlines()
+        if line.startswith(("import ", "from "))
+    ]
+    joined = "\n".join(import_lines)
+    for banned in ("import bot", "from bot", "alpaca", "PaperExecutor",
+                   "RiskManager", "recommendation_adapter",
+                   "import sentinel_engine", "from sentinel_engine",
+                   "dashboard", "ledger"):
+        assert banned not in joined
