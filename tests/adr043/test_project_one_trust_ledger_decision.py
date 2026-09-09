@@ -89,14 +89,30 @@ def _sample_model_outputs():
 
 
 def _sample_row(decision_id="DEC-TEST-001"):
+    """A real, projectable investment-action decision row (action="BUY").
+
+    ADR-066 fixed sentinel_engine.DecisionAction at BUY / BUY_MORE / HOLD /
+    SELL / WAIT and made decision_adapter.to_decision() enforce it; the
+    Trust Ledger's own action vocabulary is BUY / SELL / HOLD / REJECT.
+    REJECT is a no-action outcome, not a projectable DecisionAction -- see
+    _rejection_row() and test_rejection_outcome_row_is_not_projectable.
+    """
     return {
         "decision_id": decision_id,
         "asset": "SLB",
-        "action": "REJECT",
+        "action": "BUY",
         "timestamp": "2026-08-17T14:22:18.901835+00:00",
         "final_confidence": 0.5547,
         "model_outputs": _sample_model_outputs(),
     }
+
+
+def _rejection_row(decision_id="DEC-REJECT-001"):
+    """A real QUALIFIED_REJECTION decision row: action="REJECT" -- a Trust
+    Ledger no-action outcome, not a sentinel_engine DecisionAction."""
+    row = _sample_row(decision_id)
+    row["action"] = "REJECT"
+    return row
 
 
 # --- 1/2/3: exactly-one CLI argument enforcement ---------------------------
@@ -137,8 +153,47 @@ def test_exactly_one_decision_produces_exactly_one_projection(tmp_path):
     assert projection is not None
     assert projection.decision_id == "DEC-TEST-001"
     assert projection.symbol == "SLB"
-    assert projection.action == "REJECT"
+    assert projection.action == "BUY"
     assert projection.confidence == 0.5547
+
+
+def test_rejection_outcome_row_is_not_projectable(tmp_path, capsys):
+    """ADR-043 + ADR-066: a decision_events row whose action is the Trust
+    Ledger no-action outcome "REJECT" carries no sentinel_engine
+    DecisionAction. The script must treat it as non-projectable (its
+    existing None / not-projectable signal) -- never coerce it to BUY or
+    any other DecisionAction, never call to_decision() with "REJECT",
+    never read event_type/intent/risk_checks to work around it."""
+    db_path = _make_fixture_db(tmp_path, [_rejection_row("DEC-REJECT-001")])
+
+    result = script.project_one_decision("DEC-REJECT-001", db_path=db_path)
+    assert result is None  # not projectable, and NOT coerced into a projection
+
+    exit_code = script.main(["DEC-REJECT-001", "--db-path", db_path])
+    assert exit_code == 1
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.strip()]
+    assert lines
+    for ln in lines:
+        assert ln.startswith(script.EPHEMERAL_BANNER)
+    assert "not projectable" in " ".join(lines).lower()
+    assert "reject" in " ".join(lines).lower()
+
+
+def test_rejection_outcome_row_never_calls_to_decision(tmp_path, monkeypatch):
+    """Defensive: even if to_decision() were somehow permissive again, the
+    script must not route a REJECT row through it."""
+    calls = []
+    real_to_decision = script.to_decision
+
+    def _spy(data):
+        calls.append(data.get("action"))
+        return real_to_decision(data)
+
+    monkeypatch.setattr(script, "to_decision", _spy)
+    db_path = _make_fixture_db(tmp_path, [_rejection_row("DEC-REJECT-002")])
+
+    assert script.project_one_decision("DEC-REJECT-002", db_path=db_path) is None
+    assert calls == []  # to_decision() was never invoked for the REJECT row
 
 
 def test_unknown_decision_id_returns_none(tmp_path):

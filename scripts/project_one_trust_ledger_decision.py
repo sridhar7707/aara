@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sentinel_engine.adapters.decision_adapter import to_decision  # noqa: E402
 from sentinel_engine.adapters.evidence_adapter import to_evidence_records  # noqa: E402
 from sentinel_engine.domain.decision import Decision  # noqa: E402
+from sentinel_engine.domain.decision_action import DecisionAction  # noqa: E402
 from sentinel_engine.events.event import Event  # noqa: E402
 from sentinel_engine.ledger.ledger import LedgerStore  # noqa: E402
 from sentinel_engine.projections.decision_projection import DecisionProjection  # noqa: E402
@@ -184,6 +185,18 @@ def project_one_decision(
     if row is None:
         return None
 
+    # ADR-043 + ADR-066 compatibility boundary: decision_events.action uses the
+    # Trust Ledger's own vocabulary (BUY / SELL / HOLD / REJECT). REJECT is a
+    # no-action *outcome*, not a sentinel_engine DecisionAction
+    # (BUY / BUY_MORE / HOLD / SELL / WAIT), so decision_adapter.to_decision()
+    # correctly refuses it since ADR-066. Such a row carries no investment
+    # action to project -- treat it as non-projectable, exactly the same
+    # not-projectable signal this function already returns for a missing row.
+    # Nothing is inferred (REJECT is never coerced to BUY), no extra column is
+    # read, and no translation adapter is introduced.
+    if not DecisionAction.has_value(row["action"]):
+        return None
+
     ledger_store = ledger_store if ledger_store is not None else _ScriptLedgerStore()
     ledger_repository = LedgerRepository(ledger_store)
     projection_repository = (
@@ -215,7 +228,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     projection = project_one_decision(args.decision_id, args.db_path)
 
     if projection is None:
-        _print(f"No decision_events row found for decision_id={args.decision_id!r}.")
+        _print(
+            f"decision_id={args.decision_id!r} is not projectable: either no "
+            "decision_events row exists, or its action is a Trust Ledger "
+            "no-action outcome (e.g. REJECT) rather than a sentinel_engine "
+            "DecisionAction (ADR-066)."
+        )
         return 1
 
     _print(f"decision_id={projection.decision_id}")
