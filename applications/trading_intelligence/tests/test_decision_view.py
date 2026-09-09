@@ -70,3 +70,21 @@ def test_from_contract_defaults_approval_status_to_none():
     view = DecisionView.from_contract(_make_contract())
 
     assert view.approval_status is None
+
+
+def test_from_contract_carries_action_source_when_present():
+    """ADR-070: action_source is passed straight through from the contract,
+    unchanged, for both SENTINEL and STRATEGY."""
+    sentinel_view = DecisionView.from_contract(_make_contract(action_source="SENTINEL"))
+    strategy_view = DecisionView.from_contract(_make_contract(action_source="STRATEGY"))
+
+    assert sentinel_view.action_source == "SENTINEL"
+    assert strategy_view.action_source == "STRATEGY"
+
+
+def test_from_contract_defaults_action_source_to_none():
+    """A contract without action_source (legacy / unknown provenance) yields
+    a view with action_source None -- nothing is inferred or manufactured."""
+    view = DecisionView.from_contract(_make_contract())
+
+    assert view.action_source is None

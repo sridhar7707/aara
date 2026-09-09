@@ -19,6 +19,12 @@ also re-exported here for the same ui/ import-boundary reason) carries the
 decision's latest governance verdict, independent of status -- see
 DecisionContract's own docstring for why the two are distinct. Optional,
 defaulting to None.
+
+action_source (ADR-070, Sprint 3) is carried straight through from
+DecisionContract.action_source -- "SENTINEL" / "STRATEGY" / None -- with no
+transformation. See DecisionContract's docstring for the provenance
+semantics. Batch 1 read-model plumbing only; the Decision Center display
+copy that keys off this value is Batch 2.
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -39,6 +45,7 @@ class DecisionView:
     confidence: float
     updated_at: datetime
     approval_status: Optional[ApprovalStatus] = None
+    action_source: Optional[str] = None
 
     @classmethod
     def from_contract(cls, contract: DecisionContract) -> "DecisionView":
@@ -50,4 +57,5 @@ class DecisionView:
             confidence=contract.confidence,
             updated_at=contract.updated_at,
             approval_status=contract.approval_status,
+            action_source=contract.action_source,
         )

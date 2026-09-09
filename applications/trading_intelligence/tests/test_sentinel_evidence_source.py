@@ -231,6 +231,195 @@ def test_get_evidence_returns_multiple_entries_in_order():
     assert [entry.evidence_type for entry in result] == ["NEWS_SENTIMENT", "PRICE_ACTION"]
 
 
+# ---------------------------------------------------------------------------
+# ADR-070 (Sprint 3, Batch 1): polarity surfaced verbatim from each
+# EVIDENCE_ATTACHED event payload, matched by evidence_id -- per record only,
+# never aggregated. Mirrors the existing "data" plumbing above.
+# ---------------------------------------------------------------------------
+
+def test_get_evidence_surfaces_supporting_polarity():
+    decision_service, evidence_service, source = _make_wiring()
+    decision_service.create_decision(_make_decision())
+    evidence_service.associate_evidence(
+        "dec-001", _make_evidence(source="xgboost", polarity="SUPPORTING")
+    )
+
+    result = source.get_evidence("dec-001")
+
+    assert result[0].polarity == "SUPPORTING"
+
+
+def test_get_evidence_surfaces_contradicting_polarity():
+    decision_service, evidence_service, source = _make_wiring()
+    decision_service.create_decision(_make_decision())
+    evidence_service.associate_evidence(
+        "dec-001", _make_evidence(source="lstm", polarity="CONTRADICTING")
+    )
+
+    result = source.get_evidence("dec-001")
+
+    assert result[0].polarity == "CONTRADICTING"
+
+
+def test_get_evidence_polarity_is_none_when_explicitly_none():
+    """B1's HOLD / unrecognised-signal outcome: Evidence.polarity is None, and
+    that None reaches EvidenceEntry unchanged (not dropped, not defaulted)."""
+    decision_service, evidence_service, source = _make_wiring()
+    decision_service.create_decision(_make_decision())
+    evidence_service.associate_evidence(
+        "dec-001", _make_evidence(source="finbert", polarity=None)
+    )
+
+    result = source.get_evidence("dec-001")
+
+    assert result[0].polarity is None
+
+
+def test_get_evidence_polarity_is_none_when_payload_has_no_polarity_key():
+    """Backward compatibility: an EVIDENCE_ATTACHED event predating ADR-068 B1
+    (payload without a "polarity" key) must still produce a valid
+    EvidenceEntry with polarity None, not raise."""
+    attached_at = datetime.datetime(2026, 8, 8, 9, 5, 0)
+
+    class _Event:
+        event_type = "EVIDENCE_ATTACHED"
+        payload = {
+            "decision_id": "dec-001",
+            "evidence_id": "ev-001",
+            "evidence_type": "MODEL_OUTPUT",
+            "source": "xgboost",
+            "data": {"signal": "BUY"},
+        }
+
+    class _Timeline:
+        evidence = [EvidenceSummary(
+            evidence_id="ev-001", evidence_type="MODEL_OUTPUT",
+            source="xgboost", attached_at=attached_at,
+        )]
+        events = [_Event()]
+
+    class _StubDecisionQuery:
+        def get_decision_timeline(self, decision_id):
+            return _Timeline()
+
+    source = SentinelEvidenceSource(_StubDecisionQuery())
+
+    result = source.get_evidence("dec-001")
+
+    assert result[0].polarity is None
+
+
+def test_get_evidence_matches_polarity_to_the_right_evidence_id():
+    decision_service, evidence_service, source = _make_wiring()
+    decision_service.create_decision(_make_decision())
+    evidence_service.associate_evidence(
+        "dec-001",
+        _make_evidence(
+            evidence_id="ev-xgb", source="xgboost", polarity="SUPPORTING",
+            collected_at=datetime.datetime(2026, 8, 8, 9, 1, 0),
+        ),
+    )
+    evidence_service.associate_evidence(
+        "dec-001",
+        _make_evidence(
+            evidence_id="ev-lstm", source="lstm", polarity="CONTRADICTING",
+            collected_at=datetime.datetime(2026, 8, 8, 9, 2, 0),
+        ),
+    )
+    evidence_service.associate_evidence(
+        "dec-001",
+        _make_evidence(
+            evidence_id="ev-finbert", source="finbert", polarity=None,
+            collected_at=datetime.datetime(2026, 8, 8, 9, 3, 0),
+        ),
+    )
+
+    result = source.get_evidence("dec-001")
+
+    by_id = {entry.evidence_id: entry.polarity for entry in result}
+    assert by_id == {
+        "ev-xgb": "SUPPORTING",
+        "ev-lstm": "CONTRADICTING",
+        "ev-finbert": None,
+    }
+
+
+def test_get_evidence_does_not_aggregate_polarity():
+    """Each record keeps its own polarity; no count, net, majority, unanimity,
+    or score is produced anywhere in the read path (ADR-070 §9)."""
+    decision_service, evidence_service, source = _make_wiring()
+    decision_service.create_decision(_make_decision())
+    evidence_service.associate_evidence(
+        "dec-001",
+        _make_evidence(evidence_id="ev-1", source="xgboost", polarity="SUPPORTING",
+                       collected_at=datetime.datetime(2026, 8, 8, 9, 1, 0)),
+    )
+    evidence_service.associate_evidence(
+        "dec-001",
+        _make_evidence(evidence_id="ev-2", source="lstm", polarity="SUPPORTING",
+                       collected_at=datetime.datetime(2026, 8, 8, 9, 2, 0)),
+    )
+    evidence_service.associate_evidence(
+        "dec-001",
+        _make_evidence(evidence_id="ev-3", source="finbert", polarity="CONTRADICTING",
+                       collected_at=datetime.datetime(2026, 8, 8, 9, 3, 0)),
+    )
+
+    result = source.get_evidence("dec-001")
+
+    # One entry per record, nothing collapsed or added.
+    assert [entry.polarity for entry in result] == [
+        "SUPPORTING", "SUPPORTING", "CONTRADICTING",
+    ]
+    # No derived / aggregate field exists on the entries.
+    for entry in result:
+        for forbidden in (
+            "supporting_count", "contradicting_count", "polarity_count",
+            "net_polarity", "unanimity", "unanimity_score", "evidence_score",
+            "majority", "vote", "vote_tally",
+        ):
+            assert not hasattr(entry, forbidden)
+    # The source itself exposes no aggregation entry point.
+    assert not hasattr(source, "polarity_summary")
+    assert not hasattr(source, "net_polarity")
+
+
+def test_reading_polarity_does_not_mutate_the_event_payload_or_append_events():
+    ledger_store = _InMemoryLedgerStore()
+    ledger_repository = LedgerRepository(ledger_store)
+    projection_repository = _InMemoryProjectionRepository()
+    decision_service = DecisionService(ledger_repository, projection_repository)
+    evidence_service = EvidenceService(ledger_repository, projection_repository)
+    decision_service.create_decision(_make_decision())
+    evidence_service.associate_evidence(
+        "dec-001", _make_evidence(source="xgboost", polarity="SUPPORTING")
+    )
+    source = SentinelEvidenceSource(DecisionQuery(ledger_repository, projection_repository))
+
+    events_before = [dict(event.payload) for event in ledger_store.read_all()]
+
+    source.get_evidence("dec-001")
+
+    events_after = [dict(event.payload) for event in ledger_store.read_all()]
+    assert events_after == events_before
+
+
+def test_get_evidence_preserves_data_and_polarity_together():
+    """The two additive fields are independent -- adding polarity did not
+    disturb the existing ADR-036 data plumbing."""
+    decision_service, evidence_service, source = _make_wiring()
+    decision_service.create_decision(_make_decision())
+    evidence_service.associate_evidence(
+        "dec-001",
+        _make_evidence(source="xgboost", data={"signal": "BUY"}, polarity="SUPPORTING"),
+    )
+
+    result = source.get_evidence("dec-001")
+
+    assert result[0].data == {"signal": "BUY"}
+    assert result[0].polarity == "SUPPORTING"
+
+
 def test_get_evidence_never_calls_a_write_operation():
     """Read-only: the adapter must never append a ledger event or save a
     projection. Setup writes through real repositories first, then wraps

@@ -236,6 +236,27 @@ def _make_approval_recorded_event(decision_id, status, approved_at):
     )
 
 
+def _make_decision_created_event(decision_id, created_at, **payload_extra):
+    """A DECISION_CREATED ledger event of the shape DecisionService.create_decision()
+    emits. payload_extra lets a test add (or omit) the ADR-069 "action_source"
+    key -- omitting it models a legacy / pre-B2 record."""
+    payload = {
+        "decision_id": decision_id,
+        "symbol": "AAPL",
+        "action": "BUY",
+        "confidence": 0.78,
+        "evidence_reference": "evidence-001",
+        "risk_reference": "risk-001",
+    }
+    payload.update(payload_extra)
+    return Event(
+        event_id=f"evt-created-{decision_id}",
+        event_type=EventType.DECISION_CREATED,
+        created_at=created_at,
+        payload=payload,
+    )
+
+
 def test_approval_status_is_none_when_no_decision_query_provided():
     """Backward compatibility: every existing construction of this class
     passes only a ProjectionRepository -- approval_status must stay None,
@@ -306,3 +327,141 @@ def test_list_decisions_populates_approval_status_for_each_decision():
     verdicts = {r.decision_id: r.approval_status for r in results}
     assert verdicts["dec-001"] is ApprovalStatus.APPROVED
     assert verdicts["dec-002"] is ApprovalStatus.REJECTED
+
+
+# ---------------------------------------------------------------------------
+# ADR-070 (Sprint 3, Batch 1): action_source surfaced from the
+# DECISION_CREATED event payload via the existing optional DecisionQuery
+# collaborator -- the same read path already used for approval_status.
+# ---------------------------------------------------------------------------
+
+def test_action_source_is_none_when_no_decision_query_provided():
+    """Backward compatibility: a ProjectionRepository-only construction (every
+    existing call site) yields action_source None, exactly like approval_status."""
+    repository = _InMemoryProjectionRepository()
+    repository.save(_make_projection())
+    source = SentinelProjectionDecisionSource(repository)
+
+    result = source.get_decision("dec-001")
+
+    assert result.action_source is None
+
+
+def test_get_decision_populates_action_source_sentinel_from_decision_created_payload():
+    event = _make_decision_created_event(
+        "dec-001", datetime.datetime(2026, 8, 8, 9, 0, 0), action_source="SENTINEL"
+    )
+    ledger_repository, projection_repository = _make_decision_query([event])
+    projection_repository.save(_make_projection())
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+    source = SentinelProjectionDecisionSource(projection_repository, decision_query)
+
+    result = source.get_decision("dec-001")
+
+    assert result.action_source == "SENTINEL"
+
+
+def test_get_decision_populates_action_source_strategy_from_decision_created_payload():
+    event = _make_decision_created_event(
+        "dec-001", datetime.datetime(2026, 8, 8, 9, 0, 0), action_source="STRATEGY"
+    )
+    ledger_repository, projection_repository = _make_decision_query([event])
+    projection_repository.save(_make_projection())
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+    source = SentinelProjectionDecisionSource(projection_repository, decision_query)
+
+    result = source.get_decision("dec-001")
+
+    assert result.action_source == "STRATEGY"
+
+
+def test_action_source_is_none_when_decision_created_payload_omits_the_key():
+    """A legacy / pre-B2 DECISION_CREATED event with no action_source key must
+    yield None -- never inferred from action, confidence, status, or symbol."""
+    event = _make_decision_created_event("dec-001", datetime.datetime(2026, 8, 8, 9, 0, 0))
+    ledger_repository, projection_repository = _make_decision_query([event])
+    projection_repository.save(_make_projection())
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+    source = SentinelProjectionDecisionSource(projection_repository, decision_query)
+
+    result = source.get_decision("dec-001")
+
+    assert result.action == "BUY"
+    assert result.action_source is None
+
+
+def test_action_source_is_none_when_decision_query_has_no_decision_created_event():
+    ledger_repository, projection_repository = _make_decision_query()
+    projection_repository.save(_make_projection())
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+    source = SentinelProjectionDecisionSource(projection_repository, decision_query)
+
+    result = source.get_decision("dec-001")
+
+    assert result.action_source is None
+
+
+def test_list_decisions_populates_action_source_for_each_decision_independently():
+    sentinel_event = _make_decision_created_event(
+        "dec-001", datetime.datetime(2026, 8, 8, 9, 0, 0), action_source="SENTINEL"
+    )
+    strategy_event = _make_decision_created_event(
+        "dec-002", datetime.datetime(2026, 8, 8, 9, 5, 0), action_source="STRATEGY"
+    )
+    legacy_event = _make_decision_created_event(
+        "dec-003", datetime.datetime(2026, 8, 8, 9, 10, 0)
+    )
+    ledger_repository, projection_repository = _make_decision_query(
+        [sentinel_event, strategy_event, legacy_event]
+    )
+    projection_repository.save(_make_projection(decision_id="dec-001"))
+    projection_repository.save(_make_projection(decision_id="dec-002"))
+    projection_repository.save(_make_projection(decision_id="dec-003"))
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+    source = SentinelProjectionDecisionSource(projection_repository, decision_query)
+
+    results = source.list_decisions(["dec-001", "dec-002", "dec-003"])
+
+    provenance = {r.decision_id: r.action_source for r in results}
+    assert provenance == {"dec-001": "SENTINEL", "dec-002": "STRATEGY", "dec-003": None}
+
+
+def test_reading_action_source_does_not_mutate_the_event_payload_or_ledger():
+    event = _make_decision_created_event(
+        "dec-001", datetime.datetime(2026, 8, 8, 9, 0, 0), action_source="SENTINEL"
+    )
+    ledger_repository, projection_repository = _make_decision_query([event])
+    projection_repository.save(_make_projection())
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+    source = SentinelProjectionDecisionSource(projection_repository, decision_query)
+
+    payload_before = dict(event.payload)
+    event_count_before = len(ledger_repository.get_events())
+
+    source.get_decision("dec-001")
+    source.list_decisions(["dec-001"])
+
+    assert event.payload == payload_before
+    assert len(ledger_repository.get_events()) == event_count_before
+
+
+def test_existing_fields_unchanged_when_action_source_is_present():
+    event = _make_decision_created_event(
+        "dec-001", datetime.datetime(2026, 8, 8, 9, 0, 0), action_source="SENTINEL"
+    )
+    ledger_repository, projection_repository = _make_decision_query([event])
+    projection_repository.save(_make_projection())
+    decision_query = DecisionQuery(ledger_repository, projection_repository)
+    source = SentinelProjectionDecisionSource(projection_repository, decision_query)
+
+    result = source.get_decision("dec-001")
+
+    assert result.decision_id == "dec-001"
+    assert result.symbol == "AAPL"
+    assert result.action == "BUY"
+    assert result.status == DecisionState.DECISION_CREATED
+    assert result.confidence == 0.78
+    assert result.evidence_reference == "evidence-001"
+    assert result.risk_reference == "risk-001"
+    assert result.updated_at == datetime.datetime(2026, 8, 4, 12, 0, 0)
+    assert result.action_source == "SENTINEL"

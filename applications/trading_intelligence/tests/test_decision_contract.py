@@ -65,3 +65,28 @@ def test_decision_contract_approval_status_can_be_approved():
 def test_decision_contract_approval_status_can_be_rejected():
     contract = _make_contract(approval_status=ApprovalStatus.REJECTED)
     assert contract.approval_status is ApprovalStatus.REJECTED
+
+
+def test_decision_contract_action_source_defaults_to_none():
+    """ADR-070: additive optional field -- every existing construction that
+    omits it must keep working, with action_source None."""
+    contract = _make_contract()
+    assert contract.action_source is None
+
+
+def test_decision_contract_action_source_can_be_sentinel():
+    contract = _make_contract(action_source="SENTINEL")
+    assert contract.action_source == "SENTINEL"
+
+
+def test_decision_contract_action_source_can_be_strategy():
+    contract = _make_contract(action_source="STRATEGY")
+    assert contract.action_source == "STRATEGY"
+
+
+def test_decision_contract_action_source_is_carried_verbatim():
+    """The contract only relays the string -- it does not validate it
+    against ActionSource, normalise it, or default it."""
+    contract = _make_contract(action_source="STRATEGY")
+    assert contract.action_source == "STRATEGY"
+    assert contract.action == "BUY"  # unrelated field untouched

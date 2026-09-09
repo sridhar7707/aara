@@ -19,6 +19,15 @@ decision in its lifecycle", approval_status answers "what was decided",
 mirroring ApprovalStatus's own docstring distinction. Optional, defaulting
 to None, since no approval has necessarily been recorded yet -- not every
 producer of a DecisionContract has approval data available.
+
+action_source carries the DECISION_CREATED event payload's own
+action_source value verbatim (ADR-070, Sprint 3): "SENTINEL" (Sentinel's
+B2 recommendation authored the action), "STRATEGY" (the upstream strategy
+authored it), or None (legacy / unknown / unspecified -- pre-B2 records,
+or a payload without the key). Plain str, carried unchanged from the
+event; never inferred from action/confidence/status/symbol and never
+defaulted. The ADR-069 vocabulary (sentinel_engine.domain.action_source.
+ActionSource) is not imported here -- this contract only relays the string.
 """
 from dataclasses import dataclass
 from datetime import datetime
@@ -39,3 +48,4 @@ class DecisionContract:
     risk_reference: str
     updated_at: datetime
     approval_status: Optional[ApprovalStatus] = None
+    action_source: Optional[str] = None

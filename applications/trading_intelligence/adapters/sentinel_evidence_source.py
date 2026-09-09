@@ -25,8 +25,15 @@ already exposes the full, unfiltered Event list, and each EVIDENCE_ATTACHED
 event's own payload now carries "data" (sentinel_engine/services/
 evidence_service.py). Mirrors SentinelAuditSource's existing pattern of
 reading timeline.events directly rather than inventing a new query.
+
+polarity (ADR-070, Sprint 3) is sourced the same way -- from each
+EVIDENCE_ATTACHED event's own "polarity" payload key (populated by ADR-068
+B1), matched to its EvidenceSummary by evidence_id, carried verbatim.
+EvidenceSummary stays narrow (unwidened); a missing key or an event
+predating B1 yields None. Per-record only: no polarity is counted,
+netted, aggregated, scored, or compared across records here.
 """
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sentinel_engine.events.event_types import EventType
 from sentinel_engine.queries.decision_query import DecisionQuery
@@ -52,6 +59,7 @@ class SentinelEvidenceSource(EvidenceSource):
         if timeline is None:
             return []
         data_by_evidence_id = self._data_by_evidence_id(timeline.events)
+        polarity_by_evidence_id = self._polarity_by_evidence_id(timeline.events)
         return [
             EvidenceEntry(
                 evidence_id=item.evidence_id,
@@ -59,6 +67,7 @@ class SentinelEvidenceSource(EvidenceSource):
                 source=item.source,
                 attached_at=item.attached_at,
                 data=data_by_evidence_id.get(item.evidence_id, {}),
+                polarity=polarity_by_evidence_id.get(item.evidence_id),
             )
             for item in timeline.evidence
         ]
@@ -67,6 +76,19 @@ class SentinelEvidenceSource(EvidenceSource):
     def _data_by_evidence_id(events) -> Dict[str, Dict[str, Any]]:
         return {
             event.payload["evidence_id"]: event.payload.get("data", {})
+            for event in events
+            if event.event_type == EventType.EVIDENCE_ATTACHED
+        }
+
+    @staticmethod
+    def _polarity_by_evidence_id(events) -> Dict[str, Optional[str]]:
+        """ADR-070 (Sprint 3): each EVIDENCE_ATTACHED event's own "polarity"
+        value, keyed by evidence_id, carried verbatim. Parallel to
+        _data_by_evidence_id -- same single pass shape, same read-only
+        source. A missing key (event predating ADR-068 B1, or B1's HOLD /
+        unrecognised-signal None) simply maps to None. No aggregation."""
+        return {
+            event.payload["evidence_id"]: event.payload.get("polarity")
             for event in events
             if event.event_type == EventType.EVIDENCE_ATTACHED
         }
