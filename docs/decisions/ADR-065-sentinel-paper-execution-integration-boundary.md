@@ -3,12 +3,14 @@
 **Status:** Accepted — scope limited to the reconciled, as-built
 execution-outcome-reporting boundary (§3, §3.1, §4). See §3.2 for what
 remains explicitly deferred and unauthorized, and see `## Acceptance` below
-for the acceptance record. Per ADR-058 D2, full authoritative status
-additionally requires this file to be tracked/landed on the default
-branch — that has not yet occurred as of this act; see `## Acceptance`.
+for the acceptance record. ADR-058 D2 is satisfied: this file is tracked on
+the default branch (`main`), `Status: Accepted`, landed in commit `958751f`
+(Batch 4D-LAND); the SHA reference in `## Acceptance` was recorded in the
+immediately following consistency commit.
 **Date Proposed:** 2026-09-04
 **Date Reconciled:** 2026-09-04 (Batch 4D-RECONCILE — see §0)
 **Date Accepted:** 2026-09-04 (Batch 4D-ACCEPT — see `## Acceptance`)
+**Date Landed:** 2026-09-08 (Batch 4D-LAND — commit `958751f` on `main`)
 **Decision Type:** Architecture / Governance
 **Related ADRs:** ADR-001, ADR-002, ADR-009, ADR-012, ADR-013, ADR-014, ADR-045, ADR-058
 
@@ -637,14 +639,17 @@ the subsequent tracking/landing step.
 **Accepted By:** Architecture Owner (explicit act performed directly in this
 conversation — Batch 4D-ACCEPT — not inferred from implementation, from the
 Batch 4D-RECONCILE text change, or from any other source)
-**Accepting PR / commit:** — none yet. This acceptance act has not been
-committed to the repository as of this record. Per ADR-058 D2, full
-authoritative status additionally requires this document to be tracked on
-the default branch and landed under the repository's applicable write/merge
-controls; that step is separate from, and subsequent to, the acceptance
-decision recorded here, and has not occurred yet. No PR number, commit SHA,
-or other landing evidence is asserted because none exists at the time of
-this record.
+**Accepting / landing commit:** `958751f` — "docs/arch: land ADR-065 paper
+execution reporting" (Batch 4D-LAND), on the default branch `main`, landed
+under the repository's normal direct-to-`main` flow. That commit carries
+this ADR (in its Batch 4D-ACCEPT `Status: Accepted` form) together with
+exactly the reconciled Batch 4C implementation and tests it governs. This
+line itself was added in the immediately following mechanical
+consistency commit, since commit `958751f` could not contain its own SHA.
+With that commit, ADR-058 D2's three conditions are all met: tracked on
+the default branch, `Status: Accepted`, and landed under applicable
+write/merge controls. The acceptance decision recorded above (Batch
+4D-ACCEPT, 2026-09-04) preceded and is distinct from this landing step.
 
 **Scope of this acceptance — exactly, and only:**
 
@@ -706,9 +711,13 @@ Batch 4D-RECONCILE, through the act recorded in `## Acceptance` above.
 items and excluding everything in §3.2. This acceptance was not inferred
 from the pre-existing implementation, from the reconciliation text change,
 or from any other source — it was recorded here as a direct, explicit act.
-Per ADR-058 D2, this document additionally requires tracking/landing on the
-default branch (i.e., a commit) before it is fully authoritative; that has
-not occurred as of this entry. The three docstrings previously asserting
+Per ADR-058 D2, this document additionally required tracking/landing on the
+default branch (i.e., a commit) before it is fully authoritative; that
+occurred in commit `958751f` (Batch 4D-LAND), which carries this ADR plus
+exactly the reconciled Batch 4C implementation/tests it governs. All three
+D2 conditions — tracked on `main`, `Status: Accepted`, landed under
+applicable write/merge controls — are now met. The three docstrings
+previously asserting
 "ADR-065 (Accepted)" — `sentinel_engine/domain/decision_state.py`,
 `sentinel_engine/tests/test_decision_state.py`, and
 `sentinel_engine/tests/test_recommendation_governance_lifecycle.py` — were
@@ -720,3 +729,16 @@ the three references, describes, or relies on the deferred read-half/
 any of the three files: the correction those docstrings needed was for
 their "(Accepted)" claim to become true, not for their content to change,
 and that claim is now true.
+
+**Landed — 2026-09-08 (Batch 4D-LAND).** Committed to the default branch
+`main` as commit `958751f` ("docs/arch: land ADR-065 paper execution
+reporting"), together with exactly the reconciled Batch 4C implementation
+and tests it governs (13 files) and nothing else — Batch 2 (Decision
+optional fields) and Batch 3 (DecisionAction / Horizon / EvidencePolarity /
+recommendation-governance lifecycle) were deliberately left unstaged in the
+working tree as separately governed work. `decision_service.py` and
+`test_decision_service.py` were staged at blob granularity so only their
+`record_execution()` portions landed. ADR-058 D2 is satisfied as of this
+commit. This Status Log entry and the `## Acceptance` SHA reference were
+added in the immediately following mechanical consistency commit, since
+`958751f` could not contain its own hash.
