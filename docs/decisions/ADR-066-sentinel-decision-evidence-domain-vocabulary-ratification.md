@@ -2,12 +2,13 @@
 
 **Status:** Accepted — scope limited to the inert domain representation /
 vocabulary and the one adapter contract narrowing described in §3 (see
-`## Acceptance`). Per ADR-058 D2, full authoritative status additionally
-requires this file to be tracked/landed on the default branch; that has not
-yet occurred as of this acceptance act — the ADR remains untracked pending a
-separate LAND batch. The acceptance decision recorded in `## Acceptance` is
-the Architecture Owner act itself, distinct from and prior to that landing
-step.
+`## Acceptance`). ADR-058 D2 is satisfied: this file is tracked on the
+default branch (`main`), `Status: Accepted`, and was landed in commit
+`a7c65cb29c4eacb5bc8d31f2f56c5f771e504c4d` (Batch 4E-LAND) together with the
+§3.1–§3.8 implementation and §9 tests it ratifies. ADR-066 is now
+authoritative. The acceptance decision recorded in `## Acceptance` (Batch
+4E-ACCEPT, 2026-09-04) was the Architecture Owner act itself, distinct from
+and prior to that landing step.
 **Date Proposed:** 2026-09-08
 **Date Accepted:** 2026-09-04
 **Decision Type:** Architecture / Governance — Domain-Vocabulary Ratification (no runtime behavior change beyond one adapter contract narrowing, §8)
@@ -388,12 +389,18 @@ production caller, reverting it has no live blast radius.
 **Accepted By:** Architecture Owner (explicit act performed directly in this
 conversation — Batch 4E-ACCEPT — not inferred from the existing
 implementation, from the Batch 4E-RATIFY draft, or from any other source)
-**Accepting / landing commit:** — none yet. This acceptance act has not been
-committed. Per ADR-058 D2, full authoritative status additionally requires
-this document to be tracked on the default branch and landed under the
-repository's applicable write/merge controls; that is a separate, subsequent
-LAND batch, not part of this acceptance. No PR number or commit SHA is
-asserted because none exists yet.
+**Accepting / landing commit:** `a7c65cb29c4eacb5bc8d31f2f56c5f771e504c4d`
+— "docs: land ADR-066 decision and evidence vocabulary" (Batch 4E-LAND), on
+the default branch `main`, landed under the repository's normal
+direct-to-`main` flow, carrying this ADR (in its Batch 4E-ACCEPT
+`Status: Accepted` form) together with exactly the §3.1–§3.8 implementation
+and §9 tests it ratifies. This line was recorded in the immediately
+following documentation-consistency commit ("docs: record ADR-066 landing"),
+since commit `a7c65cb` could not contain its own SHA. With `a7c65cb`,
+ADR-058 D2's three conditions are all met — tracked on `main`,
+`Status: Accepted`, landed under applicable write/merge controls — and this
+ADR is authoritative. The acceptance decision (Batch 4E-ACCEPT, 2026-09-04)
+preceded and is distinct from this landing step.
 
 **Accepted scope — exactly, and only:** the inert domain representation and
 vocabulary in §3.1–§3.7 (`DecisionAction`, `Horizon`, `EvidencePolarity`; the
@@ -443,11 +450,24 @@ accepted this ADR, in exactly the form Batch 4E-RATIFY drafted it, through the
 act recorded in `## Acceptance` above. `Status` now reads `Accepted`, scoped
 exactly to §3 and excluding everything in §6. This acceptance was not inferred
 from the pre-existing implementation, the draft, or any other source — it is a
-direct, explicit act. Per ADR-058 D2, this document additionally requires
-tracking/landing on the default branch before it is fully authoritative; that
-is a separate LAND batch and has not occurred as of this entry, so ADR-058 D3
-still applies until it lands. No production code or test was modified to
-perform this acceptance; no other ADR was modified; nothing was staged or
-committed. The date rollover during this conversation (system clock now
+direct, explicit act. No production code or test was modified to perform this
+acceptance; no other ADR was modified; nothing was staged or committed at
+this step. The date rollover during this conversation (system clock now
 2026-09-08) does not change the `Date Accepted` the Architecture Owner
 specified for this act (2026-09-04).
+
+**Landed — 2026-09-08 (Batch 4E-LAND).** Committed to the default branch
+`main` as `a7c65cb29c4eacb5bc8d31f2f56c5f771e504c4d` ("docs: land ADR-066
+decision and evidence vocabulary"), together with exactly the §3.1–§3.8
+implementation and §9 tests it ratifies (17 files) and nothing else —
+`test_recommendation_governance_lifecycle.py`, `docs/REQUIREMENTS.md`,
+`tests/req_snapshots/req_state.json`, and the uncommitted
+`AARA_ARCHITECTURE_AUTHORITY.md` line were deliberately excluded.
+`decision_service.py` and `test_decision_service.py` carried only their
+ADR-066 hunks (the ADR-065 `record_execution` portions had already landed in
+`958751f`). With this commit ADR-058 D2 is satisfied and ADR-066 is
+authoritative; D3 no longer applies. This Status Log entry and the
+`## Acceptance` landing-commit reference were added in the immediately
+following documentation-consistency commit ("docs: record ADR-066 landing"),
+since `a7c65cb` could not contain its own hash. No production code or test
+was modified by that follow-up.
