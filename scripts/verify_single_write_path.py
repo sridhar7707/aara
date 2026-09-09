@@ -109,6 +109,72 @@ def _sql_write_sites(table: str) -> list[tuple[str, int, str]]:
     return hits
 
 
+def _module_path_of(relpath: str) -> str:
+    """Posix repo-relative .py path -> dotted module path.
+    database/services/decision_service.py -> database.services.decision_service
+    database/services/__init__.py          -> database.services"""
+    parts = relpath[:-3].split("/")  # strip ".py"
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
+def _legacy_decision_log_writer_modules(table: str = "decision_log") -> set[str]:
+    """The dotted module path(s) that actually contain the legacy
+    INSERT/UPDATE <table> SQL -- i.e. where the legacy decision_log writer
+    functions (create_decision/log_decision/...) are defined. Derived from
+    _sql_write_sites() so nothing is hard-coded: whichever file owns the
+    decision_log write literals is the legacy writer module."""
+    return {_module_path_of(relpath) for relpath, _lineno, _sql in _sql_write_sites(table)}
+
+
+def _imports_a_legacy_writer_module(tree: ast.Module, writer_modules: set[str]) -> bool:
+    """True iff this file imports one of writer_modules, either directly
+    (`import database.services.decision_service`,
+     `from database.services.decision_service import create_decision`)
+    or via a parent package (`from database.services import decision_service`)."""
+    for node in ast.walk(tree):
+        imported: list[str] = []
+        if isinstance(node, ast.Import):
+            imported = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:  # relative import -- never reaches a top-level package like `database`
+                continue
+            if node.module:
+                imported = [node.module]
+        for name in imported:
+            for wm in writer_modules:
+                if name == wm or wm.startswith(name + "."):
+                    return True
+    return False
+
+
+def _legacy_decision_log_writer_callers(fn_names: tuple[str, ...]) -> list[tuple[str, int]]:
+    """Every real Call node named in `fn_names` -- but only inside files
+    that import the legacy decision_log writer module (per import
+    provenance), so a legitimate call to some other package's
+    same-named function (e.g. sentinel_engine's
+    DecisionService.create_decision()) is never counted. Still relies on
+    _parsed_files()'s existing tests/docs/scripts/etc. exclusions."""
+    writer_modules = _legacy_decision_log_writer_modules()
+    hits: list[tuple[str, int]] = []
+    for relpath, tree in _parsed_files():
+        if _module_path_of(relpath) in writer_modules:
+            continue  # the writer module's own defs/helpers are not "callers"
+        if not _imports_a_legacy_writer_module(tree, writer_modules):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else (
+                func.attr if isinstance(func, ast.Attribute) else None
+            )
+            if name in fn_names:
+                hits.append((relpath, node.lineno))
+    return hits
+
+
 def run_checks() -> None:
     # ============================================================
     # 1. decision_log write call sites must not be reachable from the
@@ -125,16 +191,25 @@ def run_checks() -> None:
     )
 
     # ============================================================
-    # 2. The remaining decision_log writers (decision_service.create_decision,
-    #    timeline.log_decision) are dead code: zero production callers.
+    # 2. The legacy decision_log writer functions (create_decision /
+    #    log_decision, defined in whichever module owns the INSERT/UPDATE
+    #    decision_log SQL -- today database/services/decision_service.py)
+    #    are dead code: zero non-test production callers.
+    #
+    #    Import-provenance filtered: a Call named create_decision /
+    #    log_decision counts only when its file actually imports the legacy
+    #    writer module. A same-named call into another package (e.g.
+    #    sentinel_engine.services.decision_service.DecisionService
+    #    .create_decision(), or the SentinelEngine facade passthrough) is
+    #    NOT the decision_log writer and is not counted.
     # ============================================================
-    create_decision_callers = _callers_of("create_decision")
-    log_decision_callers = _callers_of("log_decision")
+    writer_modules = _legacy_decision_log_writer_modules()
+    legacy_writer_callers = _legacy_decision_log_writer_callers(("create_decision", "log_decision"))
     check(
-        "2. create_decision()/log_decision() (decision_log writers) have zero production callers",
-        not create_decision_callers and not log_decision_callers,
-        f"create_decision callers: {create_decision_callers or 'none'}; "
-        f"log_decision callers: {log_decision_callers or 'none'}",
+        "2. legacy decision_log writer functions (create_decision/log_decision) have zero production callers",
+        not legacy_writer_callers,
+        f"legacy writer module(s): {sorted(writer_modules) or 'none found'}; "
+        f"callers importing them: {legacy_writer_callers or 'none'}",
     )
 
     # ============================================================
