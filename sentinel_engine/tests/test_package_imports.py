@@ -56,9 +56,11 @@ _MODULES = [
     "sentinel_engine.services.sentinel_engine",
     "sentinel_engine.adapters",
     "sentinel_engine.adapters.decision_adapter",
+    "sentinel_engine.adapters.execution_adapter",
     "sentinel_engine.composition",
     "sentinel_engine.composition.evidence",
     "sentinel_engine.composition.governance",
+    "sentinel_engine.composition.execution",
 ]
 
 

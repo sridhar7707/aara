@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -38,6 +39,8 @@ from bot._main_positions import (
     _upsert_position_state,
 )
 from bot._main_trust_decisions import EntryDecisionRecorder
+from sentinel_engine.adapters.execution_adapter import to_execution_outcome
+from sentinel_engine.composition.execution import get_decision_service_for_execution_reporting
 
 
 @dataclass
@@ -75,12 +78,72 @@ class EntryContext:
     news_data_timestamp: str | None = None
 
 
+def _latest_decision_id_for_report(
+    trust_conn: sqlite3.Connection, symbol: str, action: str, event_type: str,
+) -> str | None:
+    """ADR-065: read-only correlation lookup for Sentinel execution-outcome
+    reporting -- the most recent decision_events row EntryDecisionRecorder
+    (bot/_main_trust_decisions.py) just wrote for this (symbol, action,
+    event_type), by sequence_number. Mirrors
+    bot/trust_ledger/outcomes.py::find_open_buy_decision_id()'s own query
+    shape; kept local to this file rather than added to
+    bot/trust_ledger/outcomes.py, since ADR-065 does not authorize changes
+    to that file."""
+    row = trust_conn.execute(
+        "SELECT decision_id FROM decision_events "
+        "WHERE asset=? AND action=? AND event_type=? "
+        "ORDER BY sequence_number DESC LIMIT 1",
+        (symbol, action, event_type),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def _report_execution_outcome_safe(
+    trust_conn: sqlite3.Connection, symbol: str, ledger_action: str, ledger_event_type: str,
+    *, side: str, outcome: str, is_paper: bool,
+    notional: float | None = None, quantity: float | None = None,
+    fill_price: float | None = None, order_id: str | None = None,
+    reason: str | None = None,
+) -> None:
+    """ADR-065: best-effort, failure-isolated report of an already-completed
+    execution outcome to Sentinel Engine.
+
+    Runs strictly after risk.approve_buy()/client.buy() and the existing
+    Trust Ledger write (recorder.reject()/record_executed()/
+    record_order_not_filled()) have already completed -- observational only.
+    Never raises: a Sentinel-reporting failure must never affect, delay,
+    retry, or roll back a trade that already happened, and this call never
+    invokes risk.approve_buy(), client.buy(), or any execution/risk code.
+
+    If no matching decision_events row can be found (trust_conn is None in
+    a test/caller that isn't wired to the ledger, or the row was never
+    written), this is a silent no-op -- it must never manufacture a
+    decision_id or a Sentinel recommendation to exercise this path."""
+    if trust_conn is None:
+        return
+    try:
+        decision_id = _latest_decision_id_for_report(trust_conn, symbol, ledger_action, ledger_event_type)
+        if decision_id is None:
+            return
+        payload = to_execution_outcome({
+            "decision_id": decision_id, "symbol": symbol, "action": ledger_action,
+            "side": side, "outcome": outcome, "is_paper": is_paper,
+            "timestamp": datetime.now(timezone.utc),
+            "notional": notional, "quantity": quantity, "fill_price": fill_price,
+            "order_id": order_id, "reason": reason,
+        })
+        get_decision_service_for_execution_reporting().record_execution(decision_id, payload)
+    except Exception as e:
+        logger.warning(f"Sentinel execution-outcome reporting failed for {symbol}: {e}")
+
+
 def _handle_entry(
     con: sqlite3.Connection, client: AlpacaClient, risk: RiskManager,
     symbol: str, ctx: EntryContext,
 ) -> float:
     """Process entry gates and buy execution. Returns updated available_cash."""
     available_cash = ctx.available_cash  # mutable local; all other fields accessed via ctx
+    _is_paper_execution = os.getenv("EXECUTION_BACKEND", "alpaca_paper") != "live"  # ADR-065
 
     _price_ts = getattr(ctx.latest, "name", None)
     _price_ts_iso = _price_ts.isoformat() if hasattr(_price_ts, "isoformat") else None
@@ -260,6 +323,11 @@ def _handle_entry(
         _reason = "risk.approve_buy() declined (portfolio-level risk check)"  # was previously silent
         logger.info(f"BUY {symbol} skipped — {_reason}")
         recorder.reject("risk_manager_approval", _reason)
+        _report_execution_outcome_safe(
+            ctx.trust_conn, symbol, "REJECT", "QUALIFIED_REJECTION",
+            side="buy", outcome="REJECTED", is_paper=_is_paper_execution,
+            notional=notional, reason=_reason,
+        )
         return available_cash
 
     result = client.buy(symbol, notional, limit_price=ctx.current_price)
@@ -346,10 +414,28 @@ def _handle_entry(
             _upsert_position_state(con, symbol, fill_price, fill_price, ctx.current_atr, fill_shares)
             available_cash -= notional
             ctx.buy_order_syms.discard(symbol)  # order is now filled, not pending
+            _report_execution_outcome_safe(
+                ctx.trust_conn, symbol, "BUY", "EXECUTED",
+                side="buy", outcome="FILLED", is_paper=_is_paper_execution,
+                notional=notional, quantity=fill_shares, fill_price=fill_price,
+                order_id=result.get("order_id"),
+            )
         else:
+            _fail_reason = "order submitted but did not fill within timeout"
             logger.warning(f"BUY {symbol} order did not fill — position state NOT recorded")
-            recorder.record_order_not_filled("order submitted but did not fill within timeout")
+            recorder.record_order_not_filled(_fail_reason)
+            _report_execution_outcome_safe(
+                ctx.trust_conn, symbol, "REJECT", "QUALIFIED_REJECTION",
+                side="buy", outcome="FAILED", is_paper=_is_paper_execution,
+                notional=notional, order_id=result.get("order_id"), reason=_fail_reason,
+            )
     else:
-        recorder.record_order_not_filled("order submission failed (client.buy() returned None)")
+        _fail_reason = "order submission failed (client.buy() returned None)"
+        recorder.record_order_not_filled(_fail_reason)
+        _report_execution_outcome_safe(
+            ctx.trust_conn, symbol, "REJECT", "QUALIFIED_REJECTION",
+            side="buy", outcome="FAILED", is_paper=_is_paper_execution,
+            notional=notional, reason=_fail_reason,
+        )
 
     return available_cash

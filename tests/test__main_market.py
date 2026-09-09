@@ -274,12 +274,17 @@ def test_fetch_symbol_daily_features_match_pretrimmed_reference(monkeypatch):
 def test_min_volume_ratio_gate_unchanged():
     """ADR-040 §5 item 6: this ADR's trim must not require, and did not
     receive, any change to MIN_VOLUME_RATIO or the Gate 2 comparison that
-    reads it -- both stay exactly as they were before this ADR."""
+    reads it -- both stay exactly as they were before this ADR.
+
+    The line number was re-pinned under ADR-065: that change added imports
+    and two new helper functions earlier in this file for Sentinel
+    execution-outcome reporting, shifting every line below them, including
+    this one, without altering Gate 2's own code."""
     assert config.MIN_VOLUME_RATIO == 0.3
 
     cycle_src = (Path(__file__).parent.parent / "bot" / "_main_cycle.py").read_text(encoding="utf-8")
     lines = cycle_src.splitlines()
-    assert lines[109] == "    if ctx.volume_ratio < MIN_VOLUME_RATIO:"  # line 110 (1-indexed)
+    assert lines[172] == "    if ctx.volume_ratio < MIN_VOLUME_RATIO:"  # line 173 (1-indexed)
 
 
 def test_fetch_symbol_spy_rs_trim_before_close_derivation(monkeypatch):
