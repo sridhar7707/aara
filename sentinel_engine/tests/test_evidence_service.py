@@ -133,6 +133,18 @@ def test_associate_evidence_writes_evidence_attached_event_with_correct_payload(
     assert events[0].payload["source"] == "newsapi"
 
 
+def test_associate_evidence_preserves_polarity_in_event_payload():
+    """Batch 2: SUPPORTING/CONTRADICTING must survive through the existing
+    EVIDENCE_ATTACHED event path, not just live on the in-memory object."""
+    service, ledger_repository, _ = _make_service()
+    evidence = _make_evidence(polarity="CONTRADICTING")
+
+    service.associate_evidence("dec-001", evidence)
+
+    events = ledger_repository.get_events()
+    assert events[0].payload["polarity"] == "CONTRADICTING"
+
+
 def test_associate_evidence_preserves_evidence_data_in_event_payload():
     """ADR-036: evidence.data must survive into the EVIDENCE_ATTACHED
     payload -- previously discarded here, the sole point Evidence.data was

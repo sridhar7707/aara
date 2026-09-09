@@ -3,6 +3,7 @@ import datetime
 
 from sentinel_engine.services.decision_service import DecisionService
 from sentinel_engine.domain.decision import Decision
+from sentinel_engine.domain.decision_action import DecisionAction
 from sentinel_engine.domain.decision_state import DecisionState
 from sentinel_engine.events.event_types import EventType
 from sentinel_engine.ledger.ledger import LedgerStore
@@ -104,6 +105,54 @@ def test_get_projection_returns_saved_projection():
 
     assert projection is not None
     assert projection.decision_id == "dec-001"
+
+
+def test_create_decision_preserves_batch_2_optional_fields_in_event_payload():
+    service, ledger_repository, _ = _make_service()
+    decision = _make_decision(
+        horizon="TACTICAL",
+        desired_allocation=5000.0,
+        minimum_viable_allocation=1500.0,
+        uncertainty=0.4,
+        thesis="Foundry capacity is the bottleneck through 2026.",
+        counterfactual="Yes.",
+    )
+
+    service.create_decision(decision)
+
+    payload = ledger_repository.get_events()[0].payload
+    assert payload["horizon"] == "TACTICAL"
+    assert payload["desired_allocation"] == 5000.0
+    assert payload["minimum_viable_allocation"] == 1500.0
+    assert payload["uncertainty"] == 0.4
+    assert payload["thesis"] == "Foundry capacity is the bottleneck through 2026."
+    assert payload["counterfactual"] == "Yes."
+
+
+def test_wait_decision_produces_an_ordinary_decision_created_event():
+    """WAIT is a recommendation/decision outcome, never an execution order
+    -- DecisionService depends only on LedgerRepository/ProjectionRepository
+    (see __init__), so there is no executor for a WAIT decision, or any
+    other decision, to reach through this service."""
+    service, ledger_repository, projection_repository = _make_service()
+    decision = _make_decision(action=DecisionAction.WAIT.value)
+
+    event = service.create_decision(decision)
+
+    assert event.event_type == EventType.DECISION_CREATED
+    assert event.payload["action"] == "WAIT"
+    projection = projection_repository.get("dec-001")
+    assert projection is not None
+    assert projection.action == "WAIT"
+
+
+def test_buy_more_decision_is_recorded_distinctly_from_buy():
+    service, _, projection_repository = _make_service()
+    service.create_decision(_make_decision(decision_id="dec-buy", action=DecisionAction.BUY.value))
+    service.create_decision(_make_decision(decision_id="dec-buy-more", action=DecisionAction.BUY_MORE.value))
+
+    assert projection_repository.get("dec-buy").action == "BUY"
+    assert projection_repository.get("dec-buy-more").action == "BUY_MORE"
 
 
 # -- record_execution() (ADR-065) --------------------------------------------

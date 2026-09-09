@@ -5,6 +5,7 @@ import dataclasses
 import pytest
 
 from sentinel_engine.evidence.evidence import Evidence
+from sentinel_engine.evidence.evidence_polarity import EvidencePolarity
 
 
 def _make_evidence(**overrides):
@@ -41,3 +42,19 @@ def test_evidence_is_immutable():
 def test_evidence_requires_all_fields():
     with pytest.raises(TypeError):
         Evidence(evidence_id="ev-001", evidence_type="NEWS_SENTIMENT")
+
+
+def test_evidence_polarity_defaults_to_none():
+    """Batch 2's additive polarity field must not break existing callers
+    that construct Evidence without it."""
+    evidence = _make_evidence()
+    assert evidence.polarity is None
+
+
+@pytest.mark.parametrize("polarity", [
+    EvidencePolarity.SUPPORTING,
+    EvidencePolarity.CONTRADICTING,
+])
+def test_evidence_preserves_polarity_when_provided(polarity):
+    evidence = _make_evidence(polarity=polarity.value)
+    assert evidence.polarity == polarity.value

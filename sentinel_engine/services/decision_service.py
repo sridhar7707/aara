@@ -37,6 +37,12 @@ class DecisionService:
                 "confidence": decision.confidence,
                 "evidence_reference": decision.evidence_reference,
                 "risk_reference": decision.risk_reference,
+                "horizon": decision.horizon,
+                "desired_allocation": decision.desired_allocation,
+                "minimum_viable_allocation": decision.minimum_viable_allocation,
+                "uncertainty": decision.uncertainty,
+                "thesis": decision.thesis,
+                "counterfactual": decision.counterfactual,
             },
         )
         self._ledger_repository.save_event(event)

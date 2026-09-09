@@ -4,10 +4,19 @@ Decision contract.
 Takes plain data (the shape bot code will eventually pass in), never a bot
 type, so this module has zero import dependency on bot/. All fields are
 validated here because this is a system boundary.
+
+Batch 2 (per docs/architecture/SENTINEL_ENGINE_PAPER_TRADING_BEHAVIORAL_CONTRACT_P0.md):
+`action` is now validated against DecisionAction's fixed five-value
+vocabulary -- this is "the appropriate boundary" the P0 contract asks for;
+Decision itself stays a trusting domain object, matching every other field
+here. The six new optional Decision fields are validated only when present
+in the input, and are otherwise omitted so Decision falls back to its own
+defaults -- this adapter never invents a value for them.
 """
 from datetime import datetime
 
 from sentinel_engine.domain.decision import Decision
+from sentinel_engine.domain.decision_action import DecisionAction
 
 _REQUIRED_FIELDS = (
     "decision_id",
@@ -18,6 +27,9 @@ _REQUIRED_FIELDS = (
     "evidence_reference",
     "risk_reference",
 )
+
+_OPTIONAL_STRING_FIELDS = ("horizon", "thesis", "counterfactual")
+_OPTIONAL_NUMERIC_FIELDS = ("desired_allocation", "minimum_viable_allocation", "uncertainty")
 
 
 def to_decision(data: dict) -> Decision:
@@ -39,6 +51,9 @@ def to_decision(data: dict) -> Decision:
         raise ValueError("symbol must be a non-empty string")
     if not isinstance(action, str) or not action:
         raise ValueError("action must be a non-empty string")
+    if not DecisionAction.has_value(action):
+        allowed = ", ".join(member.value for member in DecisionAction)
+        raise ValueError(f"action must be one of ({allowed}), got {action!r}")
     if not isinstance(timestamp, datetime):
         raise ValueError("timestamp must be a datetime instance")
     if not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
@@ -48,6 +63,22 @@ def to_decision(data: dict) -> Decision:
     if not isinstance(risk_reference, str) or not risk_reference:
         raise ValueError("risk_reference must be a non-empty string")
 
+    optional_kwargs = {}
+
+    for field in _OPTIONAL_STRING_FIELDS:
+        if field in data and data[field] is not None:
+            value = data[field]
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{field} must be a non-empty string when provided")
+            optional_kwargs[field] = value
+
+    for field in _OPTIONAL_NUMERIC_FIELDS:
+        if field in data and data[field] is not None:
+            value = data[field]
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError(f"{field} must be numeric when provided")
+            optional_kwargs[field] = float(value)
+
     return Decision(
         decision_id=decision_id,
         symbol=symbol,
@@ -56,4 +87,5 @@ def to_decision(data: dict) -> Decision:
         confidence=float(confidence),
         evidence_reference=evidence_reference,
         risk_reference=risk_reference,
+        **optional_kwargs,
     )

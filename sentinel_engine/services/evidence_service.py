@@ -40,6 +40,7 @@ class EvidenceService:
                 "evidence_type": evidence.evidence_type,
                 "source": evidence.source,
                 "data": evidence.data,
+                "polarity": evidence.polarity,
             },
         )
         self._ledger_repository.save_event(event)
