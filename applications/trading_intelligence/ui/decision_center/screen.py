@@ -71,6 +71,7 @@ _SENTINEL_ACTION_SOURCE = "SENTINEL"
 _WAIT_ACTION = "WAIT"
 _SUPPORTING_POLARITY = "SUPPORTING"
 _CONTRADICTING_POLARITY = "CONTRADICTING"
+_DECISION_CREATED_EVENT_TYPE = "DECISION_CREATED"
 
 
 def provenance_label(action_source: Optional[str]) -> str:
@@ -187,6 +188,27 @@ class DecisionDetailArea:
         if self.decision is None:
             return None
         return format_display_timestamp(self.decision.updated_at)
+
+    @property
+    def decision_created_display(self) -> Optional[str]:
+        """Sprint 4 Item #3 -- the DECISION_CREATED entry's own recorded
+        timestamp, taken from the already-loaded timeline (``audit_trail``)
+        and formatted for display, or ``None`` when the timeline carries no
+        such entry.
+
+        Reads the existing ``AuditEntry.created_at`` verbatim: never the
+        decision's ``updated_at`` (a different value with a different
+        meaning), never fabricated, and never invented when the entry is
+        absent. Whether that entry is a durable ledger event or a
+        read-model-synthesised one is not asserted or changed here -- this
+        only surfaces the timestamp it already carries. The first matching
+        entry wins, so the result is deterministic for a given timeline."""
+        if self.decision is None:
+            return None
+        for entry in self.audit_trail:
+            if entry.event_type == _DECISION_CREATED_EVENT_TYPE:
+                return format_display_timestamp(entry.created_at)
+        return None
 
     # --- ADR-070 Batch 2: recommendation-surfacing presentation semantics ---
 

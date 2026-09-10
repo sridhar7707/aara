@@ -757,6 +757,20 @@ footer { display: none !important; }
 }
 .aara-lifecycle-track .connector.complete { background: var(--lifecycle-complete); }
 
+/* Sprint 4 Item #3: the DECISION_CREATED entry's own recorded timestamp,
+   shown as a small muted caption directly under the track -- calm
+   chronological context for the first stage, never a status pill or badge.
+   Same primitive tokens as the header captions
+   (.aara-recommendation-provenance / .aara-confidence-qualifier); no new
+   token, no colour beyond the muted secondary text. The negative top
+   margin closes the track's own bottom padding so the caption sits with
+   the "Created" stage rather than floating below the whole track. */
+.aara-lifecycle-created {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  margin: calc(-1 * var(--space-sm)) 0 var(--space-md) 0;
+}
+
 /* Evidence / Governance & Policy / Approval -- distinct subtle record-card
    surfaces (Detail Panel Polish pass, superseding V4's hairline-separated
    ledger-row treatment). record_card_html's header/fields markup is

@@ -1808,6 +1808,112 @@ def test_lifecycle_track_reflects_decision_created_as_the_first_stage():
     ) in lifecycle
 
 
+# --- Sprint 4 Item #3: DECISION_CREATED timestamp caption on the lifecycle ---
+
+
+def test_lifecycle_shows_the_decision_created_event_timestamp_caption():
+    view = _make_view()
+    entry = _make_audit_entry(
+        event_type="DECISION_CREATED",
+        created_at=datetime.datetime(2026, 8, 8, 13, 30, 0),  # -> 08:30 CDT
+    )
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, audit_trail=(entry,))
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    lifecycle = ui._render_detail("dec-001")[1]
+
+    assert 'class="aara-lifecycle-created"' in lifecycle
+    assert "Decision created" in lifecycle
+    assert "2026-08-08 08:30 CDT" in lifecycle
+
+
+def test_lifecycle_caption_uses_the_event_time_not_the_decision_updated_at():
+    view = _make_view(updated_at=datetime.datetime(2026, 8, 8, 20, 0, 0))  # -> 15:00 CDT
+    entry = _make_audit_entry(
+        event_type="DECISION_CREATED",
+        created_at=datetime.datetime(2026, 8, 8, 13, 30, 0),  # -> 08:30 CDT
+    )
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, audit_trail=(entry,))
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    lifecycle = ui._render_detail("dec-001")[1]
+
+    assert "2026-08-08 08:30 CDT" in lifecycle
+    assert "2026-08-08 15:00 CDT" not in lifecycle
+
+
+def test_lifecycle_caption_absent_when_timeline_has_no_decision_created_entry():
+    view = _make_view()
+    other = _make_audit_entry(event_type="EVIDENCE_ATTACHED")
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, audit_trail=(other,))
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    lifecycle = ui._render_detail("dec-001")[1]
+
+    assert "aara-lifecycle-created" not in lifecycle
+    assert "Decision created" not in lifecycle
+    # the four-stage track itself is unchanged
+    assert "Created" in lifecycle and "Approval" in lifecycle
+
+
+def test_lifecycle_caption_absent_when_no_audit_trail():
+    view = _make_view()
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view))
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    lifecycle = ui._render_detail("dec-001")[1]
+
+    assert "aara-lifecycle-created" not in lifecycle
+
+
+def test_lifecycle_caption_does_not_change_the_audit_trail_rendering():
+    """The DECISION_CREATED audit card still renders exactly as before --
+    the caption is an addition to the lifecycle track, not the audit list."""
+    view = _make_view()
+    entry = _make_audit_entry(
+        event_type="DECISION_CREATED",
+        created_at=datetime.datetime(2026, 8, 8, 13, 30, 0),
+    )
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, audit_trail=(entry,))
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    *_, audit_html = ui._render_detail("dec-001")
+
+    assert 'class="aara-record-card"' in audit_html
+    assert "Decision Created" in audit_html
+    assert "Recorded At" in audit_html
+    assert "aara-lifecycle-created" not in audit_html
+
+
+def test_lifecycle_created_caption_escapes_interpolated_value():
+    assert (
+        "&lt;b&gt;x&lt;/b&gt;"
+        in DecisionCenterUI._lifecycle_track_html(
+            DecisionState.DECISION_CREATED, "<b>x</b>"
+        )
+    )
+    assert "<b>x</b>" not in DecisionCenterUI._lifecycle_track_html(
+        DecisionState.DECISION_CREATED, "<b>x</b>"
+    )
+
+
+def test_lifecycle_track_html_without_created_display_is_unchanged():
+    """Default call (no caption arg) must produce the pre-Item-#3 markup."""
+    out = DecisionCenterUI._lifecycle_track_html(DecisionState.DECISION_CREATED)
+
+    assert "aara-lifecycle-created" not in out
+    assert out.startswith('<div class="aara-lifecycle-track">')
+    assert out.endswith("</div>")
+
+
 def test_decision_header_escapes_symbol_and_never_exposes_the_raw_decision_id():
     """The header shows only symbol + action ('NVDA · SELL'); decision_id is
     an internal identifier (used for row selection, controller/service

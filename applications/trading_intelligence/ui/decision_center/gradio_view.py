@@ -1511,7 +1511,9 @@ class DecisionCenterUI:
             DecisionCenterUI._decision_header_html(
                 decision, detail_area.evidence_reference, detail_area.risk_reference,
             ),
-            DecisionCenterUI._lifecycle_track_html(decision.status),
+            DecisionCenterUI._lifecycle_track_html(
+                decision.status, detail_area.decision_created_display,
+            ),
             detail_area.confidence_display,
             detail_area.timestamp_display,
             detail_area.status_display,
@@ -1992,13 +1994,24 @@ class DecisionCenterUI:
         return f'<span class="aara-action-badge {css_class}">{html.escape(action)}</span>'
 
     @staticmethod
-    def _lifecycle_track_html(status: DecisionState) -> str:
+    def _lifecycle_track_html(
+        status: DecisionState, created_display: Optional[str] = None
+    ) -> str:
         """Each stage label is a native #anchor link to the already-existing
         detail section it names (decision-created-section on header_output,
         evidence-section/governance-section/approval-section on their own
         gr.HTML() outputs) -- no JS, no new controller/status/lifecycle
         semantics, just an in-page jump to a section that already renders
-        that data."""
+        that data.
+
+        Sprint 4 Item #3: when the loaded timeline carries a DECISION_CREATED
+        entry, ``created_display`` (already formatted by
+        DecisionDetailArea.decision_created_display) is shown as a small,
+        muted caption beneath the track -- calm chronological context for
+        the first stage. Escaped; omitted entirely when that entry is
+        absent (``created_display is None``), so nothing is fabricated. The
+        four-stage track markup is byte-identical to before when the
+        caption is omitted."""
         stage_values = [stage for stage, _, _ in _LIFECYCLE_STAGES]
         current_index = stage_values.index(status)
         segments = []
@@ -2016,7 +2029,14 @@ class DecisionCenterUI:
                 f'<span class="stage {stage_class}"><span class="dot"></span>'
                 f'<a class="label" href="#{anchor_id}">{html.escape(label)}</a></span>'
             )
-        return '<div class="aara-lifecycle-track">' + "".join(segments) + "</div>"
+        track = '<div class="aara-lifecycle-track">' + "".join(segments) + "</div>"
+        if created_display:
+            track += (
+                '<div class="aara-lifecycle-created">'
+                f"Decision created &middot; {html.escape(created_display)}"
+                "</div>"
+            )
+        return track
 
     @staticmethod
     def _record_card_html(

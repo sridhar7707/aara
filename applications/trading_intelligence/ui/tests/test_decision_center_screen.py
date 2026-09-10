@@ -608,6 +608,92 @@ def test_batch2_properties_do_not_disturb_existing_core_formatting():
     assert area.confidence_qualifier == "Uncalibrated ensemble model score"
 
 
+# --- Sprint 4 Item #3: decision_created_display (event-timeline enrichment) ---
+
+
+def test_decision_created_display_is_none_when_no_decision_selected():
+    area = DecisionDetailArea(decision=None)
+
+    assert area.decision_created_display is None
+
+
+def test_decision_created_display_is_none_when_timeline_has_no_events():
+    """Missing optional timeline information is reported honestly -- never
+    fabricated from updated_at or invented."""
+    area = DecisionDetailArea(decision=_make_view(), audit_trail=())
+
+    assert area.decision_created_display is None
+
+
+def test_decision_created_display_is_none_when_timeline_has_no_decision_created_entry():
+    other = _make_audit_entry(event_type="EVIDENCE_ATTACHED")
+    area = DecisionDetailArea(decision=_make_view(), audit_trail=(other,))
+
+    assert area.decision_created_display is None
+
+
+def test_decision_created_display_uses_the_decision_created_entry_timestamp():
+    entry = _make_audit_entry(
+        event_type="DECISION_CREATED",
+        created_at=datetime.datetime(2026, 8, 21, 19, 45, 0),  # naive-UTC
+    )
+    area = DecisionDetailArea(decision=_make_view(), audit_trail=(entry,))
+
+    assert area.decision_created_display == "2026-08-21 14:45 CDT"
+
+
+def test_decision_created_display_winter_timestamp_converts_to_cst():
+    entry = _make_audit_entry(
+        event_type="DECISION_CREATED",
+        created_at=datetime.datetime(2026, 1, 8, 15, 40, 0),
+    )
+    area = DecisionDetailArea(decision=_make_view(), audit_trail=(entry,))
+
+    assert area.decision_created_display == "2026-01-08 09:40 CST"
+
+
+def test_decision_created_display_is_the_event_time_not_the_decision_updated_at():
+    """The decision's updated_at is a different value with a different
+    meaning -- decision_created_display must read the DECISION_CREATED
+    event's own created_at, never updated_at."""
+    view = _make_view(updated_at=datetime.datetime(2026, 8, 21, 23, 0, 0))  # -> 18:00 CDT
+    entry = _make_audit_entry(
+        event_type="DECISION_CREATED",
+        created_at=datetime.datetime(2026, 8, 21, 19, 45, 0),  # -> 14:45 CDT
+    )
+    area = DecisionDetailArea(decision=view, audit_trail=(entry,))
+
+    assert area.decision_created_display == "2026-08-21 14:45 CDT"
+    assert area.timestamp_display == "2026-08-21 18:00 CDT"
+
+
+def test_decision_created_display_takes_the_first_decision_created_entry_deterministically():
+    first = _make_audit_entry(
+        event_type="DECISION_CREATED",
+        created_at=datetime.datetime(2026, 8, 21, 19, 45, 0),
+    )
+    second = _make_audit_entry(
+        event_type="DECISION_CREATED",
+        created_at=datetime.datetime(2026, 8, 21, 20, 30, 0),
+    )
+    area = DecisionDetailArea(decision=_make_view(), audit_trail=(first, second))
+
+    assert area.decision_created_display == "2026-08-21 14:45 CDT"
+
+
+def test_decision_created_display_does_not_disturb_provenance_or_polarity():
+    entry = _make_audit_entry(event_type="DECISION_CREATED")
+    area = DecisionDetailArea(
+        decision=_make_view(action_source="SENTINEL"),
+        evidence=(_make_entry(polarity="CONTRADICTING"),),
+        audit_trail=(entry,),
+    )
+
+    assert area.decision_created_display is not None
+    assert area.recommendation_provenance_display == "Sentinel recommendation"
+    assert area.evidence_polarity_rows[0].polarity_label == "Contradicted the BUY"
+
+
 def test_batch2_presentation_helpers_are_pure_and_import_no_execution_deps():
     import applications.trading_intelligence.ui.decision_center.screen as screen_mod
 
