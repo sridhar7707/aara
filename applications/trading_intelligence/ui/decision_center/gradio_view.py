@@ -265,6 +265,7 @@ from applications.trading_intelligence.ui.decision_center.screen import (
     CONFIDENCE_QUALIFIER,
     DecisionDetailArea,
     DecisionListArea,
+    EvidencePolarityRow,
     ReadStatus,
     format_display_timestamp,
     is_sentinel_recommendation,
@@ -1584,6 +1585,13 @@ class DecisionCenterUI:
     def _format_evidence_html(detail_area: DecisionDetailArea) -> str:
         if detail_area.evidence_status is ReadStatus.ERROR:
             return DecisionCenterUI._error_message_html(_EVIDENCE_ERROR_MESSAGE)
+        # ADR-070 Sprint 3 (§9): one per-record polarity micro-label per
+        # evidence card. DecisionDetailArea.evidence_polarity_rows is already
+        # one EvidencePolarityRow per evidence record, in the same order as
+        # detail_area.evidence (screen.py builds it by iterating that tuple),
+        # so a positional zip pairs each card with its own row. No label is
+        # recomputed here; nothing is combined or aggregated across records.
+        polarity_rows = detail_area.evidence_polarity_rows
         cards = [
             DecisionCenterUI._record_card_html(
                 entry.evidence_type,
@@ -1593,11 +1601,28 @@ class DecisionCenterUI:
                     ("Attached", format_display_timestamp(entry.attached_at), True),
                 ],
                 "neutral",
-                DecisionCenterUI._evidence_detail_html(entry),
+                DecisionCenterUI._evidence_polarity_html(polarity_row)
+                + DecisionCenterUI._evidence_detail_html(entry),
             )
-            for entry in detail_area.evidence
+            for entry, polarity_row in zip(detail_area.evidence, polarity_rows)
         ]
         return DecisionCenterUI._record_list_html(cards, _EVIDENCE_EMPTY_MESSAGE, "evidence")
+
+    @staticmethod
+    def _evidence_polarity_html(polarity_row: EvidencePolarityRow) -> str:
+        """ADR-070 §9 -- one calm, text-first micro-label carrying only this
+        single evidence record's own polarity phrase, taken verbatim from
+        screen.py's EvidencePolarityRow.polarity_label (exactly one of
+        "Supported the BUY" / "Contradicted the BUY" / "Polarity unavailable").
+        The phrase is never recomputed here, never combined with another
+        record's, and no count / majority / unanimity / net polarity / score /
+        tally is derived. Same muted supporting-caption treatment as the
+        header's confidence qualifier -- no badge, gauge, colour-only signal,
+        or motion."""
+        return (
+            '<div class="aara-evidence-polarity">'
+            f"{html.escape(polarity_row.polarity_label)}</div>"
+        )
 
     @staticmethod
     def _evidence_detail_html(entry: EvidenceEntry) -> str:

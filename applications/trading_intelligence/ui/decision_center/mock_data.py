@@ -24,6 +24,7 @@ import datetime
 from typing import List
 
 from applications.trading_intelligence.projections.decision_view import DecisionState, DecisionView
+from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionCenterScreen,
     DecisionDetailArea,
@@ -76,14 +77,54 @@ _MOCK_DECISIONS = [
 ]
 
 
+# polarity (ADR-070 §9) is set on these mock evidence records purely so a demo
+# of the shipped Decision Center shows all three per-record polarity phrases --
+# "Supported the BUY" (SUPPORTING), "Contradicted the BUY" (CONTRADICTING), and
+# "Polarity unavailable" (None -- a pre-B1 record, or B1's own HOLD /
+# unrecognised-signal outcome). One value per record; nothing here is
+# aggregated, and no production semantics change.
+_MOCK_EVIDENCE = [
+    EvidenceEntry(
+        evidence_id="mock-dec-001-xgboost",
+        evidence_type="MODEL_OUTPUT",
+        source="xgboost",
+        attached_at=datetime.datetime(2026, 8, 4, 9, 34, 0),
+        polarity="SUPPORTING",
+    ),
+    EvidenceEntry(
+        evidence_id="mock-dec-001-lstm",
+        evidence_type="MODEL_OUTPUT",
+        source="lstm",
+        attached_at=datetime.datetime(2026, 8, 4, 9, 34, 0),
+        polarity="CONTRADICTING",
+    ),
+    EvidenceEntry(
+        evidence_id="mock-dec-001-finbert",
+        evidence_type="MODEL_OUTPUT",
+        source="finbert",
+        attached_at=datetime.datetime(2026, 8, 4, 9, 34, 0),
+        polarity=None,
+    ),
+]
+
+
 def get_mock_decisions() -> List[DecisionView]:
     return list(_MOCK_DECISIONS)
+
+
+def get_mock_evidence() -> List[EvidenceEntry]:
+    return list(_MOCK_EVIDENCE)
 
 
 def build_mock_screen() -> DecisionCenterScreen:
     decisions = get_mock_decisions()
     selected = decisions[0] if decisions else None
+    detail_area = (
+        DecisionDetailArea(decision=selected, evidence=tuple(_MOCK_EVIDENCE))
+        if selected is not None
+        else DecisionDetailArea(decision=None)
+    )
     return DecisionCenterScreen(
         list_area=DecisionListArea(decisions=decisions),
-        detail_area=DecisionDetailArea(decision=selected),
+        detail_area=detail_area,
     )

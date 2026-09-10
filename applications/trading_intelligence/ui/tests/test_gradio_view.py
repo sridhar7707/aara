@@ -987,6 +987,150 @@ def test_render_detail_renders_an_empty_evidence_message_for_a_decision_with_no_
     assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
 
 
+# --- ADR-070 Sprint 3 (§9): per-record evidence polarity rendered in the
+#     evidence section. screen.py already computes DecisionDetailArea.
+#     evidence_polarity_rows; these prove the phrase reaches the rendered HTML,
+#     one per record, never aggregated. --------------------------------------
+
+_POLARITY_AGGREGATE_WORDS = (
+    "majority", "minority", "unanimity", "unanimous", "net polarity",
+    "polarity score", "evidence score", "corroboration", "count", "tally",
+    "k of n", "of 3", "of three", "votes", "consensus",
+)
+
+
+def _evidence_html_for(*entries):
+    view = _make_view()
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, evidence=entries)
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+    *_, evidence_html, _governance_html, _approval_html, _audit_html = ui._render_detail(
+        "dec-001"
+    )
+    return evidence_html
+
+
+def test_render_detail_renders_supported_polarity_once_for_its_evidence_record():
+    entry = _make_entry(evidence_id="ev-xgb", source="xgboost", polarity="SUPPORTING")
+
+    evidence_html = _evidence_html_for(entry)
+
+    assert evidence_html.count("Supported the BUY") == 1
+    assert "Contradicted the BUY" not in evidence_html
+    assert "Polarity unavailable" not in evidence_html
+    assert 'class="aara-evidence-polarity"' in evidence_html
+
+
+def test_render_detail_renders_contradicted_polarity_once_for_its_evidence_record():
+    entry = _make_entry(evidence_id="ev-lstm", source="lstm", polarity="CONTRADICTING")
+
+    evidence_html = _evidence_html_for(entry)
+
+    assert evidence_html.count("Contradicted the BUY") == 1
+    assert "Supported the BUY" not in evidence_html
+    assert "Polarity unavailable" not in evidence_html
+
+
+def test_render_detail_renders_unavailable_polarity_once_for_its_evidence_record():
+    entry = _make_entry(evidence_id="ev-fin", source="finbert", polarity=None)
+
+    evidence_html = _evidence_html_for(entry)
+
+    assert evidence_html.count("Polarity unavailable") == 1
+    assert "Supported the BUY" not in evidence_html
+    assert "Contradicted the BUY" not in evidence_html
+
+
+def test_render_detail_renders_polarity_per_record_not_aggregated():
+    entries = (
+        _make_entry(evidence_id="ev-xgb", source="xgboost", polarity="SUPPORTING"),
+        _make_entry(evidence_id="ev-lstm", source="lstm", polarity="CONTRADICTING"),
+        _make_entry(evidence_id="ev-fin", source="finbert", polarity=None),
+    )
+
+    evidence_html = _evidence_html_for(*entries)
+
+    # one line per record, each carrying only its own phrase
+    assert evidence_html.count('class="aara-evidence-polarity"') == 3
+    assert evidence_html.count("Supported the BUY") == 1
+    assert evidence_html.count("Contradicted the BUY") == 1
+    assert evidence_html.count("Polarity unavailable") == 1
+    _assert_index_order(
+        evidence_html, "Supported the BUY", "Contradicted the BUY", "Polarity unavailable"
+    )
+
+
+def test_render_detail_evidence_polarity_introduces_no_aggregate_language():
+    entries = (
+        _make_entry(evidence_id="ev-1", source="xgboost", polarity="SUPPORTING"),
+        _make_entry(evidence_id="ev-2", source="lstm", polarity="SUPPORTING"),
+        _make_entry(evidence_id="ev-3", source="finbert", polarity="CONTRADICTING"),
+    )
+
+    evidence_html = _evidence_html_for(*entries).lower()
+
+    for word in _POLARITY_AGGREGATE_WORDS:
+        assert word not in evidence_html, word
+
+
+def test_render_detail_evidence_polarity_leaves_existing_evidence_rendering_intact():
+    entry = _make_entry(
+        evidence_type="NEWS_SENTIMENT", source="newsapi", polarity="SUPPORTING"
+    )
+
+    evidence_html = _evidence_html_for(entry)
+
+    # everything test_render_detail_renders_a_single_evidence_card asserts
+    assert "NEWS_SENTIMENT" in evidence_html
+    assert "newsapi" in evidence_html
+    assert "2026-08-08 04:05 CDT" in evidence_html
+    assert 'class="aara-record-card"' in evidence_html
+    # and the polarity label is additive, not a replacement
+    assert "Supported the BUY" in evidence_html
+
+
+def test_render_detail_evidence_polarity_absent_from_empty_missing_and_error_states():
+    view = _make_view()
+
+    empty_controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=view, evidence=())
+    )
+    *_, empty_evidence, _g1, _a1, _au1 = DecisionCenterUI(
+        empty_controller, ["dec-001"]
+    )._render_detail("dec-001")
+    assert "aara-evidence-polarity" not in empty_evidence
+    assert "Polarity unavailable" not in empty_evidence
+
+    missing_controller = _FakeController(detail_area=DecisionDetailArea(decision=None))
+    *_, missing_evidence, _g2, _a2, _au2 = DecisionCenterUI(
+        missing_controller, ["dec-001"]
+    )._render_detail("dec-001")
+    assert missing_evidence == ""
+
+    error_controller = _FakeController(
+        detail_area=DecisionDetailArea(
+            decision=view, evidence=(), evidence_status=ReadStatus.ERROR
+        )
+    )
+    *_, error_evidence, _g3, _a3, _au3 = DecisionCenterUI(
+        error_controller, ["dec-001"]
+    )._render_detail("dec-001")
+    assert "aara-evidence-polarity" not in error_evidence
+    assert "Supported the BUY" not in error_evidence
+    assert "Polarity unavailable" not in error_evidence
+    assert _EVIDENCE_ERROR_MESSAGE in error_evidence
+
+
+def test_render_detail_blank_decision_id_carries_no_evidence_polarity():
+    ui = DecisionCenterUI(_FakeController(), ["dec-001"])
+
+    *_, blank_evidence, _g, _a, _au = ui._render_detail("")
+
+    assert "aara-evidence-polarity" not in blank_evidence
+    assert "Polarity unavailable" not in blank_evidence
+
+
 def test_evidence_detail_disclosure_renders_all_five_authorized_fields():
     """ADR-037: shap_drivers, is_degraded, val_loss, raw_score, headlines."""
     view = _make_view()

@@ -677,6 +677,19 @@ footer { display: none !important; }
   color: var(--color-text-secondary);
 }
 
+/* ADR-070 Sprint 3 (§9) -- per-record evidence polarity. One small, muted
+   supporting label inside an evidence record's card, carrying only that
+   record's own phrase ("Supported the BUY" / "Contradicted the BUY" /
+   "Polarity unavailable"). Same calm muted-caption treatment as
+   .aara-confidence-qualifier above -- no badge, no gauge, no red/green-only
+   signal, no motion, no new hierarchy beyond a small supporting label. Never
+   an aggregate. */
+.aara-record-card .aara-evidence-polarity {
+  margin-top: var(--space-xs);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
 /* BUY/SELL/HOLD badge -- subtle tint, never color alone (text always
    present). Compacted slightly (13px -> 12px, 8px -> 7px horizontal
    padding) as part of the Detail Panel Polish pass so it reads as an
