@@ -1,6 +1,10 @@
-from applications.trading_intelligence.ui.performance_learning.mock_data import build_mock_screen
+from applications.trading_intelligence.ui.performance_learning.mock_data import (
+    build_calibration_preview_screen,
+    build_mock_screen,
+)
 from applications.trading_intelligence.ui.performance_learning.screen import (
     ATTRIBUTION_BREAKDOWN_TITLE,
+    CALIBRATION_MIN_OUTCOMES,
     MODEL_CONFIDENCE_CALIBRATION_TITLE,
     OUTCOME_HISTORY_TITLE,
 )
@@ -53,3 +57,52 @@ def test_outcome_history_message_does_not_imply_every_decision_has_an_outcome():
     message = screen.outcome_history.unavailable_message
     assert "BUY" in message
     assert "never every decision" in message or "not every decision" in message.lower()
+
+
+# --- calibration preview builder (opt-in; never the production shell) -----
+
+
+def test_build_mock_screen_leaves_calibration_unavailable():
+    """The production shell path must not gain fabricated calibration
+    figures -- calibration stays unavailable exactly like the other
+    unwired areas."""
+    screen = build_mock_screen()
+
+    assert screen.calibration_health is None
+    assert screen.calibration_available is False
+    assert screen.calibration_bands == ()
+
+
+def test_calibration_preview_screen_is_healthy_and_over_the_min():
+    screen = build_calibration_preview_screen()
+
+    assert screen.calibration_available is True
+    assert screen.calibration_total_outcomes >= CALIBRATION_MIN_OUTCOMES
+    assert screen.calibration_has_enough_data is True
+
+
+def test_calibration_preview_exercises_wins_losses_and_an_empty_band():
+    screen = build_calibration_preview_screen()
+
+    populated = [b for b in screen.calibration_bands if b.n > 0]
+    empty = [b for b in screen.calibration_bands if b.n == 0]
+    assert len(populated) >= 2
+    assert len(empty) >= 1
+    assert any(b.wins > 0 for b in populated)
+    assert any(b.losses > 0 for b in populated)
+
+
+def test_calibration_preview_is_deterministic():
+    assert build_calibration_preview_screen() == build_calibration_preview_screen()
+
+
+def test_calibration_preview_keeps_outcome_history_and_attribution_unavailable():
+    """The preview builder illustrates the calibration render path only --
+    it does not fabricate outcome-history rows or attribution data."""
+    screen = build_calibration_preview_screen()
+
+    assert screen.outcome_rows == ()
+    assert screen.outcome_health is None
+    assert screen.attribution_breakdown.unavailable_message == (
+        build_mock_screen().attribution_breakdown.unavailable_message
+    )

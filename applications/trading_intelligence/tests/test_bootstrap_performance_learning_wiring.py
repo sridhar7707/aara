@@ -222,6 +222,75 @@ def test_composed_app_still_has_six_screen_labels_and_merged_assets():
     assert app.css and "pl-outcome-table" in app.css
 
 
+# --- Sprint 4 #1: Model Confidence Calibration wiring -------------------
+
+def _closed_pair(buy_id, sell_id, *, score, realized_pnl, symbol="AAA"):
+    return [
+        _row(id=buy_id, symbol=symbol, action="BUY", shares=100.0,
+             timestamp="2026-07-01T00:00:00+00:00", ensemble_score=score,
+             regime="RANGING"),
+        _row(id=sell_id, symbol=symbol, action="SELL_TIME_EXIT", shares=100.0,
+             timestamp="2026-07-20T00:00:00+00:00", order_id="o-{}".format(sell_id),
+             realized_pnl=realized_pnl, pnl_pct=realized_pnl / 1000.0, holding_days=19),
+    ]
+
+
+def test_calibration_is_unavailable_when_the_outcome_read_is_unavailable():
+    screen = _build_performance_learning_screen("no_such_calibration_db_xyz.db")
+    assert screen.calibration_available is False
+    assert screen.calibration_bands == ()
+
+
+def test_calibration_is_healthy_but_empty_for_an_empty_trades_db():
+    path = _empty_db()
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.calibration_available is True
+        assert screen.calibration_is_empty is True
+        # four fixed bands, all zero
+        assert [b.label for b in screen.calibration_bands] == [
+            "0.50-0.55", "0.55-0.60", "0.60-0.65", "0.65-1.00",
+        ]
+        assert all(b.n == 0 for b in screen.calibration_bands)
+    finally:
+        os.remove(path)
+
+
+def test_calibration_bands_reflect_closed_win_loss_outcomes_from_the_snapshot():
+    rows = []
+    rows += _closed_pair(1, 2, score=0.62, realized_pnl=90.0, symbol="AAA")   # 0.60-0.65 WIN
+    rows += _closed_pair(3, 4, score=0.63, realized_pnl=-40.0, symbol="BBB")  # 0.60-0.65 LOSS
+    rows += _closed_pair(5, 6, score=0.72, realized_pnl=15.0, symbol="CCC")   # 0.65-1.00 WIN
+    rows += [  # trade-7: OPEN -> not counted
+        _row(id=7, symbol="ZZZ", action="BUY", shares=10.0,
+             timestamp="2026-08-01T00:00:00+00:00", ensemble_score=0.80),
+    ]
+    path = _make_db(rows)
+    try:
+        screen = _build_performance_learning_screen(path)
+        by_label = {b.label: b for b in screen.calibration_bands}
+
+        assert (by_label["0.60-0.65"].wins, by_label["0.60-0.65"].losses) == (1, 1)
+        assert (by_label["0.65-1.00"].wins, by_label["0.65-1.00"].losses) == (1, 0)
+        assert by_label["0.50-0.55"].n == 0
+        assert by_label["0.55-0.60"].n == 0
+        assert screen.calibration_total_outcomes == 3
+    finally:
+        os.remove(path)
+
+
+def test_calibration_reuses_the_same_outcome_read_health_object():
+    """No second DB read for calibration -- it folds the SAME lineage the
+    Outcome History area already fetched, so the two areas share one
+    ReadResult health."""
+    path = _make_db(_closed_pair(1, 2, score=0.60, realized_pnl=10.0))
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.calibration_health is screen.outcome_health
+    finally:
+        os.remove(path)
+
+
 # --- production regression (opt-in) --------------------------------
 
 _PROD = os.environ.get("AARA_WAVE2A_PROD_SNAPSHOT")

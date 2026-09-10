@@ -276,7 +276,12 @@ def test_boundary_notice_and_no_outcome_tokens_survive_the_new_panel():
     blob = _html_blob(_screen(_mixed_population()))
     assert ("END OF DECISION-TIME EVIDENCE — trade/outcome recorded separately, "
             "not linked by any deterministic key.") in blob
-    lowered = blob.lower()
+    # Scope the outcome-vocabulary guard to the Decision Ledger Inspection
+    # panel only -- it is the decision-time-only surface. The separate
+    # Model Confidence Calibration area (rendered above it) legitimately
+    # uses "win rate" for its historical realized tally.
+    ledger_panel = blob[blob.index("Decision Ledger Inspection"):]
+    lowered = ledger_panel.lower()
     for banned in ("realized_pnl", "p&l", "holding period", "holding_days",
                    "exit price", "trade_id", "order_id", ">win<", ">loss<",
                    "win rate", "probability of profit"):

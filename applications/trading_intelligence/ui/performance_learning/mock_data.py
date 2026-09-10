@@ -1,26 +1,35 @@
-"""Deterministic all-unavailable data for the Performance & Learning
-screen shell.
+"""Deterministic data for the Performance & Learning screen shell.
 
-No sentinel_engine/bot/dashboard import. No outcome/attribution/
-calibration contract import or reference of any kind: per
-docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md Section 2,
-Performance & Learning names only a future, unwired Sentinel Engine input
-(`DECISION_OUTCOME_RECORDED`), and no adapter for it is wired in this
-application. This module -- the sole data source for this screen, same
-role ui/morning_brief/mock_data.py and ui/settings/mock_data.py play for
-their own screens -- builds a fixed, honest all-unavailable
-PerformanceLearningScreen rather than illustrative figures. Unlike
+No sentinel_engine/bot/dashboard import. `build_mock_screen()` -- the
+production shell path and the sole data source for this screen when no
+composition root supplies one (same role ui/morning_brief/mock_data.py and
+ui/settings/mock_data.py play for their own screens) -- builds a fixed,
+honest all-unavailable PerformanceLearningScreen. Unlike
 ui/portfolio_intelligence/mock_data.py's and
 ui/risk_intelligence/mock_data.py's mock data (hand-picked but fabricated
-figures), nothing here is a number standing in for a real outcome,
-attribution result, or calibration statistic -- every field is a literal
-explanation of why that area has no source yet.
+figures), no field on that screen is a number standing in for a real
+outcome, attribution result, or calibration statistic -- every field is a
+literal explanation of why that area has no source yet.
 
 Outcome History's message additionally states the spec's own explicit
 caveat -- outcomes, once wired, would be BUY-scoped only and would never
 cover every decision -- so a future reader of this message never mistakes
 today's total absence of data for a claim that all decisions get one.
+
+`build_mock_screen()` -- the production shell path -- stays entirely
+all-unavailable; nothing below it is a fabricated figure. The separate,
+opt-in `build_calibration_preview_screen()` builder DOES carry deterministic
+illustrative band counts, used only by render tests / a standalone preview
+of the Sprint 4 #1 "Historical outcome by ensemble score" table. It is
+never wired into `bootstrap.py`, so production behavior is unchanged.
 """
+from dataclasses import replace
+
+from applications.platform.integrations import IntegrationHealth
+from applications.trading_intelligence.projections.calibration_band import CalibrationBand
+from applications.trading_intelligence.services.decision_calibration_query_service import (
+    BAND_LABELS,
+)
 from applications.trading_intelligence.ui.performance_learning.screen import (
     ATTRIBUTION_BREAKDOWN_TITLE,
     MODEL_CONFIDENCE_CALIBRATION_TITLE,
@@ -67,4 +76,40 @@ def build_mock_screen() -> PerformanceLearningScreen:
         outcome_history=_OUTCOME_HISTORY,
         attribution_breakdown=_ATTRIBUTION_BREAKDOWN,
         model_confidence_calibration=_MODEL_CONFIDENCE_CALIBRATION,
+    )
+
+
+# Deterministic illustrative band counts for the Sprint 4 #1 calibration
+# render path. Two-plus populated bands (wins and losses both present),
+# one deliberately empty band, and a total of exactly CALIBRATION_MIN_
+# OUTCOMES so the full per-band table renders rather than the small-N
+# notice. Order matches BAND_LABELS. Not real account data -- render
+# fixtures only, never wired into bootstrap.py.
+_CALIBRATION_PREVIEW_COUNTS = {
+    "0.50-0.55": (3, 5),
+    "0.55-0.60": (0, 0),
+    "0.60-0.65": (9, 6),
+    "0.65-1.00": (6, 1),
+}
+_CALIBRATION_PREVIEW_PROVIDER = "mock_calibration_preview"
+
+
+def build_calibration_preview_screen() -> PerformanceLearningScreen:
+    """`build_mock_screen()` plus a HEALTHY calibration read carrying the
+    deterministic illustrative bands above. Outcome History and Attribution
+    stay untouched (still unavailable) -- this builder illustrates only the
+    calibration table's populated state and is used solely by render tests
+    and a standalone preview."""
+    bands = tuple(
+        CalibrationBand(
+            label=label,
+            wins=_CALIBRATION_PREVIEW_COUNTS[label][0],
+            losses=_CALIBRATION_PREVIEW_COUNTS[label][1],
+        )
+        for label in BAND_LABELS
+    )
+    return replace(
+        build_mock_screen(),
+        calibration_health=IntegrationHealth.healthy(_CALIBRATION_PREVIEW_PROVIDER),
+        calibration_bands=bands,
     )

@@ -74,6 +74,44 @@ CSS = """
   color: var(--pl-color-text-secondary);
 }
 
+/* Sprint 4 #1: Model Confidence Calibration -- the "Historical outcome by
+   ensemble score" tally. Same monospace/tabular-nums table conventions as
+   .pl-outcome-table; colours from the shared --pl-* aliases, no new
+   literals. */
+.pl-cal-heading {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pl-color-text);
+  margin: 2px 0 2px 0;
+}
+.pl-cal-disclaimer {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--pl-color-text-secondary);
+  margin: 0 0 8px 0;
+}
+.pl-cal-table {
+  border-collapse: collapse;
+  font-family: Monaco, "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.pl-cal-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pl-color-text-secondary);
+  text-align: right;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--pl-color-border);
+}
+.pl-cal-table thead th:first-child { text-align: left; }
+.pl-cal-table td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--pl-color-border);
+}
+.pl-cal-band { text-align: left; color: var(--pl-color-text); }
+.pl-cal-num { text-align: right; color: var(--pl-color-text); }
+
 /* Wave 3C: Decision Ledger Inspection. Additive; reuses the --pl-color-*
    tokens (which alias --aara-*) -- no new palette literals. Block-level,
    wrapping layout so nothing clips at 900px; native <details> for

@@ -63,6 +63,8 @@ from applications.trading_intelligence.ui.integration_health_view import (
 )
 from applications.trading_intelligence.ui.performance_learning.mock_data import build_mock_screen
 from applications.trading_intelligence.ui.performance_learning.screen import (
+    CALIBRATION_CONTENT_HEADING,
+    CALIBRATION_DISCLAIMER,
     DECISION_LEDGER_INSPECTION_TITLE,
     OutcomeHistoryRow,
     PerformanceLearningScreen,
@@ -415,14 +417,43 @@ class PerformanceLearningUI:
                 **{_DATAFRAME_HEIGHT_KWARG: 360},
             )
 
-            # --- Attribution Breakdown / Model Confidence Calibration ---
+            # --- Attribution Breakdown ---
             # unchanged: no wired source, fixed honest unavailable message
-            for section in (
-                screen.attribution_breakdown,
-                screen.model_confidence_calibration,
-            ):
-                gr.HTML(self._format_section_label_html(section))
-                gr.HTML(self._format_unavailable_message_html(section))
+            gr.HTML(self._format_section_label_html(screen.attribution_breakdown))
+            gr.HTML(self._format_unavailable_message_html(screen.attribution_breakdown))
+
+            # --- Model Confidence Calibration (Sprint 4 #1) ---
+            # Frozen IA label; the CONTENT is the neutral, disclaimed
+            # "Historical outcome by ensemble score" tally. Stable tree,
+            # visibility toggled -- same pattern as Outcome History above.
+            cal_unavailable = not screen.calibration_available
+            cal_empty = screen.calibration_available and screen.calibration_is_empty
+            cal_small_n = (
+                screen.calibration_available
+                and not screen.calibration_is_empty
+                and not screen.calibration_has_enough_data
+            )
+            cal_table = (
+                screen.calibration_available and screen.calibration_has_enough_data
+            )
+            gr.HTML(self._format_section_label_html(screen.model_confidence_calibration))
+            gr.HTML(
+                self._format_calibration_unavailable_html(screen),
+                visible=cal_unavailable,
+            )
+            gr.HTML(
+                self._format_calibration_empty_html(screen),
+                visible=cal_empty,
+            )
+            gr.HTML(
+                self._format_calibration_small_n_html(screen),
+                visible=cal_small_n,
+            )
+            gr.HTML(
+                self._format_calibration_table_html(screen),
+                visible=cal_table,
+                elem_classes=["pl-calibration"],
+            )
 
             # --- Decision Ledger Inspection (Wave 3C, ADR-064) ---
             # Additive: rendered once from the already-materialized Wave 3B
@@ -485,3 +516,65 @@ class PerformanceLearningUI:
         if not summary:
             return ""
         return f'<div class="pl-summary">{html.escape(summary)}</div>'
+
+    # --- Sprint 4 #1: Model Confidence Calibration -----------------------
+
+    @staticmethod
+    def _format_calibration_unavailable_html(screen: PerformanceLearningScreen) -> str:
+        """`calibration_health is None` (standalone / no provider) -> this
+        section's own fixed message, byte-identical to the pre-Sprint-4
+        render. A real non-HEALTHY health -> the shared ADR-061
+        "Data unavailable -- <reason>" phrase (reason from status only)."""
+        if screen.calibration_health is None:
+            return PerformanceLearningUI._format_unavailable_message_html(
+                screen.model_confidence_calibration
+            )
+        return render_unavailable(
+            screen.calibration_health,
+            fallback_message=screen.model_confidence_calibration.unavailable_message,
+        )
+
+    @staticmethod
+    def _format_calibration_empty_html(screen: PerformanceLearningScreen) -> str:
+        return (
+            '<div class="pl-unavailable-message">'
+            f'{html.escape(screen.calibration_empty_message)}'
+            "</div>"
+        )
+
+    @staticmethod
+    def _format_calibration_small_n_html(screen: PerformanceLearningScreen) -> str:
+        return (
+            '<div class="pl-unavailable-message">'
+            f'{html.escape(screen.calibration_small_n_message)}'
+            "</div>"
+        )
+
+    @staticmethod
+    def _format_calibration_table_html(screen: PerformanceLearningScreen) -> str:
+        """Heading (neutral wording) + disclaimer + one row per band.
+        Every interpolated value is HTML-escaped. Win rate is blank -- never
+        a fabricated 0% -- for a band that counted no outcomes."""
+        rows = []
+        for band in screen.calibration_bands:
+            rate = "" if band.win_rate is None else f"{band.win_rate:.0%}"
+            rows.append(
+                "<tr>"
+                f'<td class="pl-cal-band">{html.escape(band.label)}</td>'
+                f'<td class="pl-cal-num">{html.escape(str(band.n))}</td>'
+                f'<td class="pl-cal-num">{html.escape(str(band.wins))}</td>'
+                f'<td class="pl-cal-num">{html.escape(str(band.losses))}</td>'
+                f'<td class="pl-cal-num">{html.escape(rate)}</td>'
+                "</tr>"
+            )
+        return (
+            f'<div class="pl-cal-heading">{html.escape(CALIBRATION_CONTENT_HEADING)}</div>'
+            f'<div class="pl-cal-disclaimer">{html.escape(CALIBRATION_DISCLAIMER)}</div>'
+            '<table class="pl-cal-table">'
+            "<thead><tr>"
+            "<th>Ensemble score band</th><th>Outcomes (n)</th>"
+            "<th>Wins</th><th>Losses</th><th>Win rate</th>"
+            "</tr></thead>"
+            f'<tbody>{"".join(rows)}</tbody>'
+            "</table>"
+        )

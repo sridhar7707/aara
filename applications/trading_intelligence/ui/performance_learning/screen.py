@@ -27,10 +27,36 @@ from applications.trading_intelligence.contracts.candidate_decision_inspection_c
     CandidateDecisionInspection,
     LedgerFunnelSummary,
 )
+from applications.trading_intelligence.projections.calibration_band import CalibrationBand
 
 OUTCOME_HISTORY_TITLE = "Outcome History"
 ATTRIBUTION_BREAKDOWN_TITLE = "Attribution Breakdown"
 MODEL_CONFIDENCE_CALIBRATION_TITLE = "Model Confidence Calibration"
+
+# Sprint 4 #1: the Model Confidence Calibration frozen IA area gains a real
+# source -- the Wave 2A decision-outcome lineage, folded by
+# services/decision_calibration_query_service.py. The section LABEL stays
+# the frozen IA string above (never renamed); the rendered CONTENT is
+# titled neutrally and disclaimed, because this is a historical realized
+# tally, not a calibration/accuracy measurement.
+CALIBRATION_CONTENT_HEADING = "Historical outcome by ensemble score"
+CALIBRATION_DISCLAIMER = (
+    "Realized win and loss counts for closed BUY decisions, grouped by the "
+    "ensemble score recorded at entry. Lower bound inclusive, upper bound "
+    "exclusive except the final band. A historical tally only: it does not "
+    "measure how accurate the scores are and implies no statistical "
+    "significance."
+)
+# Conservative floor before a per-band split is shown at all. Matches the
+# project's existing "enough completed trades before win rate is worth
+# reading" convention (30+); a four-way split below this averages too few
+# outcomes per band to be informative. This is a display gate, not a
+# significance test.
+CALIBRATION_MIN_OUTCOMES = 30
+_CALIBRATION_EMPTY_MESSAGE = (
+    "No closed BUY decisions with a recorded ensemble score are present in "
+    "the current trades snapshot."
+)
 
 # Wave 3C (ADR-064): an additive section fed by the Wave 3A read-side
 # source + Wave 3B query service through the composition root. Decision-time
@@ -99,6 +125,15 @@ class PerformanceLearningScreen:
     # P&L / trade-linked is carried -- decision-time inspection only.
     ledger_health: Optional[IntegrationHealth] = None
     ledger_inspection: Optional[CandidateDecisionInspection] = None
+    # Sprint 4 #1: populated by the composition root from the SAME Wave 2A
+    # OutcomeLineage the Outcome History area uses (no extra read), folded
+    # by DecisionCalibrationQueryService. `calibration_health` carries that
+    # read's ReadResult health (None only in a standalone no-provider
+    # build); `calibration_bands` is the fixed four-band tuple in score
+    # order, all-zero when the read was HEALTHY but held no qualifying
+    # CLOSED WIN/LOSS outcome.
+    calibration_health: Optional[IntegrationHealth] = None
+    calibration_bands: Tuple[CalibrationBand, ...] = ()
     # Wave 3D (ADR-064, no scope expansion): the composition root also
     # attaches the count-only funnel aggregation derived from the same
     # inspection (`build_ledger_funnel_summary`). None on a non-HEALTHY
@@ -167,6 +202,45 @@ class PerformanceLearningScreen:
             self.ledger_available
             and not self.ledger_is_empty
             and self.ledger_funnel_summary is not None
+        )
+
+    # --- Sprint 4 #1: Model Confidence Calibration state ------------------
+
+    @property
+    def calibration_available(self) -> bool:
+        """True only when a HEALTHY outcome read produced this screen. The
+        bands may still be all-zero (HEALTHY, but no qualifying CLOSED
+        WIN/LOSS outcome with a recorded ensemble score)."""
+        return self.calibration_health is not None and self.calibration_health.is_healthy
+
+    @property
+    def calibration_total_outcomes(self) -> int:
+        """Qualifying CLOSED WIN/LOSS outcomes across all bands. Summed from
+        each band's own ``n`` -- never mixed across bands."""
+        return sum(band.n for band in self.calibration_bands)
+
+    @property
+    def calibration_is_empty(self) -> bool:
+        return self.calibration_total_outcomes == 0
+
+    @property
+    def calibration_has_enough_data(self) -> bool:
+        """True once the conservative display floor is met -- see
+        :data:`CALIBRATION_MIN_OUTCOMES`."""
+        return self.calibration_total_outcomes >= CALIBRATION_MIN_OUTCOMES
+
+    @property
+    def calibration_empty_message(self) -> str:
+        return _CALIBRATION_EMPTY_MESSAGE
+
+    @property
+    def calibration_small_n_message(self) -> str:
+        n = self.calibration_total_outcomes
+        noun = "outcome" if n == 1 else "outcomes"
+        return (
+            f"Only {n} closed BUY {noun} with a recorded ensemble score so "
+            f"far. A per-band breakdown is shown once there are at least "
+            f"{CALIBRATION_MIN_OUTCOMES}."
         )
 
     @property

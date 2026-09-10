@@ -1,6 +1,9 @@
 from applications.platform.integrations import IntegrationHealth
+from applications.trading_intelligence.projections.calibration_band import CalibrationBand
 from applications.trading_intelligence.ui.performance_learning.screen import (
     ATTRIBUTION_BREAKDOWN_TITLE,
+    CALIBRATION_CONTENT_HEADING,
+    CALIBRATION_MIN_OUTCOMES,
     MODEL_CONFIDENCE_CALIBRATION_TITLE,
     OUTCOME_HISTORY_TITLE,
     OutcomeHistoryRow,
@@ -142,6 +145,120 @@ def test_each_section_carries_its_own_unavailable_message():
         ),
     )
     assert screen.outcome_history.unavailable_message == "no outcome source"
+
+
+_HEALTHY = IntegrationHealth.healthy(_PROVIDER)
+
+
+def _bands(*, first=(0, 0), second=(0, 0), third=(0, 0), fourth=(0, 0)):
+    pairs = (
+        ("0.50-0.55", first),
+        ("0.55-0.60", second),
+        ("0.60-0.65", third),
+        ("0.65-1.00", fourth),
+    )
+    return tuple(
+        CalibrationBand(label=label, wins=wins, losses=losses)
+        for label, (wins, losses) in pairs
+    )
+
+
+def _fill_to_min(*, wins_share=1):
+    """Bands whose total n is exactly CALIBRATION_MIN_OUTCOMES."""
+    losses = CALIBRATION_MIN_OUTCOMES - wins_share
+    return _bands(third=(wins_share, losses))
+
+
+# --- Model Confidence Calibration state ----------------------------------
+
+
+def test_calibration_content_heading_is_neutral_historical_wording():
+    assert CALIBRATION_CONTENT_HEADING == "Historical outcome by ensemble score"
+    lowered = CALIBRATION_CONTENT_HEADING.lower()
+    for forbidden in ("predictive accuracy", "probability calibration",
+                      "guaranteed", "certainty"):
+        assert forbidden not in lowered
+
+
+def test_no_provider_calibration_is_unavailable():
+    screen = _make_screen()
+    assert screen.calibration_health is None
+    assert screen.calibration_available is False
+    assert screen.calibration_total_outcomes == 0
+
+
+def test_non_healthy_read_calibration_is_unavailable():
+    screen = _make_screen(
+        calibration_health=IntegrationHealth.unavailable(_PROVIDER, detail="x"),
+        calibration_bands=_bands(),
+    )
+    assert screen.calibration_available is False
+
+
+def test_healthy_but_zero_qualifying_outcomes_is_available_and_empty():
+    screen = _make_screen(calibration_health=_HEALTHY, calibration_bands=_bands())
+    assert screen.calibration_available is True
+    assert screen.calibration_is_empty is True
+    assert screen.calibration_has_enough_data is False
+    assert "no closed buy" in screen.calibration_empty_message.lower()
+
+
+def test_healthy_with_few_outcomes_is_available_but_below_the_min():
+    screen = _make_screen(
+        calibration_health=_HEALTHY,
+        calibration_bands=_bands(third=(2, 1)),
+    )
+    assert screen.calibration_available is True
+    assert screen.calibration_is_empty is False
+    assert screen.calibration_total_outcomes == 3
+    assert screen.calibration_has_enough_data is False
+    message = screen.calibration_small_n_message
+    assert "3" in message
+    assert str(CALIBRATION_MIN_OUTCOMES) in message
+
+
+def test_small_n_message_is_singular_for_one_outcome():
+    screen = _make_screen(
+        calibration_health=_HEALTHY, calibration_bands=_bands(first=(1, 0)),
+    )
+    assert "1 closed BUY outcome " in screen.calibration_small_n_message
+    assert "outcomes" not in screen.calibration_small_n_message
+
+
+def test_at_the_minimum_the_breakdown_is_shown():
+    screen = _make_screen(
+        calibration_health=_HEALTHY, calibration_bands=_fill_to_min(wins_share=10),
+    )
+    assert screen.calibration_total_outcomes == CALIBRATION_MIN_OUTCOMES
+    assert screen.calibration_has_enough_data is True
+
+
+def test_calibration_total_is_the_sum_of_band_n_without_cross_band_mixing():
+    screen = _make_screen(
+        calibration_health=_HEALTHY,
+        calibration_bands=_bands(first=(3, 1), second=(0, 0), third=(4, 2), fourth=(1, 0)),
+    )
+    assert screen.calibration_total_outcomes == 3 + 1 + 4 + 2 + 1
+
+
+def test_calibration_state_does_not_change_outcome_history_flags():
+    screen = _make_screen(
+        outcome_health=_HEALTHY,
+        outcome_rows=(_row(),),
+        calibration_health=_HEALTHY,
+        calibration_bands=_bands(third=(5, 5)),
+    )
+    assert screen.outcome_history_available is True
+    assert screen.is_empty is False
+
+
+def test_outcome_history_populated_but_calibration_unavailable_is_independent():
+    screen = _make_screen(
+        outcome_health=_HEALTHY,
+        outcome_rows=(_row(),),
+    )
+    assert screen.outcome_history_available is True
+    assert screen.calibration_available is False
 
 
 def test_outcome_history_row_blank_fields_stay_blank():
