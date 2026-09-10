@@ -1,11 +1,16 @@
 from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.projections.calibration_band import CalibrationBand
+from applications.trading_intelligence.projections.regime_outcome_row import (
+    REGIME_NOT_RECORDED_LABEL,
+    RegimeOutcomeRow,
+)
 from applications.trading_intelligence.ui.performance_learning.screen import (
     ATTRIBUTION_BREAKDOWN_TITLE,
     CALIBRATION_CONTENT_HEADING,
     CALIBRATION_MIN_OUTCOMES,
     MODEL_CONFIDENCE_CALIBRATION_TITLE,
     OUTCOME_HISTORY_TITLE,
+    REGIME_OUTCOMES_TITLE,
     OutcomeHistoryRow,
     PerformanceLearningScreen,
     PerformanceLearningSection,
@@ -259,6 +264,79 @@ def test_outcome_history_populated_but_calibration_unavailable_is_independent():
     )
     assert screen.outcome_history_available is True
     assert screen.calibration_available is False
+
+
+def _regime_rows(*pairs):
+    """pairs: (label, wins, losses)."""
+    return tuple(
+        RegimeOutcomeRow(regime=label, wins=wins, losses=losses)
+        for label, wins, losses in pairs
+    )
+
+
+# --- Realized outcomes by entry regime state (Sprint 4 Item #4) --------
+
+
+def test_regime_outcomes_title_is_neutral_historical_wording():
+    assert REGIME_OUTCOMES_TITLE == "Realized outcomes by entry market regime"
+    lowered = REGIME_OUTCOMES_TITLE.lower()
+    for forbidden in ("predict", "probability", "calibrat", "ai score"):
+        assert forbidden not in lowered
+
+
+def test_no_provider_regime_outcomes_is_unavailable():
+    screen = _make_screen()
+    assert screen.regime_outcome_health is None
+    assert screen.regime_outcomes_available is False
+    assert screen.regime_outcomes_total == 0
+
+
+def test_non_healthy_read_regime_outcomes_is_unavailable():
+    screen = _make_screen(
+        regime_outcome_health=IntegrationHealth.unavailable(_PROVIDER, detail="x"),
+        regime_outcome_rows=_regime_rows(("RANGING", 3, 2)),
+    )
+    assert screen.regime_outcomes_available is False
+
+
+def test_healthy_but_no_regime_rows_is_available_and_empty():
+    screen = _make_screen(regime_outcome_health=_HEALTHY, regime_outcome_rows=())
+    assert screen.regime_outcomes_available is True
+    assert screen.regime_outcomes_is_empty is True
+    assert "no closed buy" in screen.regime_outcomes_empty_message.lower()
+
+
+def test_healthy_with_regime_rows_is_available_and_totals_are_summed_per_row():
+    screen = _make_screen(
+        regime_outcome_health=_HEALTHY,
+        regime_outcome_rows=_regime_rows(
+            ("RANGING", 4, 2), ("TRENDING", 1, 3), (REGIME_NOT_RECORDED_LABEL, 0, 1),
+        ),
+    )
+    assert screen.regime_outcomes_available is True
+    assert screen.regime_outcomes_is_empty is False
+    assert screen.regime_outcomes_total == 4 + 2 + 1 + 3 + 0 + 1
+
+
+def test_regime_outcomes_state_does_not_change_outcome_history_or_calibration_flags():
+    screen = _make_screen(
+        outcome_health=_HEALTHY,
+        outcome_rows=(_row(),),
+        calibration_health=_HEALTHY,
+        calibration_bands=_bands(third=(5, 5)),
+        regime_outcome_health=_HEALTHY,
+        regime_outcome_rows=_regime_rows(("RANGING", 5, 5)),
+    )
+    assert screen.outcome_history_available is True
+    assert screen.is_empty is False
+    assert screen.calibration_available is True
+    assert screen.calibration_total_outcomes == 10
+
+
+def test_regime_outcome_row_win_rate_is_none_for_an_empty_row():
+    row = RegimeOutcomeRow(regime="RANGING", wins=0, losses=0)
+    assert row.n == 0
+    assert row.win_rate is None
 
 
 def test_outcome_history_row_blank_fields_stay_blank():

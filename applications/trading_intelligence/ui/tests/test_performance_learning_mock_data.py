@@ -1,6 +1,10 @@
+from applications.trading_intelligence.projections.regime_outcome_row import (
+    REGIME_NOT_RECORDED_LABEL,
+)
 from applications.trading_intelligence.ui.performance_learning.mock_data import (
     build_calibration_preview_screen,
     build_mock_screen,
+    build_regime_outcome_preview_screen,
 )
 from applications.trading_intelligence.ui.performance_learning.screen import (
     ATTRIBUTION_BREAKDOWN_TITLE,
@@ -103,6 +107,52 @@ def test_calibration_preview_keeps_outcome_history_and_attribution_unavailable()
 
     assert screen.outcome_rows == ()
     assert screen.outcome_health is None
+    assert screen.attribution_breakdown.unavailable_message == (
+        build_mock_screen().attribution_breakdown.unavailable_message
+    )
+
+
+# --- regime-outcome preview builder (opt-in; never the production shell) --
+
+
+def test_build_mock_screen_leaves_regime_outcomes_unavailable():
+    screen = build_mock_screen()
+
+    assert screen.regime_outcome_health is None
+    assert screen.regime_outcomes_available is False
+    assert screen.regime_outcome_rows == ()
+
+
+def test_regime_outcome_preview_screen_is_healthy_and_populated():
+    screen = build_regime_outcome_preview_screen()
+
+    assert screen.regime_outcomes_available is True
+    assert screen.regime_outcomes_is_empty is False
+    assert screen.regime_outcomes_total > 0
+
+
+def test_regime_outcome_preview_exercises_multiple_regimes_wins_losses_and_the_bucket():
+    screen = build_regime_outcome_preview_screen()
+
+    labels = [r.regime for r in screen.regime_outcome_rows]
+    assert len(labels) >= 2
+    assert REGIME_NOT_RECORDED_LABEL in labels
+    assert labels[-1] == REGIME_NOT_RECORDED_LABEL  # bucket last
+    assert any(r.wins > 0 for r in screen.regime_outcome_rows)
+    assert any(r.losses > 0 for r in screen.regime_outcome_rows)
+
+
+def test_regime_outcome_preview_is_deterministic():
+    assert build_regime_outcome_preview_screen() == build_regime_outcome_preview_screen()
+
+
+def test_regime_outcome_preview_keeps_other_areas_untouched():
+    screen = build_regime_outcome_preview_screen()
+
+    assert screen.outcome_rows == ()
+    assert screen.outcome_health is None
+    assert screen.calibration_health is None
+    assert screen.calibration_bands == ()
     assert screen.attribution_breakdown.unavailable_message == (
         build_mock_screen().attribution_breakdown.unavailable_message
     )

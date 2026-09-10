@@ -160,6 +160,9 @@ from applications.trading_intelligence.services.decision_outcome_query_service i
 from applications.trading_intelligence.services.decision_calibration_query_service import (
     DecisionCalibrationQueryService,
 )
+from applications.trading_intelligence.services.decision_regime_outcome_query_service import (
+    DecisionRegimeOutcomeQueryService,
+)
 from applications.trading_intelligence.services.candidate_decision_query_service import (
     CandidateDecisionQueryService,
     build_ledger_funnel_summary,
@@ -1253,10 +1256,12 @@ def _build_performance_learning_screen(
     (`DecisionOutcomeQueryService` over the ADR-055 trades.db snapshot).
 
     Attribution Breakdown keeps its existing honest-unavailable message.
-    Model Confidence Calibration (Sprint 4 #1) is folded from the SAME
-    Wave 2A lineage this function already fetched -- no extra read -- into
-    fixed ensemble-score bands with a realized WIN/LOSS tally; it shares
-    this read's ReadResult health.
+    Model Confidence Calibration (Sprint 4 #1) and the "Realized outcomes by
+    entry market regime" slice (Sprint 4 #4) are both folded from the SAME
+    Wave 2A lineage this function already fetched -- no extra read -- and
+    share this read's ReadResult health. Calibration groups CLOSED WIN/LOSS
+    outcomes into fixed ensemble-score bands; the regime slice groups the
+    same eligible outcomes by DecisionOutcome.entry_regime, verbatim.
 
     A non-HEALTHY read (no snapshot -- the deployed Space's normal state --
     missing table, malformed row) carries `outcome_health` with the reason
@@ -1273,17 +1278,25 @@ def _build_performance_learning_screen(
     reader = TradesDbOutcomeReader(**legacy_source_kwargs(db_path))
     result = DecisionOutcomeQueryService(reader).get_lineage()
     if result.value is None:
-        # Sprint 4 #1: the Model Confidence Calibration area shares this
-        # read's health -- one and the same object, so a non-HEALTHY read
-        # is reported once and identically by both areas.
+        # Sprint 4 #1 / #4: the Model Confidence Calibration area and the
+        # regime-outcome slice share this read's health -- one and the same
+        # object, so a non-HEALTHY read is reported once and identically by
+        # every area.
         screen = replace(
-            shell, outcome_health=result.health, calibration_health=result.health
+            shell,
+            outcome_health=result.health,
+            calibration_health=result.health,
+            regime_outcome_health=result.health,
         )
     else:
         lineage = result.value
-        # Sprint 4 #1: fold the SAME already-fetched lineage into the
-        # ensemble-score bands -- no extra source, no extra read.
+        # Sprint 4 #1 / #4: fold the SAME already-fetched lineage -- no extra
+        # source, no extra read -- into the ensemble-score bands and the
+        # per-entry-regime tally.
         calibration_bands = DecisionCalibrationQueryService().get_calibration(lineage)
+        regime_outcome_rows = DecisionRegimeOutcomeQueryService().get_regime_outcomes(
+            lineage
+        )
         screen = replace(
             shell,
             outcome_rows=tuple(_outcome_history_row(o) for o in lineage.decisions),
@@ -1291,6 +1304,8 @@ def _build_performance_learning_screen(
             summary=_outcome_history_summary(lineage),
             calibration_health=result.health,
             calibration_bands=calibration_bands,
+            regime_outcome_health=result.health,
+            regime_outcome_rows=regime_outcome_rows,
         )
 
     # Wave 3C (ADR-064): attach the Decision Ledger Inspection result --

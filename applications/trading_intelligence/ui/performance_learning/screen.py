@@ -28,6 +28,7 @@ from applications.trading_intelligence.contracts.candidate_decision_inspection_c
     LedgerFunnelSummary,
 )
 from applications.trading_intelligence.projections.calibration_band import CalibrationBand
+from applications.trading_intelligence.projections.regime_outcome_row import RegimeOutcomeRow
 
 OUTCOME_HISTORY_TITLE = "Outcome History"
 ATTRIBUTION_BREAKDOWN_TITLE = "Attribution Breakdown"
@@ -56,6 +57,27 @@ CALIBRATION_MIN_OUTCOMES = 30
 _CALIBRATION_EMPTY_MESSAGE = (
     "No closed BUY decisions with a recorded ensemble score are present in "
     "the current trades snapshot."
+)
+
+# Sprint 4 Item #4: an additive slice of Outcome History -- the SAME Wave 2A
+# lineage grouped by DecisionOutcome.entry_regime (verbatim; no invented
+# regime vocabulary), folded by
+# services/decision_regime_outcome_query_service.py. Not a frozen IA area;
+# rendered as a calm sub-table under Outcome History.
+REGIME_OUTCOMES_TITLE = "Realized outcomes by entry market regime"
+REGIME_OUTCOMES_DISCLAIMER = (
+    "Realized win and loss counts for closed BUY decisions, grouped by the "
+    "market regime recorded at entry. A historical tally only -- small "
+    "samples are included as-is, and a higher win rate for a regime is not "
+    "evidence of a causal effect."
+)
+_REGIME_OUTCOMES_UNAVAILABLE_MESSAGE = (
+    "Realized outcomes by regime are unavailable -- no outcome data source "
+    "in this environment."
+)
+_REGIME_OUTCOMES_EMPTY_MESSAGE = (
+    "No closed BUY decisions with a realized win or loss are present in the "
+    "current trades snapshot."
 )
 
 # Wave 3C (ADR-064): an additive section fed by the Wave 3A read-side
@@ -134,6 +156,16 @@ class PerformanceLearningScreen:
     # CLOSED WIN/LOSS outcome.
     calibration_health: Optional[IntegrationHealth] = None
     calibration_bands: Tuple[CalibrationBand, ...] = ()
+    # Sprint 4 Item #4: populated by the composition root from the SAME Wave
+    # 2A OutcomeLineage the Outcome History area uses (no extra read), folded
+    # by DecisionRegimeOutcomeQueryService. `regime_outcome_health` carries
+    # that read's ReadResult health (None only in a standalone no-provider
+    # build); `regime_outcome_rows` is one row per entry regime that carried
+    # an eligible CLOSED WIN/LOSS outcome, ordered real-regimes-alpha then
+    # the "Not recorded" bucket last. Empty tuple when the read was HEALTHY
+    # but no eligible outcome exists.
+    regime_outcome_health: Optional[IntegrationHealth] = None
+    regime_outcome_rows: Tuple[RegimeOutcomeRow, ...] = ()
     # Wave 3D (ADR-064, no scope expansion): the composition root also
     # attaches the count-only funnel aggregation derived from the same
     # inspection (`build_ledger_funnel_summary`). None on a non-HEALTHY
@@ -242,6 +274,36 @@ class PerformanceLearningScreen:
             f"far. A per-band breakdown is shown once there are at least "
             f"{CALIBRATION_MIN_OUTCOMES}."
         )
+
+    # --- Sprint 4 Item #4: Realized outcomes by entry regime state -------
+
+    @property
+    def regime_outcomes_available(self) -> bool:
+        """True only when a HEALTHY outcome read produced this screen. The
+        rows may still be empty (HEALTHY, but no eligible CLOSED WIN/LOSS
+        outcome)."""
+        return (
+            self.regime_outcome_health is not None
+            and self.regime_outcome_health.is_healthy
+        )
+
+    @property
+    def regime_outcomes_total(self) -> int:
+        """Eligible CLOSED WIN/LOSS outcomes across all regime rows. Summed
+        from each row's own ``n`` -- never mixed across regimes."""
+        return sum(row.n for row in self.regime_outcome_rows)
+
+    @property
+    def regime_outcomes_is_empty(self) -> bool:
+        return len(self.regime_outcome_rows) == 0
+
+    @property
+    def regime_outcomes_empty_message(self) -> str:
+        return _REGIME_OUTCOMES_EMPTY_MESSAGE
+
+    @property
+    def regime_outcomes_unavailable_message(self) -> str:
+        return _REGIME_OUTCOMES_UNAVAILABLE_MESSAGE
 
     @property
     def empty_state_message(self) -> str:

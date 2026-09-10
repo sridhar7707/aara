@@ -242,8 +242,12 @@ def test_executed_marker_does_not_enumerate_synthetic_gates():
     blob = _html_blob(_screen(ledger_inspection=_inspection(
         [_candidate(decisions=(d,))])))
     assert "Entry gates passed" in blob
+    # Scope the "no synthetic per-gate list" guard to the Decision Ledger
+    # Inspection panel -- the separate "Realized outcomes by entry market
+    # regime" slice above it legitimately contains the word "regime".
+    ledger_panel = blob[blob.index(DECISION_LEDGER_INSPECTION_TITLE):]
     for g in ("volume", "regime", "relative_strength", "earnings_proximity"):
-        assert g not in blob  # no synthetic per-gate list
+        assert g not in ledger_panel  # no synthetic per-gate list
 
 
 # --- multiple decisions -----------------------------------

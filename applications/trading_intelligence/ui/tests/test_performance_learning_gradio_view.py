@@ -1,13 +1,17 @@
+from dataclasses import replace
+
 import gradio as gr
 
 from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.projections.calibration_band import CalibrationBand
+from applications.trading_intelligence.projections.regime_outcome_row import RegimeOutcomeRow
 from applications.trading_intelligence.ui.performance_learning.gradio_view import (
     PerformanceLearningUI,
 )
 from applications.trading_intelligence.ui.performance_learning.mock_data import (
     build_calibration_preview_screen,
     build_mock_screen,
+    build_regime_outcome_preview_screen,
 )
 from applications.trading_intelligence.ui.performance_learning.screen import (
     ATTRIBUTION_BREAKDOWN_TITLE,
@@ -15,6 +19,7 @@ from applications.trading_intelligence.ui.performance_learning.screen import (
     CALIBRATION_MIN_OUTCOMES,
     MODEL_CONFIDENCE_CALIBRATION_TITLE,
     OUTCOME_HISTORY_TITLE,
+    REGIME_OUTCOMES_TITLE,
     PerformanceLearningScreen,
     PerformanceLearningSection,
 )
@@ -216,3 +221,95 @@ def test_calibration_table_html_escapes_interpolated_values():
     )
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
+
+
+# --- Sprint 4 Item #4: Realized outcomes by entry regime render ---------
+
+
+def _regime_screen(rows, *, health=None):
+    return replace(
+        build_mock_screen(),
+        regime_outcome_health=health or IntegrationHealth.healthy(_CAL_PROVIDER),
+        regime_outcome_rows=tuple(rows),
+    )
+
+
+def _rrow(label, wins, losses):
+    return RegimeOutcomeRow(regime=label, wins=wins, losses=losses)
+
+
+def test_regime_outcomes_section_title_renders():
+    demo = PerformanceLearningUI().build()
+
+    assert REGIME_OUTCOMES_TITLE in "\n".join(_html_values(demo))
+
+
+def test_regime_outcomes_unavailable_by_default_hides_the_table():
+    demo = PerformanceLearningUI().build()
+
+    visible = _visible_html(demo)
+    assert "Realized outcomes by regime are unavailable" in visible
+    assert "Entry regime</th>" not in visible
+
+
+def test_regime_outcomes_table_lists_each_regime_with_counts_and_win_rate():
+    screen = build_regime_outcome_preview_screen()
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    visible = _visible_html(demo)
+    for label in ("RANGING", "TRENDING", "VOLATILE", "Not recorded"):
+        assert label in visible
+    # RANGING preview row is 7 wins / 5 losses -> 58%
+    assert "58%" in visible
+
+    # neutral / non-predictive wording only, scoped to the regime block itself
+    block = PerformanceLearningUI._format_regime_outcomes_table_html(screen).lower()
+    for forbidden in ("predict", "probability", "calibrat", "ai score",
+                      "guaranteed", "certainty"):
+        assert forbidden not in block
+
+
+def test_regime_outcomes_empty_state_when_healthy_with_no_rows():
+    demo = PerformanceLearningUI(screen=_regime_screen([])).build()
+
+    visible = _visible_html(demo)
+    assert "No closed BUY decisions with a realized win or loss" in visible
+
+
+def test_regime_outcomes_non_healthy_read_uses_shared_unavailable_phrase():
+    screen = _regime_screen(
+        [_rrow("RANGING", 5, 5)],
+        health=IntegrationHealth.unavailable(_CAL_PROVIDER, detail="no snapshot"),
+    )
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    visible = _visible_html(demo)
+    assert "Data unavailable" in visible
+
+
+def test_regime_outcomes_table_html_escapes_interpolated_values():
+    out = PerformanceLearningUI._format_regime_outcomes_table_html(
+        _regime_screen([_rrow("<script>", 1, 0), _rrow("RANGING", 0, 1)])
+    )
+    assert "<script>" not in out
+    assert "&lt;script&gt;" in out
+
+
+def test_regime_outcomes_blank_win_rate_for_a_zero_count_row_is_not_rendered_as_zero_percent():
+    out = PerformanceLearningUI._format_regime_outcomes_table_html(
+        _regime_screen([_rrow("RANGING", 0, 0)])
+    )
+    assert "0%" not in out
+
+
+def test_regime_outcomes_does_not_disturb_calibration_rendering():
+    screen = replace(
+        build_calibration_preview_screen(),
+        regime_outcome_health=IntegrationHealth.healthy(_CAL_PROVIDER),
+        regime_outcome_rows=(_rrow("RANGING", 5, 5),),
+    )
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    visible = _visible_html(demo)
+    assert CALIBRATION_CONTENT_HEADING in visible
+    assert REGIME_OUTCOMES_TITLE in visible

@@ -66,6 +66,8 @@ from applications.trading_intelligence.ui.performance_learning.screen import (
     CALIBRATION_CONTENT_HEADING,
     CALIBRATION_DISCLAIMER,
     DECISION_LEDGER_INSPECTION_TITLE,
+    REGIME_OUTCOMES_DISCLAIMER,
+    REGIME_OUTCOMES_TITLE,
     OutcomeHistoryRow,
     PerformanceLearningScreen,
     PerformanceLearningSection,
@@ -417,6 +419,35 @@ class PerformanceLearningUI:
                 **{_DATAFRAME_HEIGHT_KWARG: 360},
             )
 
+            # --- Realized outcomes by entry market regime (Sprint 4 Item #4) ---
+            # An additive slice of Outcome History: the SAME Wave 2A lineage
+            # grouped by DecisionOutcome.entry_regime (verbatim -- no invented
+            # regime vocabulary). Stable tree, visibility toggled -- same
+            # pattern as Outcome History / calibration above.
+            reg_unavailable = not screen.regime_outcomes_available
+            reg_empty = (
+                screen.regime_outcomes_available and screen.regime_outcomes_is_empty
+            )
+            reg_table = (
+                screen.regime_outcomes_available and not screen.regime_outcomes_is_empty
+            )
+            gr.HTML(
+                f'<div class="pl-section-label">{html.escape(REGIME_OUTCOMES_TITLE)}</div>'
+            )
+            gr.HTML(
+                self._format_regime_outcomes_unavailable_html(screen),
+                visible=reg_unavailable,
+            )
+            gr.HTML(
+                self._format_regime_outcomes_empty_html(screen),
+                visible=reg_empty,
+            )
+            gr.HTML(
+                self._format_regime_outcomes_table_html(screen),
+                visible=reg_table,
+                elem_classes=["pl-regime-outcomes"],
+            )
+
             # --- Attribution Breakdown ---
             # unchanged: no wired source, fixed honest unavailable message
             gr.HTML(self._format_section_label_html(screen.attribution_breakdown))
@@ -573,6 +604,64 @@ class PerformanceLearningUI:
             '<table class="pl-cal-table">'
             "<thead><tr>"
             "<th>Ensemble score band</th><th>Outcomes (n)</th>"
+            "<th>Wins</th><th>Losses</th><th>Win rate</th>"
+            "</tr></thead>"
+            f'<tbody>{"".join(rows)}</tbody>'
+            "</table>"
+        )
+
+    # --- Sprint 4 Item #4: Realized outcomes by entry market regime -----
+
+    @staticmethod
+    def _format_regime_outcomes_unavailable_html(
+        screen: PerformanceLearningScreen,
+    ) -> str:
+        """`regime_outcome_health is None` (standalone / no provider) -> this
+        slice's own fixed message. A real non-HEALTHY health -> the shared
+        ADR-061 "Data unavailable -- <reason>" phrase (reason from status
+        only)."""
+        if screen.regime_outcome_health is None:
+            return (
+                '<div class="pl-unavailable-message">'
+                f'{html.escape(screen.regime_outcomes_unavailable_message)}'
+                "</div>"
+            )
+        return render_unavailable(
+            screen.regime_outcome_health,
+            fallback_message=screen.regime_outcomes_unavailable_message,
+        )
+
+    @staticmethod
+    def _format_regime_outcomes_empty_html(screen: PerformanceLearningScreen) -> str:
+        return (
+            '<div class="pl-unavailable-message">'
+            f'{html.escape(screen.regime_outcomes_empty_message)}'
+            "</div>"
+        )
+
+    @staticmethod
+    def _format_regime_outcomes_table_html(screen: PerformanceLearningScreen) -> str:
+        """Disclaimer + one row per entry regime, in the order the fold
+        already fixed (real regimes alphabetical, "Not recorded" last).
+        Every interpolated value is HTML-escaped. Win rate is blank -- never
+        a fabricated 0% -- for a row that counted no outcomes."""
+        rows = []
+        for row in screen.regime_outcome_rows:
+            rate = "" if row.win_rate is None else f"{row.win_rate:.0%}"
+            rows.append(
+                "<tr>"
+                f'<td class="pl-regime-label">{html.escape(row.regime)}</td>'
+                f'<td class="pl-regime-num">{html.escape(str(row.n))}</td>'
+                f'<td class="pl-regime-num">{html.escape(str(row.wins))}</td>'
+                f'<td class="pl-regime-num">{html.escape(str(row.losses))}</td>'
+                f'<td class="pl-regime-num">{html.escape(rate)}</td>'
+                "</tr>"
+            )
+        return (
+            f'<div class="pl-regime-disclaimer">{html.escape(REGIME_OUTCOMES_DISCLAIMER)}</div>'
+            '<table class="pl-regime-table">'
+            "<thead><tr>"
+            "<th>Entry regime</th><th>Outcomes (n)</th>"
             "<th>Wins</th><th>Losses</th><th>Win rate</th>"
             "</tr></thead>"
             f'<tbody>{"".join(rows)}</tbody>'

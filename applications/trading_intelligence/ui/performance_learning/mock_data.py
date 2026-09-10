@@ -18,15 +18,21 @@ today's total absence of data for a claim that all decisions get one.
 
 `build_mock_screen()` -- the production shell path -- stays entirely
 all-unavailable; nothing below it is a fabricated figure. The separate,
-opt-in `build_calibration_preview_screen()` builder DOES carry deterministic
-illustrative band counts, used only by render tests / a standalone preview
-of the Sprint 4 #1 "Historical outcome by ensemble score" table. It is
-never wired into `bootstrap.py`, so production behavior is unchanged.
+opt-in `build_calibration_preview_screen()` and
+`build_regime_outcome_preview_screen()` builders DO carry deterministic
+illustrative counts, used only by render tests / a standalone preview of
+the Sprint 4 Item #1 "Historical outcome by ensemble score" table and the
+Item #4 "Realized outcomes by entry market regime" table. Neither is
+wired into `bootstrap.py`, so production behavior is unchanged.
 """
 from dataclasses import replace
 
 from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.projections.calibration_band import CalibrationBand
+from applications.trading_intelligence.projections.regime_outcome_row import (
+    REGIME_NOT_RECORDED_LABEL,
+    RegimeOutcomeRow,
+)
 from applications.trading_intelligence.services.decision_calibration_query_service import (
     BAND_LABELS,
 )
@@ -112,4 +118,35 @@ def build_calibration_preview_screen() -> PerformanceLearningScreen:
         build_mock_screen(),
         calibration_health=IntegrationHealth.healthy(_CALIBRATION_PREVIEW_PROVIDER),
         calibration_bands=bands,
+    )
+
+
+# Deterministic illustrative regime rows for the Sprint 4 Item #4 render
+# path: three real regimes (verbatim strings, wins and losses both present)
+# plus the explicit "Not recorded" bucket last. Not real account data --
+# render fixtures only, never wired into bootstrap.py.
+_REGIME_PREVIEW_ROWS = (
+    ("RANGING", 7, 5),
+    ("TRENDING", 9, 3),
+    ("VOLATILE", 2, 6),
+    (REGIME_NOT_RECORDED_LABEL, 1, 2),
+)
+_REGIME_PREVIEW_PROVIDER = "mock_regime_outcome_preview"
+
+
+def build_regime_outcome_preview_screen() -> PerformanceLearningScreen:
+    """`build_mock_screen()` plus a HEALTHY outcome read carrying the
+    deterministic illustrative regime rows above. Outcome History,
+    Attribution, and the calibration section stay untouched (still
+    unavailable) -- this builder illustrates only the regime table's
+    populated state and is used solely by render tests and a standalone
+    preview."""
+    rows = tuple(
+        RegimeOutcomeRow(regime=label, wins=wins, losses=losses)
+        for label, wins, losses in _REGIME_PREVIEW_ROWS
+    )
+    return replace(
+        build_mock_screen(),
+        regime_outcome_health=IntegrationHealth.healthy(_REGIME_PREVIEW_PROVIDER),
+        regime_outcome_rows=rows,
     )

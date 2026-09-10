@@ -224,11 +224,11 @@ def test_composed_app_still_has_six_screen_labels_and_merged_assets():
 
 # --- Sprint 4 #1: Model Confidence Calibration wiring -------------------
 
-def _closed_pair(buy_id, sell_id, *, score, realized_pnl, symbol="AAA"):
+def _closed_pair(buy_id, sell_id, *, score, realized_pnl, symbol="AAA", regime="RANGING"):
     return [
         _row(id=buy_id, symbol=symbol, action="BUY", shares=100.0,
              timestamp="2026-07-01T00:00:00+00:00", ensemble_score=score,
-             regime="RANGING"),
+             regime=regime),
         _row(id=sell_id, symbol=symbol, action="SELL_TIME_EXIT", shares=100.0,
              timestamp="2026-07-20T00:00:00+00:00", order_id="o-{}".format(sell_id),
              realized_pnl=realized_pnl, pnl_pct=realized_pnl / 1000.0, holding_days=19),
@@ -287,6 +287,81 @@ def test_calibration_reuses_the_same_outcome_read_health_object():
     try:
         screen = _build_performance_learning_screen(path)
         assert screen.calibration_health is screen.outcome_health
+    finally:
+        os.remove(path)
+
+
+# --- Sprint 4 Item #4: Realized outcomes by entry regime wiring --------
+
+def test_regime_outcomes_unavailable_when_the_outcome_read_is_unavailable():
+    screen = _build_performance_learning_screen("no_such_regime_db_xyz.db")
+    assert screen.regime_outcomes_available is False
+    assert screen.regime_outcome_rows == ()
+
+
+def test_regime_outcomes_healthy_but_empty_for_an_empty_trades_db():
+    path = _empty_db()
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.regime_outcomes_available is True
+        assert screen.regime_outcomes_is_empty is True
+        assert screen.regime_outcome_rows == ()
+    finally:
+        os.remove(path)
+
+
+def test_regime_outcome_rows_reflect_closed_win_loss_outcomes_grouped_by_entry_regime():
+    rows = []
+    rows += _closed_pair(1, 2, realized_pnl=90.0, score=0.6, symbol="AAA", regime="RANGING")   # WIN
+    rows += _closed_pair(3, 4, realized_pnl=-40.0, score=0.6, symbol="BBB", regime="RANGING")  # LOSS
+    rows += _closed_pair(5, 6, realized_pnl=15.0, score=0.6, symbol="CCC", regime="TRENDING")  # WIN
+    rows += _closed_pair(7, 8, realized_pnl=20.0, score=0.6, symbol="DDD", regime=None)        # WIN, no regime
+    rows += [  # trade-9: OPEN -> not counted
+        _row(id=9, symbol="ZZZ", action="BUY", shares=10.0,
+             timestamp="2026-08-01T00:00:00+00:00", ensemble_score=0.8, regime="RANGING"),
+    ]
+    path = _make_db(rows)
+    try:
+        screen = _build_performance_learning_screen(path)
+        by_label = {r.regime: r for r in screen.regime_outcome_rows}
+
+        assert (by_label["RANGING"].wins, by_label["RANGING"].losses) == (1, 1)
+        assert (by_label["TRENDING"].wins, by_label["TRENDING"].losses) == (1, 0)
+        assert (by_label["Not recorded"].wins, by_label["Not recorded"].losses) == (1, 0)
+        # deterministic order: real regimes alpha, "Not recorded" last
+        assert [r.regime for r in screen.regime_outcome_rows] == [
+            "RANGING", "TRENDING", "Not recorded",
+        ]
+        assert screen.regime_outcomes_total == 4
+    finally:
+        os.remove(path)
+
+
+def test_regime_outcomes_reuse_the_same_outcome_read_health_object():
+    """No second DB read -- the regime fold consumes the SAME lineage the
+    Outcome History area already fetched."""
+    path = _make_db(_closed_pair(1, 2, score=0.60, realized_pnl=10.0))
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.regime_outcome_health is screen.outcome_health
+    finally:
+        os.remove(path)
+
+
+def test_regime_wiring_does_not_disturb_calibration_wiring():
+    path = _make_db(_closed_pair(1, 2, score=0.62, realized_pnl=25.0, regime="TRENDING"))
+    try:
+        screen = _build_performance_learning_screen(path)
+        # calibration still wired from the same lineage
+        assert screen.calibration_available is True
+        assert [b.label for b in screen.calibration_bands] == [
+            "0.50-0.55", "0.55-0.60", "0.60-0.65", "0.65-1.00",
+        ]
+        by_band = {b.label: b for b in screen.calibration_bands}
+        assert by_band["0.60-0.65"].wins == 1
+        # regime wired alongside
+        assert [r.regime for r in screen.regime_outcome_rows] == ["TRENDING"]
+        assert screen.regime_outcome_rows[0].wins == 1
     finally:
         os.remove(path)
 

@@ -112,6 +112,39 @@ CSS = """
 .pl-cal-band { text-align: left; color: var(--pl-color-text); }
 .pl-cal-num { text-align: right; color: var(--pl-color-text); }
 
+/* Sprint 4 Item #4: Realized outcomes by entry market regime -- an additive
+   slice of Outcome History. Identical calm/analytical table treatment as
+   .pl-cal-table above (monospace, tabular-nums, muted rules); colours from
+   the shared --pl-* aliases, no new literals, no colour treatment on the
+   numbers themselves. */
+.pl-regime-disclaimer {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--pl-color-text-secondary);
+  margin: 0 0 8px 0;
+}
+.pl-regime-table {
+  border-collapse: collapse;
+  font-family: Monaco, "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.pl-regime-table thead th {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--pl-color-text-secondary);
+  text-align: right;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--pl-color-border);
+}
+.pl-regime-table thead th:first-child { text-align: left; }
+.pl-regime-table td {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--pl-color-border);
+}
+.pl-regime-label { text-align: left; color: var(--pl-color-text); }
+.pl-regime-num { text-align: right; color: var(--pl-color-text); }
+
 /* Wave 3C: Decision Ledger Inspection. Additive; reuses the --pl-color-*
    tokens (which alias --aara-*) -- no new palette literals. Block-level,
    wrapping layout so nothing clips at 900px; native <details> for
