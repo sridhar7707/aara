@@ -648,6 +648,35 @@ footer { display: none !important; }
   font-weight: 500;
 }
 
+/* ADR-070 Sprint 3 -- recommendation-surfacing semantics, sat directly under
+   the decision identity line. Text-first and calm: provenance is a small
+   micro-label (muted for an interpreted strategy decision, navy for a genuine
+   Sentinel recommendation -- the words already differ, colour is never the
+   only signal); the Sentinel non-concurrence line is one plain informational
+   sentence, never a stoplight colour or pill; the confidence qualifier is a
+   small muted caption. Existing primitive tokens only -- no new token, no
+   red/green, no badge/gauge, no motion (FORBIDDEN_UI_PATTERNS.md). */
+.aara-decision-header .aara-recommendation-provenance {
+  margin-top: var(--space-xs);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+}
+.aara-decision-header .aara-recommendation-provenance.is-sentinel {
+  color: var(--color-navy-primary);
+}
+.aara-decision-header .aara-sentinel-wait {
+  margin-top: var(--space-xs);
+  font-size: 14px;
+  color: var(--color-navy-primary);
+}
+.aara-decision-header .aara-confidence-qualifier {
+  margin-top: var(--space-xs);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
 /* BUY/SELL/HOLD badge -- subtle tint, never color alone (text always
    present). Compacted slightly (13px -> 12px, 8px -> 7px horizontal
    padding) as part of the Detail Panel Polish pass so it reads as an

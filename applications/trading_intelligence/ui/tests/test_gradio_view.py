@@ -513,6 +513,93 @@ def test_render_detail_header_omits_reference_fields_when_none_are_present():
     assert "opaque pointer" not in header.lower()
 
 
+# --- ADR-070 Sprint 3: recommendation-surfacing semantics rendered in the
+#     visible Decision Center header (screen.py already computes them; these
+#     prove they reach the rendered HTML). ---------------------------------
+
+def _header_for(**view_overrides):
+    view = _make_view(**view_overrides)
+    controller = _FakeController(detail_area=DecisionDetailArea(decision=view))
+    ui = DecisionCenterUI(controller, [view.decision_id])
+    return ui._render_detail(view.decision_id)[0]
+
+
+def test_render_detail_header_labels_a_sentinel_authored_decision_a_sentinel_recommendation():
+    header = _header_for(action="BUY", action_source="SENTINEL")
+
+    assert "Sentinel recommendation" in header
+    assert "interpreted strategy decision" not in header
+    assert "is-sentinel" in header  # provenance line carries the emphasis modifier
+
+
+def test_render_detail_header_labels_a_strategy_decision_an_interpreted_strategy_decision():
+    header = _header_for(action="BUY", action_source="STRATEGY")
+
+    assert "interpreted strategy decision" in header
+    assert "Sentinel recommendation" not in header
+    assert "is-sentinel" not in header
+
+
+def test_render_detail_header_treats_missing_or_unknown_provenance_as_interpreted_strategy_decision():
+    for missing in (None, "", "sentinel", "unexpected"):
+        header = _header_for(action="BUY", action_source=missing)
+
+        assert "interpreted strategy decision" in header, missing
+        assert "Sentinel recommendation" not in header, missing
+
+
+def test_render_detail_header_shows_the_inert_non_concurrence_line_only_for_a_sentinel_wait():
+    header = _header_for(action="WAIT", action_source="SENTINEL")
+
+    assert "Sentinel does not concur at this time." in header
+    # inert: no veto / block / schedule / check-back wording introduced here
+    for forbidden in ("blocked", "rejected", "check back", "try again", "scheduled"):
+        assert forbidden not in header.lower()
+
+
+def test_render_detail_header_omits_the_non_concurrence_line_for_a_non_sentinel_or_non_wait_decision():
+    for action, source in (
+        ("WAIT", "STRATEGY"),
+        ("WAIT", None),
+        ("WAIT", "sentinel"),   # wrong case -> not Sentinel-authored
+        ("BUY", "SENTINEL"),    # Sentinel-authored but not a WAIT
+    ):
+        header = _header_for(action=action, action_source=source)
+        assert "does not concur" not in header, (action, source)
+
+
+def test_render_detail_header_shows_the_uncalibrated_confidence_qualifier():
+    header = _header_for(action="BUY", action_source="SENTINEL", confidence=0.73)
+
+    assert '<div class="aara-confidence-qualifier">Uncalibrated ensemble model score</div>' in header
+    # the qualifier itself claims no calibrated accuracy / probability
+    qualifier = "Uncalibrated ensemble model score"
+    assert qualifier.startswith("Uncalibrated")
+    assert not any(ch.isdigit() for ch in qualifier)
+    for forbidden in ("probability", "accuracy", "likelihood", "chance"):
+        assert forbidden not in qualifier.lower()
+
+
+def test_render_detail_header_recommendation_context_order_is_identity_then_provenance_then_qualifier():
+    header = _header_for(action="WAIT", action_source="SENTINEL")
+
+    _assert_index_order(
+        header,
+        "identity-line",
+        "aara-recommendation-provenance",
+        "Sentinel does not concur at this time.",
+        "aara-confidence-qualifier",
+    )
+
+
+def test_empty_and_missing_and_error_details_carry_no_recommendation_context():
+    """The recommendation lines are decision-scoped -- they must not appear
+    in the 'nothing selected' / 'not found' / 'read error' header states."""
+    assert "aara-recommendation-provenance" not in DecisionCenterUI._empty_detail()[0]
+    assert "aara-recommendation-provenance" not in DecisionCenterUI._missing_decision_detail()[0]
+    assert "aara-recommendation-provenance" not in DecisionCenterUI._decision_error_detail()[0]
+
+
 def test_risk_reference_clarification_html_is_unchanged():
     """DC-01 regression lock: the existing opaque-pointer disclosure must
     remain byte-for-byte unchanged by the new navigation link added

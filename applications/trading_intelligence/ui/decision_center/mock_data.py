@@ -30,6 +30,12 @@ from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionListArea,
 )
 
+# action_source (ADR-070) is set here purely so the recommendation-surfacing
+# semantics are exercisable in a demo of the shipped Decision Center: one
+# Sentinel-authored BUY ("Sentinel recommendation"), one strategy-originated
+# decision ("interpreted strategy decision"), one with no provenance recorded
+# (the safe default -- also "interpreted strategy decision", never Sentinel),
+# and one Sentinel-authored WAIT (renders the inert non-concurrence line).
 _MOCK_DECISIONS = [
     DecisionView(
         decision_id="mock-dec-001",
@@ -38,6 +44,7 @@ _MOCK_DECISIONS = [
         status=DecisionState.DECISION_CREATED,
         confidence=0.82,
         updated_at=datetime.datetime(2026, 8, 4, 9, 35, 0),
+        action_source="SENTINEL",
     ),
     DecisionView(
         decision_id="mock-dec-002",
@@ -46,6 +53,7 @@ _MOCK_DECISIONS = [
         status=DecisionState.GOVERNANCE_EVALUATED,
         confidence=0.54,
         updated_at=datetime.datetime(2026, 8, 4, 9, 40, 0),
+        action_source="STRATEGY",
     ),
     DecisionView(
         decision_id="mock-dec-003",
@@ -54,6 +62,16 @@ _MOCK_DECISIONS = [
         status=DecisionState.APPROVAL_RECORDED,
         confidence=0.91,
         updated_at=datetime.datetime(2026, 8, 4, 10, 15, 0),
+        # action_source deliberately absent -> "interpreted strategy decision".
+    ),
+    DecisionView(
+        decision_id="mock-dec-004",
+        symbol="GOOGL",
+        action="WAIT",
+        status=DecisionState.DECISION_CREATED,
+        confidence=0.48,
+        updated_at=datetime.datetime(2026, 8, 4, 10, 30, 0),
+        action_source="SENTINEL",
     ),
 ]
 

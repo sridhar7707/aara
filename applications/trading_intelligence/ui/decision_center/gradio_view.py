@@ -262,10 +262,14 @@ from applications.trading_intelligence.projections.decision_view import Decision
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
 from applications.trading_intelligence.ui.decision_center.screen import (
+    CONFIDENCE_QUALIFIER,
     DecisionDetailArea,
     DecisionListArea,
     ReadStatus,
     format_display_timestamp,
+    is_sentinel_recommendation,
+    provenance_label,
+    sentinel_non_concurrence_statement,
 )
 from applications.trading_intelligence.ui.decision_center.theme import CSS
 
@@ -1089,6 +1093,13 @@ class DecisionCenterUI:
                     with gr.Row(elem_classes=["aara-hero-metrics"]):
                         conviction_output = gr.Textbox(
                             label="Confidence", interactive=False,
+                            # ADR-070 Sprint 3: the fixed uncalibrated-ensemble
+                            # qualifier that screen.py exposes -- sits directly
+                            # under the number it qualifies. Static (never
+                            # decision-dependent), never a probability/accuracy
+                            # claim; also rendered in the decision header for
+                            # provenance grouping (single source: this constant).
+                            info=CONFIDENCE_QUALIFIER,
                             elem_classes=["aara-field-value", "aara-conviction-value"],
                         )
                         updated_output = gr.Textbox(
@@ -1871,9 +1882,47 @@ class DecisionCenterUI:
         return (
             '<div class="aara-decision-header">'
             f'<div class="identity-line">{html.escape(decision.symbol)} &middot; {badge}</div>'
+            f"{DecisionCenterUI._recommendation_context_html(decision)}"
             f"{references_html}"
             "</div>"
         )
+
+    @staticmethod
+    def _recommendation_context_html(decision: DecisionView) -> str:
+        """ADR-070 Sprint 3 -- renders the recommendation-surfacing semantics
+        screen.py already computes, without re-forming any recommendation,
+        recomputing/calibrating confidence, aggregating evidence, or implying
+        execution / approval / scheduling:
+
+        * Provenance line, always shown: "Sentinel recommendation" only when
+          DecisionView.action_source is exactly "SENTINEL" (never inferred from
+          action/confidence/evidence); "STRATEGY", None, or any unexpected
+          value -> "interpreted strategy decision" (the safe default).
+        * Sentinel non-concurrence line, only for a Sentinel-authored WAIT
+          (action == "WAIT" and action_source == "SENTINEL") -- the exact inert
+          sentence, carrying no veto / block / schedule / "check back" meaning.
+        * Confidence qualifier caption, always shown -- the fixed
+          uncalibrated-ensemble wording (same constant the Confidence field's
+          own info text uses)."""
+        provenance = provenance_label(decision.action_source)
+        sentinel_class = " is-sentinel" if is_sentinel_recommendation(
+            decision.action_source
+        ) else ""
+        parts = [
+            f'<div class="aara-recommendation-provenance{sentinel_class}">'
+            f"{html.escape(provenance)}</div>"
+        ]
+        wait_line = sentinel_non_concurrence_statement(
+            decision.action, decision.action_source,
+        )
+        if wait_line is not None:
+            parts.append(
+                f'<div class="aara-sentinel-wait">{html.escape(wait_line)}</div>'
+            )
+        parts.append(
+            f'<div class="aara-confidence-qualifier">{html.escape(CONFIDENCE_QUALIFIER)}</div>'
+        )
+        return "".join(parts)
 
     @staticmethod
     def _raw_reference_fields_html(
