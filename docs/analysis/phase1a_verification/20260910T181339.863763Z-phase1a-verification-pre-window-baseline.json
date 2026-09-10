@@ -1,0 +1,472 @@
+{
+  "schema": "phase1a-verification/v1",
+  "run_timestamp": "2026-09-10T18:13:39.863763+00:00",
+  "window": {
+    "start": "2026-07-28",
+    "end": "2026-08-27"
+  },
+  "hf_repo_id": "ksri77/ai-trading-bot-db",
+  "hf_revisions": {
+    "trust_ledger.db": "c63746bc419b8b3d582f0e572285216fd91bb003",
+    "trades.db": "c63746bc419b8b3d582f0e572285216fd91bb003"
+  },
+  "snapshot_max_timestamp": "2026-09-10T18:06:16.316179+00:00",
+  "source_sha256": {
+    "trust_ledger.db": "5a53adcc04879be77877d4d1457d1eba77aeda7fa888371a6ff2a7f2ec257ac8",
+    "trades.db": "0283f6b462180d23aed15a41a07caa3ad7a9f2b0b34fd17ce9f268f1b6a6ae0f"
+  },
+  "snapshot_freshness": {
+    "id": "SNAPSHOT_FRESHNESS",
+    "name": "Snapshot freshness (covers window + optional recency)",
+    "verdict": "PASS",
+    "detail": "Snapshot covers the window (max 2026-09-10T18:06:16.316179+00:00).",
+    "counts": {
+      "snapshot_max_timestamp": "2026-09-10T18:06:16.316179+00:00",
+      "run_timestamp": "2026-09-10T18:13:39.863763+00:00",
+      "window_end": "2026-08-27",
+      "staleness_hours": 48.0,
+      "require_recent": false,
+      "covers_window": true,
+      "age_hours": 0.12,
+      "recency_ok": true
+    },
+    "offending_ids": []
+  },
+  "checks": [
+    {
+      "id": "SINGLE_WRITE_PATH",
+      "name": "Single write path (verify_single_write_path.py; ADR-071 scope)",
+      "verdict": "PASS",
+      "detail": "exit=0. [PASS] 2. legacy decision_log writer functions (create_decision/log_decision) have zero production callers -- legacy writer module(s): ['database.services.decision_service']; callers importing them: none\n[PASS] 3. approve_decision()/reject_decision() callers confined to the dashboard's human-click handler -- only dashboard/components/pending_approvals.py calls these\n[PASS] 4a. Scanner stage has exactly one production caller (bot/_main_candidates.py) -- [('bot/_main_candidates.py', 23)]\n[PASS] 4b. Ledger stage has exactly one production caller (bot/_main_trust_decisions.py) -- [('bot/_main_trust_decisions.py', 85)]\n[PASS] 4c. Paper Execution stage has exactly one production caller (bot/_main_trust_decisions.py) -- [('bot/_main_trust_decisions.py', 347)]\n[PASS] 5. decision_log has zero rows written after cutover -- 0 row(s) created after 2026-07-28T20:54:30-05:00 (cutover commit dfa567a)\n\n7/7 claims verified | checks 1-4 are static analysis of the current repo tree, not per-day window proof.",
+      "counts": {
+        "exit_code": 0
+      },
+      "offending_ids": []
+    },
+    {
+      "id": "CANDIDATE_LINKAGE",
+      "name": "Candidate-evaluation linkage (every decision)",
+      "verdict": "PASS",
+      "detail": "4539/4539 decisions link to a completed candidate.",
+      "counts": {
+        "decisions": 4539,
+        "unlinked": 0
+      },
+      "offending_ids": []
+    },
+    {
+      "id": "MANIFEST_LINKAGE",
+      "name": "Deployment-manifest linkage (every decision)",
+      "verdict": "PASS",
+      "detail": "4539/4539 decisions reference a PROMOTED manifest.",
+      "counts": {
+        "decisions": 4539,
+        "unpromoted": 0
+      },
+      "offending_ids": []
+    },
+    {
+      "id": "DATA_INTEGRITY_ALL",
+      "name": "Data integrity - all decisions (model_outputs[xgboost/lstm/finbert] + risk_checks + data_completeness)",
+      "verdict": "PASS",
+      "detail": "4539/4539 window decisions carry all three fields.",
+      "counts": {
+        "decisions": 4539,
+        "incomplete": 0
+      },
+      "offending_ids": []
+    },
+    {
+      "id": "EXECUTED_COMPLETENESS",
+      "name": "EXECUTED-decision completeness (check_executed_completeness, windowed)",
+      "verdict": "INCONCLUSIVE",
+      "detail": "0 EXECUTED decisions in window; EXECUTED-only check is vacuous (not a FAIL).",
+      "counts": {},
+      "offending_ids": []
+    },
+    {
+      "id": "DUPLICATE_FINGERPRINTS",
+      "name": "Duplicate decisions (S12: EXECUTED-only; check_duplicate_fingerprints, windowed)",
+      "verdict": "INCONCLUSIVE",
+      "detail": "0 EXECUTED decisions in window; S12 guard is EXECUTED-only, so vacuous (not a FAIL).",
+      "counts": {},
+      "offending_ids": []
+    },
+    {
+      "id": "REPRODUCIBILITY_SAMPLE",
+      "name": "Reproducibility sample (FR-0.10/NFR-8 artifact-checksum; EXECUTED-only)",
+      "verdict": "INCONCLUSIVE",
+      "detail": "0 EXECUTED decisions in window; vacuous. ledger.reproducibility verifies artifact checksums only, not output reproduction (no inference pipeline).",
+      "counts": {},
+      "offending_ids": []
+    },
+    {
+      "id": "PROVENANCE_CHAIN",
+      "name": "Provenance chain (Decision -> Manifest -> Training runs/Artifacts -> Strategy -> Risk rules)",
+      "verdict": "INCONCLUSIVE",
+      "detail": "Resolved for all window decisions: roles ['lstm', 'xgboost'] + strategy + risk rules. FinBERT has model_outputs but NO training-run/artifact in the manifest chain (recovered S6 requires all three). Not resolved here (schema/bootstrap out of scope).",
+      "counts": {
+        "manifests": 1,
+        "resolved_roles": [
+          "lstm",
+          "xgboost"
+        ]
+      },
+      "offending_ids": []
+    },
+    {
+      "id": "HASH_CHAIN_INTEGRITY",
+      "name": "Hash-chain integrity + active_deployment_pointer drift (ledger.integrity)",
+      "verdict": "PASS",
+      "detail": "All Group-A hash chains clean; no pointer drift.",
+      "counts": {},
+      "offending_ids": []
+    },
+    {
+      "id": "FAILED_WRITES",
+      "name": "Zero failed writes over the window",
+      "verdict": "INCONCLUSIVE",
+      "detail": "Not provable from durable artifacts: a write that raised before INSERT leaves no row and no chain gap, and bot error logs are ephemeral/uncommitted. A prospective durable failure log (protected bot/, out of scope) would be required.",
+      "counts": {},
+      "offending_ids": []
+    },
+    {
+      "id": "PER_DAY_ENUMERATION",
+      "name": "30 consecutive days - per-day evidence enumeration",
+      "verdict": "INCONCLUSIVE",
+      "detail": "18 trading day(s) with evidence, 5 empty trading day(s): ['2026-07-28', '2026-08-07', '2026-08-10', '2026-08-11', '2026-08-12'], 8 weekend/non-trading day(s). '30 consecutive days' is a human-adjudication item; this orchestrator does not PASS it. Weekday/weekend from stdlib calendar only (no market-holiday source in the repo).",
+      "counts": {
+        "trading_days_with_evidence": 18,
+        "empty_trading_days": 5,
+        "weekend_days": 8,
+        "empty_trading_day_dates": [
+          "2026-07-28",
+          "2026-08-07",
+          "2026-08-10",
+          "2026-08-11",
+          "2026-08-12"
+        ],
+        "per_day": [
+          {
+            "date": "2026-07-28",
+            "weekday": "Tue",
+            "class": "empty-trading-day",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-07-29",
+            "weekday": "Wed",
+            "class": "evidence",
+            "candidate": 14,
+            "decision": 0,
+            "risk": 61,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-07-30",
+            "weekday": "Thu",
+            "class": "evidence",
+            "candidate": 13,
+            "decision": 17,
+            "risk": 68,
+            "constitution": 102,
+            "trades": 0
+          },
+          {
+            "date": "2026-07-31",
+            "weekday": "Fri",
+            "class": "evidence",
+            "candidate": 13,
+            "decision": 0,
+            "risk": 61,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-01",
+            "weekday": "Sat",
+            "class": "weekend",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-02",
+            "weekday": "Sun",
+            "class": "weekend",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-03",
+            "weekday": "Mon",
+            "class": "evidence",
+            "candidate": 14,
+            "decision": 0,
+            "risk": 61,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-04",
+            "weekday": "Tue",
+            "class": "evidence",
+            "candidate": 14,
+            "decision": 0,
+            "risk": 61,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-05",
+            "weekday": "Wed",
+            "class": "evidence",
+            "candidate": 18,
+            "decision": 0,
+            "risk": 60,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-06",
+            "weekday": "Thu",
+            "class": "evidence",
+            "candidate": 19,
+            "decision": 3,
+            "risk": 25,
+            "constitution": 18,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-07",
+            "weekday": "Fri",
+            "class": "empty-trading-day",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-08",
+            "weekday": "Sat",
+            "class": "weekend",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-09",
+            "weekday": "Sun",
+            "class": "weekend",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-10",
+            "weekday": "Mon",
+            "class": "empty-trading-day",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-11",
+            "weekday": "Tue",
+            "class": "empty-trading-day",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-12",
+            "weekday": "Wed",
+            "class": "empty-trading-day",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-13",
+            "weekday": "Thu",
+            "class": "evidence",
+            "candidate": 20,
+            "decision": 0,
+            "risk": 29,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-14",
+            "weekday": "Fri",
+            "class": "evidence",
+            "candidate": 20,
+            "decision": 0,
+            "risk": 61,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-15",
+            "weekday": "Sat",
+            "class": "weekend",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-16",
+            "weekday": "Sun",
+            "class": "weekend",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-17",
+            "weekday": "Mon",
+            "class": "evidence",
+            "candidate": 21,
+            "decision": 747,
+            "risk": 68,
+            "constitution": 4482,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-18",
+            "weekday": "Tue",
+            "class": "evidence",
+            "candidate": 20,
+            "decision": 670,
+            "risk": 61,
+            "constitution": 4020,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-19",
+            "weekday": "Wed",
+            "class": "evidence",
+            "candidate": 19,
+            "decision": 610,
+            "risk": 61,
+            "constitution": 3660,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-20",
+            "weekday": "Thu",
+            "class": "evidence",
+            "candidate": 19,
+            "decision": 662,
+            "risk": 61,
+            "constitution": 3972,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-21",
+            "weekday": "Fri",
+            "class": "evidence",
+            "candidate": 17,
+            "decision": 488,
+            "risk": 61,
+            "constitution": 2928,
+            "trades": 1
+          },
+          {
+            "date": "2026-08-22",
+            "weekday": "Sat",
+            "class": "weekend",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-23",
+            "weekday": "Sun",
+            "class": "weekend",
+            "candidate": 0,
+            "decision": 0,
+            "risk": 0,
+            "constitution": 0,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-24",
+            "weekday": "Mon",
+            "class": "evidence",
+            "candidate": 17,
+            "decision": 366,
+            "risk": 61,
+            "constitution": 2196,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-25",
+            "weekday": "Tue",
+            "class": "evidence",
+            "candidate": 17,
+            "decision": 305,
+            "risk": 61,
+            "constitution": 1830,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-26",
+            "weekday": "Wed",
+            "class": "evidence",
+            "candidate": 16,
+            "decision": 244,
+            "risk": 61,
+            "constitution": 1464,
+            "trades": 0
+          },
+          {
+            "date": "2026-08-27",
+            "weekday": "Thu",
+            "class": "evidence",
+            "candidate": 16,
+            "decision": 427,
+            "risk": 61,
+            "constitution": 2562,
+            "trades": 0
+          }
+        ]
+      },
+      "offending_ids": []
+    }
+  ],
+  "overall_verdict": "INCONCLUSIVE",
+  "notes": [
+    "READ-ONLY: production DBs are copied to a disposable temp dir; only the copies are opened writably (ledger.db.init_db migrates a snapshot). data/trust_ledger.db, trades.db and the HF cache are untouched.",
+    "NEVER emits an overall PASS on its own: FAILED_WRITES and PER_DAY_ENUMERATION are inherently INCONCLUSIVE and need human adjudication + sign-off per ADR-058 D2.",
+    "A run with overall != FAIL is NOT a Phase 1A pass and does NOT start the 30-day window.",
+    "single-write-path checks 1-4 are static analysis of the current repo tree, not per-day window proof."
+  ]
+}

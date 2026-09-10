@@ -37,7 +37,12 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 CUTOVER_COMMIT = "dfa567ad79df5f05174fdc0439470129b1330508"
 CUTOVER_TIMESTAMP = "2026-07-28T20:54:30-05:00"  # commit dfa567a's committer date
 
-TRADES_DB_PATH = REPO_ROOT / "trades.db"
+# Check 5 targets the repo-root trades.db by default. The Phase 1A §14
+# verification orchestrator (scripts/phase1a_verification.py) needs check 5 to
+# run against a disposable copy of the accumulated *production* trades.db, so
+# PHASE1A_TRADES_DB overrides only this path. Checks 1-4 (static analysis of the
+# repo tree) and the meaning of every check are unchanged.
+TRADES_DB_PATH = Path(os.environ.get("PHASE1A_TRADES_DB") or (REPO_ROOT / "trades.db"))
 
 # tests/ (fixtures call these directly), docs/ (frozen Phase 0 design-session
 # reference copies), scripts/ (offline tooling, not the live trading cycle,
