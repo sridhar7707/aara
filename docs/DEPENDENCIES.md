@@ -49,7 +49,6 @@ Full pinned list in `requirements.txt` (bot + dashboard) and `requirements_space
 | duckdb | ≥ 1.0.0 | Analytics columnar DB | Pin major |
 | sqlalchemy | ≥ 2.0.0 | SQLite ORM helpers | Pin major |
 | python-dotenv | ≥ 1.0.0 | `.env` loading | Flexible |
-| schedule | ≥ 1.2.0 | In-process job scheduler | Flexible |
 | requests | ≥ 2.31.0 | HTTP (Reddit, Finnhub) | Flexible |
 
 ## Development / Test Dependencies
