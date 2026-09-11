@@ -23,6 +23,7 @@ from applications.trading_intelligence.projections.evidence_entry import Evidenc
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
 from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _ACCESSIBLE_NAME_SETUP_JS,
+    _ACTION_BADGE_CLASSES,
     _APPROVAL_ERROR_MESSAGE,
     _AUDIT_ERROR_MESSAGE,
     _DECISION_NOT_FOUND_MESSAGE,
@@ -1943,8 +1944,11 @@ def test_evidence_card_escapes_html_in_entry_values():
     assert "&lt;img" in evidence_html
 
 
-def test_action_badge_reflects_buy_sell_and_hold():
-    for action, css_class in (("BUY", "action-buy"), ("SELL", "action-sell"), ("HOLD", "action-hold")):
+def test_action_badge_reflects_buy_sell_hold_wait_and_buy_more():
+    for action, css_class in (
+        ("BUY", "action-buy"), ("SELL", "action-sell"), ("HOLD", "action-hold"),
+        ("WAIT", "action-hold"), ("BUY_MORE", "action-buy-more"),
+    ):
         view = _make_view(action=action)
         controller = _FakeController(detail_area=DecisionDetailArea(decision=view))
         ui = DecisionCenterUI(controller, ["dec-001"])
@@ -1958,10 +1962,13 @@ def test_action_badge_reflects_buy_sell_and_hold():
 def test_list_rows_render_the_action_column_as_a_badge_for_each_action():
     """The Decisions gr.Dataframe renders its Action column through
     datatype="markdown" (V3) -- list_rows must carry the same restrained
-    badge markup as the hero, not a plain string, for every BUY/SELL/HOLD
-    value, and it must not disturb column 0 (decision_id), which
-    _on_row_select depends on via evt.row_value[0]."""
-    for action, css_class in (("BUY", "action-buy"), ("SELL", "action-sell"), ("HOLD", "action-hold")):
+    badge markup as the hero, not a plain string, for every BUY/SELL/HOLD/
+    WAIT/BUY_MORE value, and it must not disturb column 0 (decision_id),
+    which _on_row_select depends on via evt.row_value[0]."""
+    for action, css_class in (
+        ("BUY", "action-buy"), ("SELL", "action-sell"), ("HOLD", "action-hold"),
+        ("WAIT", "action-hold"), ("BUY_MORE", "action-buy-more"),
+    ):
         view = _make_view(action=action)
         screen = DecisionCenterScreen(
             list_area=DecisionListArea(decisions=[view]),
@@ -1974,6 +1981,73 @@ def test_list_rows_render_the_action_column_as_a_badge_for_each_action():
 
         assert list_rows[0][0] == "dec-001"
         assert list_rows[0][2] == f'<span class="aara-list-action-badge {css_class}">{action}</span>'
+
+
+def test_buy_and_sell_badge_classes_are_unchanged_by_the_buy_more_addition():
+    """Regression lock: adding BUY_MORE must not touch BUY/SELL's own
+    established mapping."""
+    assert _ACTION_BADGE_CLASSES["BUY"] == "action-buy"
+    assert _ACTION_BADGE_CLASSES["SELL"] == "action-sell"
+
+
+def test_hold_wait_and_buy_more_badges_are_distinguishable():
+    """HOLD and WAIT deliberately keep sharing the same neutral colour
+    (Sprint 6A's own choice -- WAIT has no distinct design token and the
+    action label text itself, not colour, carries the distinction, per
+    FORBIDDEN_UI_PATTERNS.md's 'colour is never the only signal' rule).
+    BUY_MORE, added this sprint, additionally gets its own colour class, so
+    all three full badges must still render as three distinct strings, and
+    BUY_MORE's class must differ from HOLD/WAIT's shared one."""
+    rendered = {}
+    for action in ("HOLD", "WAIT", "BUY_MORE"):
+        view = _make_view(action=action)
+        controller = _FakeController(detail_area=DecisionDetailArea(decision=view))
+        ui = DecisionCenterUI(controller, ["dec-001"])
+        rendered[action] = ui._render_detail("dec-001")[0]
+
+    assert len({rendered["HOLD"], rendered["WAIT"], rendered["BUY_MORE"]}) == 3
+    assert _ACTION_BADGE_CLASSES["HOLD"] == _ACTION_BADGE_CLASSES["WAIT"] == "action-hold"
+    assert _ACTION_BADGE_CLASSES["BUY_MORE"] == "action-buy-more"
+    assert _ACTION_BADGE_CLASSES["BUY_MORE"] != _ACTION_BADGE_CLASSES["HOLD"]
+
+
+_FORBIDDEN_ADR070_CONFIDENCE_WORDS = (
+    "probability", "likelihood", "certainty", "calibrated confidence",
+    "recommendation confidence", "sentinel's confidence",
+)
+
+
+def test_action_badges_introduce_no_forbidden_adr070_confidence_language():
+    """ADR-070 SS8 bans these words as a description of Decision.confidence
+    on any Decision Center surface. This sprint touches only action-badge
+    presentation, but the guard is cheap and belongs alongside the other
+    badge tests rather than only in a confidence-specific test module."""
+    for action in ("BUY", "SELL", "HOLD", "WAIT", "BUY_MORE"):
+        view = _make_view(action=action)
+        controller = _FakeController(detail_area=DecisionDetailArea(decision=view))
+        ui = DecisionCenterUI(controller, ["dec-001"])
+        header = ui._render_detail("dec-001")[0].lower()
+
+        for forbidden in _FORBIDDEN_ADR070_CONFIDENCE_WORDS:
+            assert forbidden not in header
+
+
+def test_action_badge_css_introduces_no_timer_polling_or_motion_mechanism():
+    """ADR-070 SS12 / FORBIDDEN_UI_PATTERNS.md: no timers, polling,
+    notifications, alerts, countdowns, flashing, or gimmick motion anywhere
+    in the Decision Center stylesheet -- a cheap source-level regression
+    lock scoped to the whole CSS constant this sprint's new rules live in."""
+    forbidden_css_tokens = (
+        "@keyframes", "animation:", "animation-", "blink", "countdown",
+        "setinterval", "settimeout",
+    )
+    # BlinkMacSystemFont (the WebKit/Blink engine's own system-font keyword,
+    # already present in --font-primary) is the one legitimate "blink"
+    # substring in this stylesheet -- strip it before checking so the guard
+    # targets an actual blinking-motion mechanism, not a font-stack name.
+    css_lower = CSS.lower().replace("blinkmacsystemfont", "")
+    for forbidden in forbidden_css_tokens:
+        assert forbidden not in css_lower
 
 
 def test_list_rows_render_an_approved_verdict_badge():

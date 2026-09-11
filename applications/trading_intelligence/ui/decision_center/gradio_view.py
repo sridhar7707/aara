@@ -948,7 +948,17 @@ _NO_PRODUCER_DISCLOSURE_HTML = (
     "</div>"
 )
 
-_ACTION_BADGE_CLASSES = {"BUY": "action-buy", "SELL": "action-sell", "HOLD": "action-hold"}
+_ACTION_BADGE_CLASSES = {
+    "BUY": "action-buy", "SELL": "action-sell", "HOLD": "action-hold",
+    # WAIT (Sentinel B2 non-concurrence) has no distinct design token today --
+    # mapped explicitly to HOLD's existing neutral styling rather than left to
+    # the .get() fallback below, so it's an intentional entry, not an accident.
+    "WAIT": "action-hold",
+    # BUY_MORE (Sprint 8A) gets its own quiet tint -- distinct from HOLD/WAIT's
+    # shared neutral gray -- reusing the existing gold tokens Governance's own
+    # record cards already use (theme.py), not a new base color.
+    "BUY_MORE": "action-buy-more",
+}
 
 _LIFECYCLE_STAGES = [
     (DecisionState.DECISION_CREATED, "Created", "decision-created-section"),

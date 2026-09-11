@@ -141,6 +141,14 @@ CSS = """
      to this token only; --color-text-secondary itself, and its other
      already-passing uses, are untouched. */
   --action-hold-fg: #5D5D5D;
+  /* BUY_MORE (Sprint 8A) -- reuses the exact gold RGB triple the Governance
+     record-card tint already uses below (rgba(200, 164, 93, ...)) and
+     --color-gold-accent as its foreground (already used as real text at a
+     comparable small size in .aara-shell-nav's own nav-label, not the
+     thinner --color-gold-accent-boundary variant reserved for hairline/
+     focus-ring contexts) -- no new base color introduced. */
+  --action-buy-more-bg: rgba(200, 164, 93, 0.08);
+  --action-buy-more-fg: var(--color-gold-accent);
 }
 
 /* ==========================================================================
@@ -518,6 +526,7 @@ footer { display: none !important; }
 .aara-list-action-badge.action-buy { background: var(--action-buy-bg); color: var(--action-buy-fg); }
 .aara-list-action-badge.action-sell { background: var(--action-sell-bg); color: var(--action-sell-fg); }
 .aara-list-action-badge.action-hold { background: var(--action-hold-bg); color: var(--action-hold-fg); }
+.aara-list-action-badge.action-buy-more { background: var(--action-buy-more-bg); color: var(--action-buy-more-fg); }
 
 /* Verdict column badge (Approved/Rejected) -- reuses the same
    positive/negative tint vocabulary as the Decision Detail approval card
@@ -706,6 +715,7 @@ footer { display: none !important; }
 .aara-action-badge.action-buy { background: var(--action-buy-bg); color: var(--action-buy-fg); }
 .aara-action-badge.action-sell { background: var(--action-sell-bg); color: var(--action-sell-fg); }
 .aara-action-badge.action-hold { background: var(--action-hold-bg); color: var(--action-hold-fg); }
+.aara-action-badge.action-buy-more { background: var(--action-buy-more-bg); color: var(--action-buy-more-fg); }
 
 /* Four-stage lifecycle track -- stronger visual weight than V2 (thicker
    connectors, larger markers) so it reads as a governed journey rather than
