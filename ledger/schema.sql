@@ -6,7 +6,7 @@
 -- one field couldn't hold both "what the governor would have done" and "what
 -- actually happened," which differ by design throughout Observation Mode (FR-1.10a).
 --
--- 16 tables total: 8 Immutable Trust Ledger (Group A, hash-chained,
+-- 17 tables total: 9 Immutable Trust Ledger (Group A, hash-chained,
 -- append-only, zero exceptions as of v1.2) + 5 Versioned Reference Records
 -- (Group B, append-only by trigger, no hash chain) + 3 Operational Tables
 -- (Group C, mutable) -- plus the decision_state VIEW (Section 5.1a),
@@ -26,6 +26,15 @@
 -- constitution_enforcement_events added as an 8th Group A table -- it did not
 -- exist in the Phase 0 freeze, added per the same "genuine, documented
 -- exception" process as v1.5's risk_evaluation_events split.
+--
+-- v1.5.2 (Sprint 4 additive exception, ADR-006-style): decision_action_source_events
+-- added as a 9th Group A table -- an immutable sibling audit fact recording the
+-- ADR-069 (B2) action-source provenance ("SENTINEL" / "STRATEGY") authored at
+-- entry-decision creation, one row per entry decision, referencing the
+-- authoritative decision_events row. Strictly additive: decision_events is
+-- unchanged; its hash reconstruction/verification is untouched. Absence of a
+-- row means action-source provenance was not recorded (exit decisions and
+-- historical decisions have none; nothing is backfilled).
 
 PRAGMA foreign_keys = ON;
 
@@ -253,6 +262,27 @@ CREATE TABLE IF NOT EXISTS decision_confidence_events (
                                  'PARTIAL_EVIDENCE','CONFLICTED_EVIDENCE','NO_EVIDENCE'))
 );
 
+-- v1.5.2 (Sprint 4 additive exception): the ADR-069 (B2) action-source
+-- provenance authored in EntryDecisionRecorder.__init__ -- one immutable row
+-- per entry decision, written by bot/trust_ledger/action_source.py
+-- immediately after the authoritative decision_events row. decision_id is a
+-- real FK: the writer only runs after write_decision_event() has committed a
+-- parent row. action_source carries exactly the ActionSource live vocabulary
+-- ("SENTINEL" when B2 concurs, "STRATEGY" on the B2 fallback). Exit decisions
+-- and historical decisions have no row here -- provenance simply absent, never
+-- fabricated or backfilled. Its own independent hash chain; decision_events is
+-- not modified.
+CREATE TABLE IF NOT EXISTS decision_action_source_events (
+    sequence_number       INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id              TEXT NOT NULL UNIQUE,
+    decision_id           TEXT NOT NULL REFERENCES decision_events(decision_id),
+    action_source         TEXT NOT NULL,   -- SENTINEL / STRATEGY (ActionSource live vocabulary)
+    recorded_at           TEXT NOT NULL,
+    record_hash           TEXT NOT NULL,
+    previous_record_hash  TEXT NOT NULL,
+    CHECK (action_source IN ('SENTINEL', 'STRATEGY'))
+);
+
 -- ============================================================================
 -- Group C: Operational Tables (mutable, not sources of historical truth)
 -- ============================================================================
@@ -310,6 +340,7 @@ CREATE INDEX IF NOT EXISTS idx_manifest_events_manifest_id  ON deployment_manife
 CREATE INDEX IF NOT EXISTS idx_training_runs_artifact       ON model_training_runs(artifact_id);
 CREATE INDEX IF NOT EXISTS idx_constitution_enforcement_decision_id ON constitution_enforcement_events(decision_id);
 CREATE INDEX IF NOT EXISTS idx_decision_confidence_decision_id ON decision_confidence_events(decision_id);
+CREATE INDEX IF NOT EXISTS idx_decision_action_source_decision_id ON decision_action_source_events(decision_id);
 
 -- ============================================================================
 -- Append-only enforcement triggers (Section 3): blanket no-update/no-delete
@@ -416,6 +447,13 @@ CREATE TRIGGER IF NOT EXISTS trg_decision_confidence_events_no_delete
 BEFORE DELETE ON decision_confidence_events
 BEGIN SELECT RAISE(ABORT, 'decision_confidence_events is append-only'); END;
 
+CREATE TRIGGER IF NOT EXISTS trg_decision_action_source_events_no_update
+BEFORE UPDATE ON decision_action_source_events
+BEGIN SELECT RAISE(ABORT, 'decision_action_source_events is append-only'); END;
+CREATE TRIGGER IF NOT EXISTS trg_decision_action_source_events_no_delete
+BEFORE DELETE ON decision_action_source_events
+BEGIN SELECT RAISE(ABORT, 'decision_action_source_events is append-only'); END;
+
 -- ============================================================================
 -- Chain-integrity triggers (new in v1.2, Section 3 item 3): a BEFORE INSERT
 -- trigger on every Group A table rejects any row whose previous_record_hash
@@ -498,6 +536,14 @@ WHEN NEW.previous_record_hash != COALESCE(
     '0000000000000000000000000000000000000000000000000000000000000000'
 )
 BEGIN SELECT RAISE(ABORT, 'decision_confidence_events: previous_record_hash does not match current chain head'); END;
+
+CREATE TRIGGER IF NOT EXISTS trg_decision_action_source_events_chain_integrity
+BEFORE INSERT ON decision_action_source_events
+WHEN NEW.previous_record_hash != COALESCE(
+    (SELECT record_hash FROM decision_action_source_events ORDER BY sequence_number DESC LIMIT 1),
+    '0000000000000000000000000000000000000000000000000000000000000000'
+)
+BEGIN SELECT RAISE(ABORT, 'decision_action_source_events: previous_record_hash does not match current chain head'); END;
 
 -- ============================================================================
 -- Candidate provenance enforcement (new in v1.4): a decision_events row must

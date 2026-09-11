@@ -16,6 +16,7 @@ from typing import Any
 
 from loguru import logger
 
+import bot.trust_ledger.action_source as action_source_ledger
 import bot.trust_ledger.constitution as constitution
 import bot.trust_ledger.data_quality as data_quality
 import bot.trust_ledger.decisions as decisions
@@ -65,6 +66,7 @@ def record_decision_safe(
     risk_checks: dict, final_confidence: float, intent: dict, data_completeness: dict,
     risk: RiskManager | None = None,
     decision_id: str | None = None,
+    action_source: str | None = None,
 ) -> None:
     if candidate_event_id is None or deployment_manifest_id is None:
         logger.warning(
@@ -88,6 +90,20 @@ def record_decision_safe(
             final_confidence, deployment_manifest_id, intent, data_completeness,
             decision_id=decision_id,
         )
+        # Sprint 4 additive slice: record the ADR-069 B2 action-source
+        # provenance (entry path only -- action_source is None on exit /
+        # legacy paths, so no row is written there). Immediately after the
+        # authoritative decision_events write, keyed to the exact parent row
+        # just written; failure-isolated exactly like constitution below --
+        # the parent is already committed by append_ledger_row() and is
+        # never rolled back, retried, or blocked by a failure here.
+        if action_source is not None:
+            try:
+                action_source_ledger.write_action_source_event(
+                    trust_conn, decision_row["decision_id"], action_source, _utc_now(),
+                )
+            except Exception as e:
+                logger.warning(f"trust ledger action-source write failed for {asset}: {e}")
         try:
             constitution.check_and_log(trust_conn, decision_row, risk)
         except Exception as e:
@@ -178,6 +194,11 @@ class EntryDecisionRecorder:
                 f"using upstream strategy provenance: {e}"
             )
             _b2_action, _b2_source = "BUY", ActionSource.STRATEGY.value
+        # Sprint 4 additive slice: retain the already-computed B2 provenance
+        # ("SENTINEL" / "STRATEGY") so the terminal write methods can thread
+        # it into the durable decision_action_source_events sibling. Never
+        # recomputed later.
+        self.action_source = _b2_source
         try:
             get_decision_service().create_decision(Decision(
                 decision_id=self.decision_id,
@@ -206,7 +227,7 @@ class EntryDecisionRecorder:
             self.portfolio_snapshot, self.market_context, self.model_outputs,
             {"gate_trace": self.trace}, self.final_confidence,
             decisions.build_intent("REJECT"), self.data_completeness, risk=self.risk,
-            decision_id=self.decision_id,
+            decision_id=self.decision_id, action_source=self.action_source,
         )
 
     def record_executed(
@@ -252,7 +273,7 @@ class EntryDecisionRecorder:
              "fill_shares": fill_shares},
             self.final_confidence, intent,
             self.data_completeness, risk=self.risk,
-            decision_id=self.decision_id,
+            decision_id=self.decision_id, action_source=self.action_source,
         )
 
     def record_order_not_filled(self, reason: str) -> None:
@@ -266,7 +287,7 @@ class EntryDecisionRecorder:
             self.portfolio_snapshot, self.market_context, self.model_outputs,
             {"gate_trace": self.trace}, self.final_confidence,
             decisions.build_intent("REJECT"), self.data_completeness, risk=self.risk,
-            decision_id=self.decision_id,
+            decision_id=self.decision_id, action_source=self.action_source,
         )
 
 

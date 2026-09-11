@@ -141,6 +141,10 @@ _MINIMAL_PAYLOADS = {
         "confidence_state": "PARTIAL_EVIDENCE", "evidence_basis": {},
         "risk_evidence_state": None, "risk_evidence_reason": None,
     },
+    "decision_action_source_events": lambda: {
+        "event_id": "ASRC-EXTRA", "decision_id": "DEC-1",
+        "action_source": "SENTINEL", "recorded_at": "2026-07-28T00:00:00Z",
+    },
 }
 
 

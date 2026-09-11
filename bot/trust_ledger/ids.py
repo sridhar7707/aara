@@ -64,3 +64,9 @@ def new_data_quality_event_id() -> str:
 def new_confidence_event_id(symbol: str | None = None) -> str:
     """For decision_confidence_events -- Confidence Integrity Redesign Phase 1."""
     return _new_id("CONF", symbol)
+
+
+def new_action_source_event_id(symbol: str | None = None) -> str:
+    """For decision_action_source_events -- one per entry decision, ADR-069 B2
+    action-source provenance (Sprint 4 additive slice)."""
+    return _new_id("ASRC", symbol)

@@ -69,6 +69,11 @@ _LEDGER_TABLES: dict[str, dict[str, Any]] = {
         "json_fields": {"evidence_basis"},
         "bool_fields": set(),
     },
+    "decision_action_source_events": {
+        "id_field": "event_id",
+        "json_fields": set(),
+        "bool_fields": set(),
+    },
     "cost_models": {
         "id_field": "cost_model_id",
         "json_fields": {"commission_rules", "tax_assumptions"},
