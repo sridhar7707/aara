@@ -66,8 +66,19 @@ shipped -- see "Current state" below for what's actually here).
   `LedgerStore` are in-memory only; the real backend choice remains a
   separately governed decision
   (`docs/decisions/ADR-004-sentinel-ledger-ownership-strategy.md`).
-- **No "list all decisions" capability.** The UI shows exactly the decision
-  ids its composition root was constructed with -- see
-  `services/decision_query_service.py`'s own docstring.
-- **No live trading, real market data, or production-readiness claim.**
-  The seeded decisions are illustrative, not real trading output.
+- **No general "list all decisions" capability on the Sentinel-engine demo
+  path.** `build_application()`'s composition root supplies the
+  caller-provided decision ids the UI shows -- see
+  `services/decision_query_service.py`'s own docstring. The deployed
+  `build_application_from_trades_snapshot()` path does not share this
+  limitation: its trades.db adapter
+  (`adapters/trades_db_decision_source.py`) enumerates recent BUY trade ids
+  itself (`_SELECT_BUY_IDS`), bounded by that query's own `_BUY_LIST_LIMIT`,
+  not supplied by the caller.
+- **No live trading, real market data, or production-readiness claim on the
+  Sentinel-engine demo path.** `build_application()`'s seeded decisions are
+  illustrative, not real trading output. The deployed
+  `build_application_from_trades_snapshot()` path reads real `trades.db` BUY
+  rows -- historical decision-time evidence, not seeded data -- but this is
+  still not a live order-control surface or a production-readiness claim
+  (see `gradio_view.py`'s own disclosure text).

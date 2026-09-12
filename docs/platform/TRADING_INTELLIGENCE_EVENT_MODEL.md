@@ -148,9 +148,9 @@ do not force risk evaluation into a decision-scoped shape it doesn't have.
 
 ## 8. Execution Lifecycle Model
 
-Conceptual state machine (field names for the execution payload are **not**
-finalized — the gap analysis flagged that `alpaca_client.py`/`paper_executor.py`'s
-actual fill-dict shape was not read; this document does not invent it):
+Conceptual state machine (the execution payload's field names, once left
+unfinalized here pending a read of `alpaca_client.py`/`paper_executor.py`'s
+actual fill-dict shape, are now fixed by ADR-065 Section 4 -- see below):
 
 ```
 decision_events row written (action=BUY/SELL, event_type=EXECUTED)
@@ -165,14 +165,17 @@ Executor.buy() / Executor.sell() called  [Trading Intelligence-internal, Section
 wait_for_fill() confirms                 [Trading Intelligence-internal, Section 5]
         |
         v
-DECISION_EXECUTED (payload: symbol, action, distilled fill data — exact fields TBD)
+DECISION_EXECUTED (payload: see ADR-065 Section 4 for the accepted field list)
 ```
 
-`DECISION_EXECUTED`'s payload should carry only the distilled result (what
+`DECISION_EXECUTED`'s payload carries only the distilled result (what
 executed, at what price, when) — not the order mechanics that produced it, per
-Section 5. Finalizing exact field names requires reading the executor
-implementations first (gap analysis recommendation #5) — explicitly deferred, not
-guessed here.
+Section 5. The exact field names, once finalized by reading the executor
+implementations (gap analysis recommendation #5), are now fixed by
+[ADR-065](../decisions/ADR-065-sentinel-paper-execution-integration-boundary.md)
+Section 4: required keys `decision_id`, `symbol`, `action`, `side`, `outcome`,
+`is_paper`, `timestamp`; optional keys `notional`, `quantity`, `fill_price`,
+`order_id`, `reason`.
 
 ## 9. Outcome Lifecycle Model
 
