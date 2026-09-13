@@ -113,6 +113,16 @@ class AlpacaOrder:
 
 
 @dataclass(frozen=True)
+class PortfolioHistoryPoint:
+    """One real portfolio_snapshots row -- the equity/value-over-time chart
+    plots these verbatim, in ascending as_of order. No derived figures
+    (return, drawdown, Sharpe, etc.) are ever computed from this or carried
+    on it; it is portfolio_value at a point in time, nothing else."""
+    as_of: str
+    portfolio_value: float
+
+
+@dataclass(frozen=True)
 class AlpacaOrdersSnapshot:
     """A successful, real read of Alpaca Paper recent orders. An empty
     `orders` tuple is a legitimate real result ("connected, no matching
@@ -134,6 +144,7 @@ class PortfolioScreen:
     alpaca_account: Optional[AlpacaAccountSnapshot] = None
     alpaca_positions: Tuple[AlpacaPosition, ...] = field(default=())
     alpaca_orders: Optional[AlpacaOrdersSnapshot] = None
+    portfolio_history: Optional[Tuple[PortfolioHistoryPoint, ...]] = None
     # ADR-061 Category A (A4): per-section integration health, populated by
     # the composition root (bootstrap.py) from each adapter's ReadResult.
     # Carries the reason a section is unavailable; consumed by rendering in
@@ -142,6 +153,7 @@ class PortfolioScreen:
     holdings_health: Optional[IntegrationHealth] = None
     alpaca_health: Optional[IntegrationHealth] = None
     alpaca_orders_health: Optional[IntegrationHealth] = None
+    portfolio_history_health: Optional[IntegrationHealth] = None
 
     @property
     def capital_is_available(self) -> bool:
@@ -197,3 +209,18 @@ class PortfolioScreen:
     @property
     def alpaca_orders_empty_state_message(self) -> str:
         return "Alpaca Paper account has no recent orders."
+
+    @property
+    def portfolio_history_is_available(self) -> bool:
+        """True once a real portfolio_history tuple has been supplied. An
+        empty tuple is a real "connected, no rows yet" result, distinct
+        from None (the portfolio_snapshots read was unavailable)."""
+        return self.portfolio_history is not None
+
+    @property
+    def portfolio_history_is_empty(self) -> bool:
+        return self.portfolio_history is not None and len(self.portfolio_history) == 0
+
+    @property
+    def portfolio_history_empty_state_message(self) -> str:
+        return "No portfolio history is recorded yet."

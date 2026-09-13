@@ -1090,11 +1090,14 @@ def _build_portfolio_intelligence_screen(db_path: Optional[str] = None) -> Portf
                 "None" if real_holdings is None else "tuple[%d]" % len(real_holdings),
                 getattr(holdings_health, "status", None),
                 getattr(holdings_health, "detail", None))
+    history_result = LegacyPortfolioSnapshotSource(**legacy_kwargs).get_portfolio_history()
     screen = PortfolioScreen(
         capital=capital_result.value,
         capital_health=capital_result.health,
         holdings=real_holdings,
         holdings_health=holdings_health,
+        portfolio_history=history_result.value,
+        portfolio_history_health=history_result.health,
     )
     return _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
 

@@ -58,8 +58,12 @@ section -- the intended, safe behavior, not a bug.
 import os
 import sqlite3
 from dataclasses import dataclass
+from typing import Tuple
 
 from applications.platform.integrations import IntegrationHealth, ReadResult
+from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
+    PortfolioHistoryPoint,
+)
 
 _PROVIDER = "trades_db_portfolio_snapshot"
 
@@ -73,6 +77,15 @@ _DB_PATH = "trades.db"
 _SELECT_LATEST_SNAPSHOT = (
     "SELECT portfolio_value, available_cash, timestamp FROM portfolio_snapshots "
     "WHERE portfolio_value > 0 ORDER BY timestamp DESC LIMIT 1"
+)
+
+# Same `portfolio_value > 0` fabricated-zero-row guard as
+# _SELECT_LATEST_SNAPSHOT, ordered ASC (oldest first) for a left-to-right
+# equity/value-over-time chart. Portfolio Intelligence's own chart, not
+# Morning Brief's single-point summary above.
+_SELECT_HISTORY = (
+    "SELECT timestamp, portfolio_value FROM portfolio_snapshots "
+    "WHERE portfolio_value > 0 ORDER BY timestamp ASC"
 )
 
 
@@ -141,3 +154,32 @@ class LegacyPortfolioSnapshotSource:
             ),
             _PROVIDER,
         )
+
+    def get_portfolio_history(self) -> "ReadResult[Tuple[PortfolioHistoryPoint, ...]]":
+        """Returns a ReadResult over every positive-value portfolio_snapshots
+        row, oldest first -- the real equity/value-over-time chart backing
+        Portfolio Intelligence's own history section (a separate concern
+        from Morning Brief's latest-snapshot summary above). HEALTHY with a
+        tuple of PortfolioHistoryPoint on success -- an empty tuple is a
+        genuine "connected, no rows yet" result, not a failure; UNAVAILABLE
+        when the database file is absent or locked; API_ERROR when the
+        portfolio_snapshots table is missing or a row could not be read."""
+        if not os.path.exists(self._db_path):
+            return ReadResult.failed(
+                IntegrationHealth.unavailable(_PROVIDER, detail="trades.db is not present")
+            )
+        try:
+            conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+        except sqlite3.Error as exc:
+            return ReadResult.failed(_sqlite_health(exc))
+        try:
+            rows = conn.execute(_SELECT_HISTORY).fetchall()
+        except sqlite3.Error as exc:
+            return ReadResult.failed(_sqlite_health(exc))
+        finally:
+            conn.close()
+        points = tuple(
+            PortfolioHistoryPoint(as_of=str(row[0]), portfolio_value=float(row[1]))
+            for row in rows
+        )
+        return ReadResult.healthy(points, _PROVIDER)

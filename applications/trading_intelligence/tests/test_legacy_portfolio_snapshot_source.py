@@ -14,6 +14,9 @@ from applications.trading_intelligence.adapters.legacy_portfolio_snapshot_source
     LegacyPortfolioSnapshotSource,
     PortfolioSnapshotValue,
 )
+from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
+    PortfolioHistoryPoint,
+)
 
 
 def _assert_healthy_empty(result):
@@ -155,6 +158,106 @@ def test_is_healthy_empty_when_only_row_has_null_values():
     try:
         source = LegacyPortfolioSnapshotSource(db_path=path)
         _assert_healthy_empty(source.get_latest_portfolio_snapshot())
+    finally:
+        os.remove(path)
+
+
+def test_get_portfolio_history_returns_points_ascending_by_timestamp_regardless_of_insert_order():
+    """The bot appends rows in wall-clock order, but the read must not rely
+    on that -- ORDER BY timestamp ASC in the SQL itself is what guarantees
+    a left-to-right chart, so this inserts the later row first."""
+    path = tempfile.mktemp(suffix=".db")
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE portfolio_snapshots (timestamp TEXT PRIMARY KEY, "
+        "portfolio_value REAL, available_cash REAL, open_positions INTEGER)"
+    )
+    conn.execute(
+        "INSERT INTO portfolio_snapshots VALUES "
+        "('2026-08-31T19:39:42+00:00', 100029.85, 59869.06, 5)"
+    )
+    conn.execute(
+        "INSERT INTO portfolio_snapshots VALUES "
+        "('2026-08-30T15:03:38+00:00', 90000.0, 30000.0, 4)"
+    )
+    conn.commit()
+    conn.close()
+    try:
+        source = LegacyPortfolioSnapshotSource(db_path=path)
+        result = source.get_portfolio_history()
+        assert result.health.status is IntegrationStatus.HEALTHY
+        assert result.value == (
+            PortfolioHistoryPoint(as_of="2026-08-30T15:03:38+00:00", portfolio_value=90000.0),
+            PortfolioHistoryPoint(as_of="2026-08-31T19:39:42+00:00", portfolio_value=100029.85),
+        )
+    finally:
+        os.remove(path)
+
+
+def test_get_portfolio_history_is_healthy_with_empty_tuple_when_table_is_empty():
+    """An empty tuple is a legitimate 'connected, zero rows' HEALTHY result
+    (the plural-adapter convention), never ReadResult.empty()."""
+    path = tempfile.mktemp(suffix=".db")
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE portfolio_snapshots (timestamp TEXT, portfolio_value REAL, "
+        "available_cash REAL, open_positions INTEGER)"
+    )
+    conn.commit()
+    conn.close()
+    try:
+        source = LegacyPortfolioSnapshotSource(db_path=path)
+        result = source.get_portfolio_history()
+        assert result.health.status is IntegrationStatus.HEALTHY
+        assert result.value == ()
+    finally:
+        os.remove(path)
+
+
+def test_get_portfolio_history_is_api_error_when_table_is_missing(empty_db):
+    source = LegacyPortfolioSnapshotSource(db_path=empty_db)
+
+    result = source.get_portfolio_history()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.API_ERROR
+
+
+def test_get_portfolio_history_is_unavailable_when_database_file_is_missing():
+    source = LegacyPortfolioSnapshotSource(
+        db_path="this_file_does_not_exist_xyz_12345.db"
+    )
+
+    result = source.get_portfolio_history()
+    assert result.value is None
+    assert result.health.status is IntegrationStatus.UNAVAILABLE
+
+
+def test_get_portfolio_history_skips_nonpositive_portfolio_value_rows():
+    """The same fabricated-zero-row guard as get_latest_portfolio_snapshot()
+    applies to the history read -- a bad Alpaca reconcile row must never
+    appear as a point on the chart."""
+    path = tempfile.mktemp(suffix=".db")
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE portfolio_snapshots (timestamp TEXT PRIMARY KEY, "
+        "portfolio_value REAL, available_cash REAL, open_positions INTEGER)"
+    )
+    conn.execute(
+        "INSERT INTO portfolio_snapshots VALUES "
+        "('2026-08-30T00:00:00+00:00', 77000.0, 7000.0, 3)"
+    )
+    conn.execute(
+        "INSERT INTO portfolio_snapshots VALUES "
+        "('2026-08-31T00:00:00+00:00', 0.0, 0.0, 0)"
+    )
+    conn.commit()
+    conn.close()
+    try:
+        source = LegacyPortfolioSnapshotSource(db_path=path)
+        result = source.get_portfolio_history()
+        assert result.value == (
+            PortfolioHistoryPoint(as_of="2026-08-30T00:00:00+00:00", portfolio_value=77000.0),
+        )
     finally:
         os.remove(path)
 

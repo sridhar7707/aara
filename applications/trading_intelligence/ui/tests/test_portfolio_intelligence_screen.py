@@ -1,5 +1,6 @@
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     CapitalSummary,
+    PortfolioHistoryPoint,
     PortfolioHolding,
     PortfolioScreen,
 )
@@ -96,3 +97,23 @@ def test_is_empty_is_false_when_holdings_is_none():
     screen = PortfolioScreen(capital=_make_capital(), holdings=None)
 
     assert screen.is_empty is False
+
+
+def test_portfolio_history_is_available_true_for_empty_tuple_false_for_none():
+    assert PortfolioScreen(portfolio_history=()).portfolio_history_is_available is True
+    assert PortfolioScreen(portfolio_history=None).portfolio_history_is_available is False
+
+
+def test_portfolio_history_is_empty_only_for_a_real_empty_tuple():
+    assert PortfolioScreen(portfolio_history=()).portfolio_history_is_empty is True
+    assert PortfolioScreen(portfolio_history=None).portfolio_history_is_empty is False
+    point = PortfolioHistoryPoint(as_of="2026-08-31T00:00:00+00:00", portfolio_value=1000.0)
+    assert PortfolioScreen(portfolio_history=(point,)).portfolio_history_is_empty is False
+
+
+def test_default_screen_portfolio_history_is_unavailable_not_empty():
+    screen = PortfolioScreen()
+
+    assert screen.portfolio_history is None
+    assert screen.portfolio_history_is_available is False
+    assert screen.portfolio_history_is_empty is False

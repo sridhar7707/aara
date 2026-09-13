@@ -50,6 +50,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import gradio as gr
+import pandas as pd
 
 from applications.trading_intelligence.ui.integration_health_view import (
     CSS as _INTEGRATION_HEALTH_CSS,
@@ -60,6 +61,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     AlpacaOrder,
     AlpacaPosition,
     CapitalSummary,
+    PortfolioHistoryPoint,
     PortfolioHolding,
     PortfolioScreen,
 )
@@ -212,6 +214,18 @@ _HOLDINGS_UNAVAILABLE_MESSAGE = (
     "could not be read in this environment."
 )
 
+# Portfolio Value Over Time (real portfolio_snapshots equity/value curve).
+# A read-only observation of the bot's own trades.db history, entirely
+# separate from Capital Summary/Holdings' point-in-time figures above --
+# no derived performance metric (return, drawdown, Sharpe, alpha, beta,
+# CAGR, ROI, attribution) is ever computed from it or rendered anywhere
+# near it; the chart is portfolio_value at each recorded instant, nothing
+# else.
+_PORTFOLIO_HISTORY_UNAVAILABLE_MESSAGE = (
+    "Portfolio value history is not available -- the managed portfolio "
+    "snapshot history could not be read in this environment."
+)
+
 # Used only when both Capital Summary/Allocation AND Holdings were
 # supplied from real sources (screen.capital_is_available and
 # screen.holdings_is_available both True). Holdings' current price/market
@@ -315,6 +329,11 @@ def _table_update(state: Tuple[List[List[str]], bool]) -> Dict[str, Any]:
     return gr.update(value=rows, visible=visible)
 
 
+def _chart_update(state: Tuple[pd.DataFrame, bool]) -> Dict[str, Any]:
+    dataframe, visible = state
+    return gr.update(value=dataframe, visible=visible)
+
+
 class PortfolioIntelligenceUI:
     def __init__(
         self,
@@ -408,6 +427,24 @@ class PortfolioIntelligenceUI:
                 **{_DATAFRAME_HEIGHT_KWARG: 320},
             )
 
+            gr.HTML('<div class="pi-section-label">Portfolio Value Over Time</div>')
+            history_message_value, history_message_visible = (
+                self._portfolio_history_message_state(initial)
+            )
+            portfolio_history_message_output = gr.HTML(
+                history_message_value, visible=history_message_visible,
+            )
+            history_dataframe, history_visible = self._portfolio_history_chart_state(initial)
+            portfolio_history_chart = gr.LinePlot(
+                value=history_dataframe,
+                x="as_of",
+                y="portfolio_value",
+                x_title="Date",
+                y_title="Portfolio Value ($)",
+                visible=history_visible,
+                elem_classes=["pi-portfolio-history-chart"],
+            )
+
             gr.HTML(
                 f'<div class="pi-section-label">Alpaca Paper Account '
                 f'<span class="pi-alpaca-badge">{html.escape(_ALPACA_PAPER_BADGE_TEXT)}</span></div>'
@@ -471,6 +508,7 @@ class PortfolioIntelligenceUI:
                 rendered_at_output, snapshot_output,
                 disclosure_output, capital_summary_output, allocation_output,
                 holdings_message_output, holdings_table,
+                portfolio_history_message_output, portfolio_history_chart,
                 alpaca_account_output, alpaca_positions_message_output, alpaca_positions_table,
                 alpaca_orders_truncation_output, alpaca_orders_message_output,
                 alpaca_orders_table,
@@ -530,6 +568,8 @@ class PortfolioIntelligenceUI:
             gr.update(value=self._allocation_state(screen)[0]),
             _html_update(self._holdings_message_state(screen)),
             _table_update(self._holdings_table_state(screen)),
+            _html_update(self._portfolio_history_message_state(screen)),
+            _chart_update(self._portfolio_history_chart_state(screen)),
             gr.update(value=self._alpaca_account_state(screen)[0]),
             _html_update(self._alpaca_positions_message_state(screen)),
             _table_update(self._alpaca_positions_table_state(screen)),
@@ -577,6 +617,30 @@ class PortfolioIntelligenceUI:
         if screen.holdings_is_available and not screen.is_empty:
             return (self._format_holdings_rows(screen.holdings), True)
         return ([], False)
+
+    def _portfolio_history_message_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
+        if not screen.portfolio_history_is_available:
+            return (
+                render_unavailable(
+                    screen.portfolio_history_health,
+                    fallback_message=_PORTFOLIO_HISTORY_UNAVAILABLE_MESSAGE,
+                ),
+                True,
+            )
+        if screen.portfolio_history_is_empty:
+            return (
+                f'<div class="pi-empty-message aara-empty">'
+                f'{html.escape(screen.portfolio_history_empty_state_message)}</div>',
+                True,
+            )
+        return ("", False)
+
+    def _portfolio_history_chart_state(
+        self, screen: PortfolioScreen,
+    ) -> Tuple[pd.DataFrame, bool]:
+        if screen.portfolio_history_is_available and not screen.portfolio_history_is_empty:
+            return (self._format_portfolio_history_dataframe(screen.portfolio_history), True)
+        return (self._format_portfolio_history_dataframe(()), False)
 
     def _alpaca_account_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
         if screen.alpaca_is_available:
@@ -700,6 +764,21 @@ class PortfolioIntelligenceUI:
     @staticmethod
     def _format_empty_message_html(screen: PortfolioScreen) -> str:
         return f'<div class="pi-empty-message aara-empty">{html.escape(screen.empty_state_message)}</div>'
+
+    @staticmethod
+    def _format_portfolio_history_dataframe(
+        points: Tuple[PortfolioHistoryPoint, ...],
+    ) -> pd.DataFrame:
+        """Two real columns only -- each point's own as_of instant and its
+        own portfolio_value, verbatim from portfolio_snapshots. No derived
+        column (return, drawdown, or any other computed metric) is ever
+        added here."""
+        return pd.DataFrame(
+            {
+                "as_of": [pd.Timestamp(point.as_of) for point in points],
+                "portfolio_value": [point.portfolio_value for point in points],
+            }
+        )
 
     @staticmethod
     def _format_alpaca_account_html(account: AlpacaAccountSnapshot) -> str:

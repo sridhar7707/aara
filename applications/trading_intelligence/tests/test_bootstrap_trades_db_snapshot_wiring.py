@@ -28,6 +28,9 @@ import pytest
 
 from applications.platform.integrations import IntegrationHealth, ReadResult
 from applications.trading_intelligence import bootstrap
+from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
+    PortfolioHistoryPoint,
+)
 
 
 def _snap_ok(path):
@@ -155,6 +158,23 @@ def test_portfolio_screen_capital_unavailable_when_no_snapshot(
     monkeypatch.chdir(tmp_path)
     screen = bootstrap._build_portfolio_intelligence_screen(db_path=None)
     assert screen.capital is None
+
+
+def test_portfolio_screen_history_is_real_from_snapshot(tmp_path, offline):
+    snap = _make_fixture_snapshot(tmp_path)
+    screen = bootstrap._build_portfolio_intelligence_screen(db_path=snap)
+    assert screen.portfolio_history == (
+        PortfolioHistoryPoint(as_of="2026-08-30T19:39:42+00:00", portfolio_value=80000.0),
+        PortfolioHistoryPoint(as_of="2026-08-31T19:39:42+00:00", portfolio_value=88000.0),
+    )
+
+
+def test_portfolio_screen_history_unavailable_when_no_snapshot(
+    tmp_path, monkeypatch, offline
+):
+    monkeypatch.chdir(tmp_path)
+    screen = bootstrap._build_portfolio_intelligence_screen(db_path=None)
+    assert screen.portfolio_history is None
 
 
 def test_morning_brief_regime_and_capital_real_from_snapshot(tmp_path, offline):

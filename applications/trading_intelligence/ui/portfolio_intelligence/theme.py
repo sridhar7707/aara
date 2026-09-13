@@ -224,4 +224,8 @@ CSS = """
   color: var(--pi-color-text-secondary);
   padding: 4px 0;
 }
+
+.pi-portfolio-history-chart {
+  margin: 4px 0;
+}
 """

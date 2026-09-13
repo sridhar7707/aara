@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 import gradio as gr
+import pandas as pd
 
 from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (
@@ -17,6 +18,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
     _PARTIAL_DATA_BODY,
     _PARTIAL_DATA_HTML,
     _PARTIAL_DATA_TITLE,
+    _PORTFOLIO_HISTORY_UNAVAILABLE_MESSAGE,
     _REAL_DATA_HTML,
     _RENDERED_AT_PREFIX,
     _SNAPSHOT_PREFIX,
@@ -32,6 +34,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     AlpacaOrdersSnapshot,
     AlpacaPosition,
     CapitalSummary,
+    PortfolioHistoryPoint,
     PortfolioHolding,
     PortfolioScreen,
 )
@@ -295,6 +298,67 @@ def test_holdings_unavailable_renders_the_message_and_no_table():
 
     assert any(_HOLDINGS_UNAVAILABLE_MESSAGE in v for v in html_values)
     assert not any(d for d in dataframes if "pi-holdings-table" in (d.elem_classes or []))
+
+
+# --- Portfolio Value Over Time (real portfolio_snapshots history chart) --
+
+
+def _history_chart(demo):
+    charts = [b for b in demo.blocks.values() if isinstance(b, gr.LinePlot)]
+    assert len(charts) == 1
+    return charts[0]
+
+
+def test_portfolio_history_unavailable_renders_the_message_and_hides_the_chart():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(portfolio_history=None))
+
+    demo = ui.build()
+    html_values = _html_values(demo)
+
+    assert any(_PORTFOLIO_HISTORY_UNAVAILABLE_MESSAGE in v for v in html_values)
+    assert _history_chart(demo).visible is False
+
+
+def test_portfolio_history_empty_renders_the_message_and_hides_the_chart():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(portfolio_history=()))
+
+    demo = ui.build()
+    html_values = _html_values(demo)
+
+    assert any("No portfolio history is recorded yet." in v for v in html_values)
+    assert _history_chart(demo).visible is False
+
+
+def test_portfolio_history_with_real_points_renders_the_chart_and_no_message():
+    points = (
+        PortfolioHistoryPoint(as_of="2026-08-30T15:03:38+00:00", portfolio_value=90000.0),
+        PortfolioHistoryPoint(as_of="2026-08-31T19:39:42+00:00", portfolio_value=100029.85),
+    )
+    ui = PortfolioIntelligenceUI(PortfolioScreen(portfolio_history=points))
+
+    demo = ui.build()
+    chart = _history_chart(demo)
+
+    assert chart.visible is True
+    assert [row[1] for row in chart.value["data"]] == [90000.0, 100029.85]
+    # x is each point's own as_of instant (epoch ms), in the same order
+    assert [row[0] for row in chart.value["data"]] == [
+        int(pd.Timestamp(p.as_of).timestamp() * 1000) for p in points
+    ]
+    assert not any(
+        "Portfolio value history" in v or "No portfolio history" in v
+        for v in _html_values(demo)
+    )
+
+
+def test_portfolio_history_chart_has_no_derived_performance_metrics():
+    """Explicit scope guard: only the two real columns (timestamp, portfolio
+    value) may ever appear -- no Sharpe/alpha/beta/CAGR/ROI/drawdown or any
+    other computed metric."""
+    points = (PortfolioHistoryPoint(as_of="2026-08-31T00:00:00+00:00", portfolio_value=100000.0),)
+    chart = _history_chart(PortfolioIntelligenceUI(PortfolioScreen(portfolio_history=points)).build())
+
+    assert set(chart.value["columns"]) == {"as_of", "portfolio_value"}
 
 
 # --- ADR-061 A4: per-section IntegrationHealth in the unavailable state ---
@@ -716,7 +780,7 @@ def test_default_screen_renders_zero_visible_dataframes():
 # --- Render-time fetch: Refresh button, demo.load, "as of" indicator ----
 
 
-_OUTPUT_COUNT = 13  # see PortfolioIntelligenceUI.build()'s `outputs` list
+_OUTPUT_COUNT = 15  # see PortfolioIntelligenceUI.build()'s `outputs` list
 
 
 def _refresh_button(demo):
@@ -839,7 +903,8 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
     updates = ui._render()
 
     rendered_at, snapshot, disclosure, capital_summary, allocation, \
-        holdings_msg, holdings_tbl, alpaca_acct, alpaca_pos_msg, alpaca_pos_tbl, \
+        holdings_msg, holdings_tbl, portfolio_history_msg, portfolio_history_chart, \
+        alpaca_acct, alpaca_pos_msg, alpaca_pos_tbl, \
         orders_trunc, orders_msg, orders_tbl = updates
 
     assert _SNAPSHOT_UNAVAILABLE in snapshot["value"]
@@ -847,6 +912,9 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
     assert _CAPITAL_UNAVAILABLE_MESSAGE in capital_summary["value"]
     assert _CAPITAL_UNAVAILABLE_MESSAGE in allocation["value"]
     assert _HOLDINGS_UNAVAILABLE_MESSAGE in holdings_msg["value"]
+    assert _PORTFOLIO_HISTORY_UNAVAILABLE_MESSAGE in portfolio_history_msg["value"]
+    assert portfolio_history_chart["visible"] is False
+    assert len(portfolio_history_chart["value"]) == 0
     assert _ALPACA_UNAVAILABLE_MESSAGE in alpaca_acct["value"]
     assert _ALPACA_ORDERS_UNAVAILABLE_MESSAGE in orders_msg["value"]
     # every table hidden and empty
