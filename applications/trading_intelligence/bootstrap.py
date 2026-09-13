@@ -100,6 +100,9 @@ from applications.trading_intelligence.adapters.legacy_position_source import (
     LegacyPositionSource,
     OpenPosition,
 )
+from applications.trading_intelligence.adapters.legacy_earnings_source import (
+    LegacyEarningsSource,
+)
 from applications.trading_intelligence.adapters.legacy_news_cache_source import (
     LegacyNewsCacheSource,
 )
@@ -131,6 +134,9 @@ from applications.trading_intelligence.adapters.trades_db_decision_source import
 )
 from applications.trading_intelligence.adapters.trades_db_outcome_source import (
     TradesDbOutcomeReader,
+)
+from applications.trading_intelligence.adapters.trades_db_earnings_source import (
+    TradesDbEarningsSource,
 )
 from applications.trading_intelligence.adapters.trades_db_news_cache_diff_source import (
     TradesDbNewsCacheDiffSource,
@@ -400,11 +406,17 @@ def build_application_from_trades_snapshot(db_path: Optional[str]) -> DecisionCe
     # rationale as news_cache_diff_source above.
     recommendation_source = LegacyRecommendationSource(**legacy_source_kwargs(db_path))
     recommendation_diff_source = TradesDbRecommendationDiffSource(recommendation_source)
+    # Sprint 7 "Earnings Proximity": same real-only-on-this-path rationale
+    # as the two collaborators above.
+    earnings_source = TradesDbEarningsSource(
+        LegacyEarningsSource(**legacy_source_kwargs(db_path))
+    )
 
     controller = DecisionCenterController(
         query_service, evidence_query_service, governance_query_service, audit_source,
         news_cache_diff_source=news_cache_diff_source,
         recommendation_diff_source=recommendation_diff_source,
+        earnings_source=earnings_source,
     )
     return DecisionCenterUI(controller, decision_ids)
 

@@ -25,6 +25,7 @@ from applications.trading_intelligence.services.news_cache_snapshot_diff import 
     NewsCacheSnapshotDiff,
 )
 from applications.trading_intelligence.services.recommendation_diff import RecommendationDiff
+from applications.trading_intelligence.adapters.legacy_earnings_source import EarningsSnapshot
 from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _ACCESSIBLE_NAME_SETUP_JS,
     _ACTION_BADGE_CLASSES,
@@ -1550,6 +1551,87 @@ def test_recommendation_evidence_does_not_grow_detail_values_arity():
 
     assert len(result) == 11
     assert "Recommendation Then" in result[10]
+
+
+# --- Sprint 7: "Earnings Proximity" evidence, appended into the SAME
+# "Evidence Since Decision" HTML string as the news-cache and
+# recommendation evidence -- no new tuple slot, no _DetailValues change.
+
+def test_earnings_evidence_near_earnings_appears_in_same_html():
+    snapshot = EarningsSnapshot(symbol="AVGO", near_earnings=True, cached_at="2026-09-01T16:41:57+00:00")
+    area = DecisionDetailArea(decision=_make_view(), earnings_snapshot=snapshot)
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "Near earnings" in out
+    assert "Not near earnings" not in out
+
+
+def test_earnings_evidence_not_near_earnings_appears_in_same_html():
+    snapshot = EarningsSnapshot(symbol="AAPL", near_earnings=False, cached_at="2026-09-01T16:41:57+00:00")
+    area = DecisionDetailArea(decision=_make_view(), earnings_snapshot=snapshot)
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "Not near earnings" in out
+
+
+def test_earnings_evidence_not_tracked_state():
+    area = DecisionDetailArea(
+        decision=_make_view(), earnings_snapshot=None, earnings_status=ReadStatus.OK,
+    )
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "Not tracked" in out
+    assert "aara-error-message" not in out
+
+
+def test_earnings_evidence_error_state_uses_the_existing_error_convention():
+    area = DecisionDetailArea(
+        decision=_make_view(), earnings_snapshot=None, earnings_status=ReadStatus.ERROR,
+    )
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert 'class="aara-error-message"' in out
+
+
+def test_earnings_evidence_renders_cached_at_when_available():
+    snapshot = EarningsSnapshot(symbol="AVGO", near_earnings=True, cached_at="2026-09-01T16:41:57+00:00")
+    area = DecisionDetailArea(decision=_make_view(), earnings_snapshot=snapshot)
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "2026-09-01T16:41:57+00:00" in out
+
+
+def test_earnings_evidence_html_escapes_cached_at():
+    snapshot = EarningsSnapshot(
+        symbol="AVGO", near_earnings=True, cached_at="<script>alert(1)</script>",
+    )
+    area = DecisionDetailArea(decision=_make_view(), earnings_snapshot=snapshot)
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "<script>" not in out
+    assert "&lt;script&gt;" in out
+
+
+def test_earnings_evidence_does_not_grow_detail_values_arity():
+    """The design constraint this slice must satisfy: earnings evidence is
+    concatenated into the SAME tuple slot as the other two facts --
+    _DetailValues stays at exactly 11 elements."""
+    snapshot = EarningsSnapshot(symbol="AVGO", near_earnings=True, cached_at="2026-09-01")
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=_make_view(), earnings_snapshot=snapshot)
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    result = ui._render_detail("dec-001")
+
+    assert len(result) == 11
+    assert "Near earnings" in result[10]
 
 
 def test_feature_drivers_production_pair_list_renders_name_colon_value():

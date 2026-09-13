@@ -179,6 +179,11 @@ class DecisionDetailArea:
     # RecommendationDiff lives in applications.trading_intelligence.services.
     recommendation_diff: Optional["RecommendationDiff"] = None
     recommendation_diff_status: ReadStatus = ReadStatus.OK
+    # Sprint 7 "Earnings Proximity": same forward-reference-string
+    # convention as the two fields above, kept consistent even though
+    # EarningsSnapshot lives under adapters/ rather than services/.
+    earnings_snapshot: Optional["EarningsSnapshot"] = None
+    earnings_status: ReadStatus = ReadStatus.OK
 
     @property
     def is_empty(self) -> bool:

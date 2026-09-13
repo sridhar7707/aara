@@ -54,6 +54,13 @@ sixth, optional collaborator (default None), added separately from
 news_cache_diff_source and following the identical duck-typed,
 independently-isolated pattern -- a failure here never affects any other
 concern, and vice versa.
+
+Sprint 7 "Earnings Proximity": earnings_source is a seventh, optional
+collaborator (default None), following the identical duck-typed,
+independently-isolated pattern as the two above -- a failure here never
+affects any other concern, and vice versa. Unlike the other two, its
+`get_snapshot(symbol)` takes no timestamp, since earnings_cache carries no
+date dimension to compare against.
 """
 from typing import List, Optional
 
@@ -83,6 +90,7 @@ class DecisionCenterController:
         audit_source: SentinelAuditSource,
         news_cache_diff_source=None,
         recommendation_diff_source=None,
+        earnings_source=None,
     ):
         self._query_service = query_service
         self._evidence_query_service = evidence_query_service
@@ -90,6 +98,7 @@ class DecisionCenterController:
         self._audit_source = audit_source
         self._news_cache_diff_source = news_cache_diff_source
         self._recommendation_diff_source = recommendation_diff_source
+        self._earnings_source = earnings_source
 
     def load_decisions(self, decision_ids: List[str]) -> DecisionListArea:
         views = self._query_service.list_decision_views(decision_ids)
@@ -159,6 +168,17 @@ class DecisionCenterController:
             recommendation_diff = None
             recommendation_diff_status = ReadStatus.OK
 
+        if self._earnings_source is not None:
+            try:
+                earnings_snapshot = self._earnings_source.get_snapshot(view.symbol)
+                earnings_status = ReadStatus.OK
+            except TradingIntelligenceReadError:
+                earnings_snapshot = None
+                earnings_status = ReadStatus.ERROR
+        else:
+            earnings_snapshot = None
+            earnings_status = ReadStatus.OK
+
         return DecisionDetailArea(
             decision=view,
             evidence_reference=evidence_reference, risk_reference=risk_reference,
@@ -169,6 +189,7 @@ class DecisionCenterController:
             news_cache_diff=news_cache_diff, news_cache_diff_status=news_cache_diff_status,
             recommendation_diff=recommendation_diff,
             recommendation_diff_status=recommendation_diff_status,
+            earnings_snapshot=earnings_snapshot, earnings_status=earnings_status,
         )
 
     def load_screen(

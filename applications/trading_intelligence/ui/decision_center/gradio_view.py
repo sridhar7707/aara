@@ -715,6 +715,19 @@ _RECOMMENDATION_DIFF_UNAVAILABLE_HTML = (
     f'<div class="aara-empty-message">{html.escape(_RECOMMENDATION_DIFF_UNAVAILABLE_MESSAGE)}</div>'
 )
 
+# Sprint 7 "Earnings Proximity": purely descriptive current-value fact --
+# no date comparison, no volatility/materiality/significance/urgency
+# meaning. Rendered into the SAME "Evidence Since Decision" HTML string
+# (see _format_news_cache_diff_html) -- no new section, no new
+# _DetailValues slot.
+_EARNINGS_NEAR_LABEL = "Near earnings"
+_EARNINGS_NOT_NEAR_LABEL = "Not near earnings"
+_EARNINGS_NOT_TRACKED_MESSAGE = "Not tracked"
+_EARNINGS_ERROR_MESSAGE = "Earnings information is temporarily unavailable."
+_EARNINGS_NOT_TRACKED_HTML = (
+    f'<div class="aara-empty-message">{html.escape(_EARNINGS_NOT_TRACKED_MESSAGE)}</div>'
+)
+
 # MVP Loading States slice: _empty_detail()'s prior "" for why/evidence/
 # governance/approval/audit rendered as literal blank space under each
 # section heading -- no cue that the blank is because nothing is selected
@@ -1925,16 +1938,19 @@ class DecisionCenterUI:
         """Sprint 7 "Evidence Since Decision": the single HTML string
         rendered into the one "Evidence Since Decision" section/output --
         the purely descriptive news-cache comparison
-        (_news_cache_evidence_html) followed by the purely descriptive
-        recommendation comparison (_format_recommendation_diff_html),
-        concatenated. Both facts share this one section/output slot
-        deliberately: adding the second fact must not grow _DetailValues,
+        (_news_cache_evidence_html), the purely descriptive recommendation
+        comparison (_format_recommendation_diff_html), and the purely
+        descriptive earnings-proximity fact (_format_earnings_html),
+        concatenated. All three facts share this one section/output slot
+        deliberately: adding a new fact must not grow _DetailValues,
         change _on_row_select's arity, or touch build()'s component
-        wiring -- see trades_db_recommendation_diff_source.py's own
-        module docstring for the full rationale."""
+        wiring -- see trades_db_recommendation_diff_source.py's /
+        trades_db_earnings_source.py's own module docstrings for the full
+        rationale."""
         return (
             DecisionCenterUI._news_cache_evidence_html(detail_area)
             + DecisionCenterUI._format_recommendation_diff_html(detail_area)
+            + DecisionCenterUI._format_earnings_html(detail_area)
         )
 
     @staticmethod
@@ -2024,6 +2040,52 @@ class DecisionCenterUI:
             fields.append(
                 ("Confidence Now", DecisionCenterUI._format_evidence_value(diff.after_confidence))
             )
+
+        rows = "".join(
+            '<div class="aara-record-field">'
+            f'<span class="record-label">{html.escape(label)}</span>'
+            f'<span class="record-value">{html.escape(value)}</span>'
+            "</div>"
+            for label, value in fields
+        )
+        return (
+            '<details class="aara-payload-disclosure">'
+            "<summary>Details</summary>"
+            f'<div class="aara-record-card-fields">{rows}</div>'
+            "</details>"
+        )
+
+    @staticmethod
+    def _format_earnings_html(detail_area: DecisionDetailArea) -> str:
+        """Sprint 7 "Earnings Proximity": a purely descriptive fact --
+        whether this decision's symbol is currently cached as near
+        earnings (earnings_cache, unmodified via LegacyEarningsSource /
+        TradesDbEarningsSource). Unlike the two facts above, there is no
+        before/after comparison here -- earnings_cache carries a single
+        current value per symbol, not a dated series -- so this renders
+        exactly one factual line plus, when available, the cache's own
+        freshness timestamp verbatim. `near_earnings` is relayed exactly
+        as the bot recorded it (already normalized to a real bool at the
+        adapter boundary -- see legacy_earnings_source.py); nothing here
+        infers an earnings date, computes days until earnings, or
+        attaches any volatility/materiality/significance/urgency meaning
+        to it."""
+        if detail_area.earnings_status is ReadStatus.ERROR:
+            return DecisionCenterUI._error_message_html(_EARNINGS_ERROR_MESSAGE)
+        snapshot = detail_area.earnings_snapshot
+        if snapshot is None:
+            return _EARNINGS_NOT_TRACKED_HTML
+
+        fields = []
+        if snapshot.near_earnings is True:
+            fields.append(("Earnings Proximity", _EARNINGS_NEAR_LABEL))
+        elif snapshot.near_earnings is False:
+            fields.append(("Earnings Proximity", _EARNINGS_NOT_NEAR_LABEL))
+        # snapshot.near_earnings is None (row exists, flag not set): no
+        # proximity row is rendered -- never guessed, never defaulted to
+        # either state.
+        if snapshot.cached_at is not None:
+            fields.append(("Cached", snapshot.cached_at))
 
         rows = "".join(
             '<div class="aara-record-field">'

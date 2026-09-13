@@ -818,3 +818,86 @@ def test_load_decision_detail_does_not_query_recommendation_diff_for_a_missing_d
     assert detail_area.is_empty is True
     assert detail_area.recommendation_diff is None
     assert detail_area.recommendation_diff_status is ReadStatus.OK
+
+
+class _InMemoryEarningsSource:
+    """Fake earnings collaborator -- duck-typed like
+    _InMemoryRecommendationDiffSource above (no services/ wrapper, no
+    ABC). get_snapshot(symbol) only -- no date, no diff."""
+
+    def __init__(self, snapshot_by_symbol=None):
+        self._snapshot_by_symbol = snapshot_by_symbol or {}
+
+    def get_snapshot(self, symbol):
+        return self._snapshot_by_symbol.get(symbol)
+
+
+class _BoomEarningsSource:
+    def get_snapshot(self, symbol):
+        raise TradingIntelligenceReadError("boom")
+
+
+def test_load_decision_detail_attaches_earnings_snapshot_when_collaborator_present():
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": _make_contract(symbol="AVGO")})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        earnings_source=_InMemoryEarningsSource({"AVGO": "some-earnings-snapshot"}),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.earnings_snapshot == "some-earnings-snapshot"
+    assert detail.earnings_status is ReadStatus.OK
+
+
+def test_load_decision_detail_earnings_snapshot_is_none_when_collaborator_absent():
+    """No earnings_source injected -- the Sentinel path's existing
+    construction must keep working unchanged, with an honest OK/None
+    result, never an error, and never a read attempt."""
+    controller = _make_controller(decisions={"dec-001": _make_contract()})
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.earnings_snapshot is None
+    assert detail.earnings_status is ReadStatus.OK
+
+
+def test_load_decision_detail_reports_earnings_error_but_keeps_other_concerns():
+    contract = _make_contract()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource({"dec-001": [_make_entry()]})),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        earnings_source=_BoomEarningsSource(),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.decision is not None
+    assert detail.evidence == (_make_entry(),)
+    assert detail.evidence_status is ReadStatus.OK
+    assert detail.earnings_snapshot is None
+    assert detail.earnings_status is ReadStatus.ERROR
+
+
+def test_load_decision_detail_does_not_query_earnings_for_a_missing_decision():
+    class _AssertNotCalledEarningsSource:
+        def get_snapshot(self, symbol):
+            raise AssertionError("earnings must not be queried for a missing decision")
+
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource()),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        earnings_source=_AssertNotCalledEarningsSource(),
+    )
+
+    detail_area = controller.load_decision_detail("missing-decision")
+
+    assert detail_area.is_empty is True
+    assert detail_area.earnings_snapshot is None
+    assert detail_area.earnings_status is ReadStatus.OK

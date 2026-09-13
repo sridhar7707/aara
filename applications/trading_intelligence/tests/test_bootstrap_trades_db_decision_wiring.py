@@ -47,6 +47,9 @@ CREATE TABLE recommendations (
     prediction_date TEXT NOT NULL, recommendation TEXT, confidence REAL,
     prev_recommendation TEXT, price_at_recommendation REAL, created_at TEXT,
     UNIQUE(symbol, prediction_date)
+);
+CREATE TABLE earnings_cache (
+    symbol TEXT PRIMARY KEY, near_earnings INTEGER, cached_at TEXT
 )
 """
 
@@ -103,6 +106,14 @@ def test_build_application_sentinel_path_has_no_recommendation_diff_source():
     diff collaborator either."""
     ui = build_application()
     assert ui._controller._recommendation_diff_source is None
+
+
+def test_build_application_sentinel_path_has_no_earnings_source():
+    """Coexistence: build_application() (the Sentinel path) has no
+    trades.db to read at all, so it must not be given an earnings
+    collaborator either."""
+    ui = build_application()
+    assert ui._controller._earnings_source is None
 
 
 # -- build_application_from_trades_snapshot() --------------------------
@@ -166,6 +177,23 @@ def test_seeded_db_wires_a_real_recommendation_diff_source():
         detail = ui._controller.load_decision_detail("trade-45")
         assert detail.recommendation_diff is None
         assert detail.recommendation_diff_status is ReadStatus.OK
+    finally:
+        os.remove(path)
+
+
+def test_seeded_db_wires_a_real_earnings_source():
+    """Confirms build_application_from_trades_snapshot() actually
+    constructs and injects TradesDbEarningsSource into the controller --
+    the read path is safe/honest (an empty temp DB has no earnings_cache
+    rows for any symbol, so the honest result is OK/None, never an
+    error)."""
+    path = _seeded_db()
+    try:
+        ui = build_application_from_trades_snapshot(path)
+        assert ui._controller._earnings_source is not None
+        detail = ui._controller.load_decision_detail("trade-45")
+        assert detail.earnings_snapshot is None
+        assert detail.earnings_status is ReadStatus.OK
     finally:
         os.remove(path)
 
