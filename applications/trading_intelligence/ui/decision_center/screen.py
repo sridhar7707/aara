@@ -166,6 +166,14 @@ class DecisionDetailArea:
     approvals_status: ReadStatus = ReadStatus.OK
     audit_trail: Tuple[AuditEntry, ...] = field(default=())
     audit_trail_status: ReadStatus = ReadStatus.OK
+    # Sprint 7 "Evidence Since Decision": typed as a bare forward-reference
+    # string, not imported, so this UI component does not import from
+    # applications.trading_intelligence.services (see ui/tests/
+    # test_ui_structure.py's test_screen_components_do_not_import_services_
+    # directly) -- the concrete NewsCacheSnapshotDiff type is passed through
+    # unmodified by controller.py, which is allowed to call services/.
+    news_cache_diff: Optional["NewsCacheSnapshotDiff"] = None
+    news_cache_diff_status: ReadStatus = ReadStatus.OK
 
     @property
     def is_empty(self) -> bool:

@@ -38,6 +38,16 @@ the same underlying decision record, so a failure here is reported exactly
 like a decision-read failure. The two values are passed through to
 DecisionDetailArea unresolved, uninterpreted -- display-only, per the
 read-only audit that scoped this change.
+
+Sprint 7 "Evidence Since Decision": news_cache_diff_source is a fifth,
+optional collaborator (default None), following the same duck-typed
+pattern as audit_source -- no services/ wrapper, since it has no
+list-vs-detail split to isolate. Isolated in its own independent
+try/except, exactly like the four existing concerns: a failure here never
+prevents evidence/governance/approvals/audit-trail from loading, and vice
+versa. When no collaborator is injected (the Sentinel path's existing
+4-arg construction), the result is an honest ReadStatus.OK / None -- never
+an error, and no read is attempted at all.
 """
 from typing import List, Optional
 
@@ -65,11 +75,13 @@ class DecisionCenterController:
         evidence_query_service: DecisionEvidenceQueryService,
         governance_query_service: DecisionGovernanceQueryService,
         audit_source: SentinelAuditSource,
+        news_cache_diff_source=None,
     ):
         self._query_service = query_service
         self._evidence_query_service = evidence_query_service
         self._governance_query_service = governance_query_service
         self._audit_source = audit_source
+        self._news_cache_diff_source = news_cache_diff_source
 
     def load_decisions(self, decision_ids: List[str]) -> DecisionListArea:
         views = self._query_service.list_decision_views(decision_ids)
@@ -113,6 +125,19 @@ class DecisionCenterController:
             audit_trail = ()
             audit_trail_status = ReadStatus.ERROR
 
+        if self._news_cache_diff_source is not None:
+            try:
+                news_cache_diff = self._news_cache_diff_source.get_diff(
+                    view.symbol, view.updated_at
+                )
+                news_cache_diff_status = ReadStatus.OK
+            except TradingIntelligenceReadError:
+                news_cache_diff = None
+                news_cache_diff_status = ReadStatus.ERROR
+        else:
+            news_cache_diff = None
+            news_cache_diff_status = ReadStatus.OK
+
         return DecisionDetailArea(
             decision=view,
             evidence_reference=evidence_reference, risk_reference=risk_reference,
@@ -120,6 +145,7 @@ class DecisionCenterController:
             governance=governance, governance_status=governance_status,
             approvals=approvals, approvals_status=approvals_status,
             audit_trail=audit_trail, audit_trail_status=audit_trail_status,
+            news_cache_diff=news_cache_diff, news_cache_diff_status=news_cache_diff_status,
         )
 
     def load_screen(

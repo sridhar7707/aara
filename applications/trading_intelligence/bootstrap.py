@@ -100,6 +100,9 @@ from applications.trading_intelligence.adapters.legacy_position_source import (
     LegacyPositionSource,
     OpenPosition,
 )
+from applications.trading_intelligence.adapters.legacy_news_cache_source import (
+    LegacyNewsCacheSource,
+)
 from applications.trading_intelligence.adapters.legacy_regime_source import LegacyRegimeSource
 from applications.trading_intelligence.adapters.legacy_risk_state_source import LegacyRiskStateSource
 from applications.trading_intelligence.adapters.live_market_quote_source import (
@@ -125,6 +128,9 @@ from applications.trading_intelligence.adapters.trades_db_decision_source import
 )
 from applications.trading_intelligence.adapters.trades_db_outcome_source import (
     TradesDbOutcomeReader,
+)
+from applications.trading_intelligence.adapters.trades_db_news_cache_diff_source import (
+    TradesDbNewsCacheDiffSource,
 )
 from applications.trading_intelligence.adapters.trades_db_snapshot import fetch_trades_db_snapshot
 from applications.trading_intelligence.adapters.trust_ledger_inspection_source import (
@@ -380,9 +386,14 @@ def build_application_from_trades_snapshot(db_path: Optional[str]) -> DecisionCe
     evidence_query_service = DecisionEvidenceQueryService(TradesDbEvidenceSource(reader))
     governance_query_service = DecisionGovernanceQueryService(TradesDbGovernanceSource(reader))
     audit_source = TradesDbAuditSource(reader)
+    # Sprint 7 "Evidence Since Decision": real-only on this path -- the
+    # Sentinel path (build_application()) has no trades.db and passes none.
+    news_cache_source = LegacyNewsCacheSource(**legacy_source_kwargs(db_path))
+    news_cache_diff_source = TradesDbNewsCacheDiffSource(news_cache_source)
 
     controller = DecisionCenterController(
         query_service, evidence_query_service, governance_query_service, audit_source,
+        news_cache_diff_source=news_cache_diff_source,
     )
     return DecisionCenterUI(controller, decision_ids)
 

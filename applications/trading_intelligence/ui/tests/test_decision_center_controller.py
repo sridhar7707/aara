@@ -652,3 +652,85 @@ def test_load_decisions_does_not_query_audit_trail():
     list_area = controller.load_decisions(["dec-001"])
 
     assert list_area.is_empty is False
+
+
+class _InMemoryNewsCacheDiffSource:
+    """Fake news-cache diff collaborator -- duck-typed like
+    _InMemoryAuditSource above (no services/ wrapper, no ABC)."""
+
+    def __init__(self, diff_by_decision=None):
+        self._diff_by_decision = diff_by_decision or {}
+
+    def get_diff(self, symbol, decision_timestamp):
+        return self._diff_by_decision.get(symbol)
+
+
+class _BoomNewsCacheDiffSource:
+    def get_diff(self, symbol, decision_timestamp):
+        raise TradingIntelligenceReadError("boom")
+
+
+def test_load_decision_detail_attaches_news_cache_diff_when_collaborator_present():
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": _make_contract(symbol="AAPL")})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        news_cache_diff_source=_InMemoryNewsCacheDiffSource({"AAPL": "some-diff"}),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.news_cache_diff == "some-diff"
+    assert detail.news_cache_diff_status is ReadStatus.OK
+
+
+def test_load_decision_detail_news_cache_diff_is_none_when_collaborator_absent():
+    """No news_cache_diff_source injected -- the Sentinel path's existing
+    4-arg construction must keep working unchanged, with an honest OK/None
+    result, never an error, and never a read attempt."""
+    controller = _make_controller(decisions={"dec-001": _make_contract()})
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.news_cache_diff is None
+    assert detail.news_cache_diff_status is ReadStatus.OK
+
+
+def test_load_decision_detail_reports_news_cache_diff_error_but_keeps_other_concerns():
+    contract = _make_contract()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource({"dec-001": [_make_entry()]})),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        news_cache_diff_source=_BoomNewsCacheDiffSource(),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.decision is not None
+    assert detail.evidence == (_make_entry(),)
+    assert detail.evidence_status is ReadStatus.OK
+    assert detail.news_cache_diff is None
+    assert detail.news_cache_diff_status is ReadStatus.ERROR
+
+
+def test_load_decision_detail_does_not_query_news_cache_diff_for_a_missing_decision():
+    class _AssertNotCalledNewsCacheDiffSource:
+        def get_diff(self, symbol, decision_timestamp):
+            raise AssertionError("news cache diff must not be queried for a missing decision")
+
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource()),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        news_cache_diff_source=_AssertNotCalledNewsCacheDiffSource(),
+    )
+
+    detail_area = controller.load_decision_detail("missing-decision")
+
+    assert detail_area.is_empty is True
+    assert detail_area.news_cache_diff is None
+    assert detail_area.news_cache_diff_status is ReadStatus.OK

@@ -690,6 +690,20 @@ _GOVERNANCE_ERROR_MESSAGE = "Governance information is temporarily unavailable."
 _APPROVAL_ERROR_MESSAGE = "Approval information is temporarily unavailable."
 _AUDIT_ERROR_MESSAGE = "Audit trail is temporarily unavailable."
 
+# Sprint 7 "Evidence Since Decision": purely descriptive news-cache
+# headline comparison between the decision's own date and today -- no
+# materiality/severity/urgency/invalidation/alert/re-evaluation/confidence/
+# thesis/counterfactual meaning is ever attached to any of these strings.
+_NEWS_CACHE_DIFF_NO_CHANGE_MESSAGE = "No change in cached headlines since this decision"
+_NEWS_CACHE_DIFF_UNAVAILABLE_MESSAGE = "No cached headlines available yet for today."
+_NEWS_CACHE_DIFF_ERROR_MESSAGE = "Evidence since decision is temporarily unavailable."
+_NEWS_CACHE_DIFF_NO_CHANGE_HTML = (
+    f'<div class="aara-empty-message">{html.escape(_NEWS_CACHE_DIFF_NO_CHANGE_MESSAGE)}</div>'
+)
+_NEWS_CACHE_DIFF_UNAVAILABLE_HTML = (
+    f'<div class="aara-empty-message">{html.escape(_NEWS_CACHE_DIFF_UNAVAILABLE_MESSAGE)}</div>'
+)
+
 # MVP Loading States slice: _empty_detail()'s prior "" for why/evidence/
 # governance/approval/audit rendered as literal blank space under each
 # section heading -- no cue that the blank is because nothing is selected
@@ -972,7 +986,7 @@ _LIFECYCLE_STAGES = [
 # so every existing `*_, evidence_html, governance_html, approval_html,
 # audit_html = ...`-style unpack in the test suite keeps addressing the same
 # trailing four elements unchanged.
-_DetailValues = Tuple[str, str, str, str, str, str, str, str, str, str]
+_DetailValues = Tuple[str, str, str, str, str, str, str, str, str, str, str]
 
 # Audit Trail payload disclosure allowlist (P0 fix, accessibility/completeness
 # audit): every key the real sentinel_engine event producers currently put on
@@ -1183,11 +1197,16 @@ class DecisionCenterUI:
                         elem_classes=["aara-section-label"],
                     )
                     audit_output = gr.HTML()
+                    gr.Markdown(
+                        '<h3 class="aara-eyebrow">Evidence Since Decision</h3>',
+                        elem_classes=["aara-section-label"],
+                    )
+                    news_cache_diff_output = gr.HTML()
 
             detail_outputs = [
                 header_output, lifecycle_output, conviction_output, updated_output,
                 status_output, why_output, evidence_output, governance_output, approval_output,
-                audit_output,
+                audit_output, news_cache_diff_output,
             ]
             screen_outputs = [list_output, list_empty_output] + detail_outputs
             # Session-scoped (per Gradio Blocks session, not a self attribute --
@@ -1289,7 +1308,7 @@ class DecisionCenterUI:
 
     def _on_row_select(
         self, evt: gr.SelectData,
-    ) -> Tuple[Optional[str], str, str, str, str, str, str, str, str, str, str]:
+    ) -> Tuple[Optional[str], str, str, str, str, str, str, str, str, str, str, str]:
         if not evt.selected or not evt.row_value:
             return (None,) + self._empty_detail()
         decision_id = evt.row_value[0]
@@ -1544,6 +1563,7 @@ class DecisionCenterUI:
             DecisionCenterUI._format_governance_html(detail_area),
             DecisionCenterUI._format_approval_html(detail_area),
             DecisionCenterUI._format_audit_html(detail_area),
+            DecisionCenterUI._format_news_cache_diff_html(detail_area),
         )
 
     @staticmethod
@@ -1890,6 +1910,51 @@ class DecisionCenterUI:
         return DecisionCenterUI._record_list_html(cards, _AUDIT_EMPTY_MESSAGE, "audit")
 
     @staticmethod
+    def _format_news_cache_diff_html(detail_area: DecisionDetailArea) -> str:
+        """Sprint 7 "Evidence Since Decision": a purely descriptive
+        comparison of the cached news headlines on file for this decision's
+        own date versus today's date (news_cache_snapshot_diff.py,
+        unmodified). Reuses the same <details class="aara-payload-
+        disclosure"> + aara-record-field markup every other trades.db
+        disclosure already uses -- no new CSS class. Four states, matching
+        every other section's existing health convention: a genuine read
+        error (ReadStatus.ERROR) uses the same _error_message_html()
+        wrapper every other section's error state already uses; a healthy
+        read with nothing to compare (news_cache_diff is None,
+        ReadStatus.OK) is an honest not-cached message, never an error; an
+        identical comparison states plainly that nothing changed; any real
+        change lists literal counts and the literal added/removed headline
+        strings verbatim -- nothing here interprets headline meaning,
+        scores it, or calls it material, severe, urgent, invalidating, or
+        an alert."""
+        if detail_area.news_cache_diff_status is ReadStatus.ERROR:
+            return DecisionCenterUI._error_message_html(_NEWS_CACHE_DIFF_ERROR_MESSAGE)
+        diff = detail_area.news_cache_diff
+        if diff is None:
+            return _NEWS_CACHE_DIFF_UNAVAILABLE_HTML
+        if diff.is_identical:
+            return _NEWS_CACHE_DIFF_NO_CHANGE_HTML
+        fields = [
+            ("Headlines Then", str(diff.before_headline_count)),
+            ("Headlines Now", str(diff.after_headline_count)),
+        ]
+        fields += [("Added", headline) for headline in diff.added_headlines]
+        fields += [("Removed", headline) for headline in diff.removed_headlines]
+        rows = "".join(
+            '<div class="aara-record-field">'
+            f'<span class="record-label">{html.escape(label)}</span>'
+            f'<span class="record-value">{html.escape(value)}</span>'
+            "</div>"
+            for label, value in fields
+        )
+        return (
+            '<details class="aara-payload-disclosure">'
+            "<summary>Details</summary>"
+            f'<div class="aara-record-card-fields">{rows}</div>'
+            "</details>"
+        )
+
+    @staticmethod
     def _format_audit_detail_html(payload: Dict[str, Any]) -> str:
         """Expandable, structured presentation of what
         DecisionQuery.get_decision_timeline() already returns on the
@@ -2150,7 +2215,7 @@ class DecisionCenterUI:
         return (
             "", _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE,
             _SELECT_DECISION_HTML, _SELECT_DECISION_HTML, _SELECT_DECISION_HTML,
-            _SELECT_DECISION_HTML, _SELECT_DECISION_HTML,
+            _SELECT_DECISION_HTML, _SELECT_DECISION_HTML, _SELECT_DECISION_HTML,
         )
 
     @staticmethod
@@ -2158,7 +2223,7 @@ class DecisionCenterUI:
         return (
             DecisionCenterUI._missing_decision_header_html(),
             _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE,
-            "", "", "", "", "",
+            "", "", "", "", "", "",
         )
 
     @staticmethod
@@ -2166,5 +2231,5 @@ class DecisionCenterUI:
         return (
             DecisionCenterUI._decision_error_header_html(),
             _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE, _MISSING_VALUE,
-            "", "", "", "", "",
+            "", "", "", "", "", "",
         )
