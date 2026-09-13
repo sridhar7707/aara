@@ -101,6 +101,53 @@ def test_summary_line_is_rendered_when_populated():
     assert "7 SELL rows excluded (6 phantom-reconcile-suppressed, 1 orphan)." in combined
 
 
+def test_win_rate_summary_line_is_rendered_when_populated():
+    ui = PerformanceLearningUI(
+        screen=replace(
+            _populated_screen([_closed_row()]),
+            win_rate_summary="18 wins / 30 closed (60%).",
+        ),
+    )
+    combined = "\n".join(_html_values(ui.build()))
+    assert "18 wins / 30 closed (60%)." in combined
+
+
+def test_win_rate_not_enough_data_message_is_rendered_when_populated():
+    ui = PerformanceLearningUI(
+        screen=replace(
+            _populated_screen([_closed_row()]),
+            win_rate_summary="Not enough completed trades yet for a win rate (1 of 30 needed).",
+        ),
+    )
+    combined = "\n".join(_html_values(ui.build()))
+    assert "Not enough completed trades yet for a win rate (1 of 30 needed)." in combined
+
+
+def test_win_rate_summary_absent_when_none():
+    ui = PerformanceLearningUI(screen=_populated_screen([_closed_row()]))
+    combined = "\n".join(_html_values(ui.build()))
+    assert "wins /" not in combined
+    assert "Not enough completed trades" not in combined
+
+
+def test_win_rate_summary_hidden_when_outcome_history_unavailable():
+    """Mirrors the existing summary/table visible=False convention: the
+    component's value is still computed, but it must not be visible when
+    the outcome read itself is unavailable (populated is False)."""
+    health = IntegrationHealth.unavailable(_PROVIDER, detail="trades snapshot is not present")
+    message = "Not enough completed trades yet for a win rate (0 of 30 needed)."
+    ui = PerformanceLearningUI(
+        screen=replace(_unavailable_screen(health), win_rate_summary=message),
+    )
+    demo = ui.build()
+    win_rate_blocks = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.HTML) and getattr(b, "value", None) == f'<div class="pl-summary">{message}</div>'
+    ]
+    assert len(win_rate_blocks) == 1
+    assert win_rate_blocks[0].visible is False
+
+
 def test_open_partial_ambiguous_rows_have_blank_exit_pnl_direction():
     rows = [
         _open_row(),

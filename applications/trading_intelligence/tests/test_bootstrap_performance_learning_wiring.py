@@ -348,6 +348,98 @@ def test_regime_outcomes_reuse_the_same_outcome_read_health_object():
         os.remove(path)
 
 
+def test_win_rate_summary_is_none_when_outcome_history_unavailable():
+    screen = _build_performance_learning_screen("no_such_win_rate_db_xyz.db")
+    assert screen.win_rate_summary is None
+
+
+def test_win_rate_summary_shows_not_enough_completed_trades_for_empty_db():
+    path = _empty_db()
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.win_rate_summary == (
+            "Not enough completed trades yet for a win rate (0 of 30 needed)."
+        )
+    finally:
+        os.remove(path)
+
+
+def test_win_rate_summary_shows_not_enough_completed_trades_below_threshold():
+    rows = []
+    rows += _closed_pair(1, 2, score=0.62, realized_pnl=90.0, symbol="AAA")   # WIN
+    rows += _closed_pair(3, 4, score=0.63, realized_pnl=-40.0, symbol="BBB")  # LOSS
+    path = _make_db(rows)
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.win_rate_summary == (
+            "Not enough completed trades yet for a win rate (2 of 30 needed)."
+        )
+    finally:
+        os.remove(path)
+
+
+def test_win_rate_summary_shows_real_percentage_at_threshold():
+    rows = []
+    for i in range(18):
+        rows += _closed_pair(100 + i * 2, 101 + i * 2, score=0.60, realized_pnl=10.0, symbol=f"W{i}")
+    for i in range(12):
+        rows += _closed_pair(200 + i * 2, 201 + i * 2, score=0.60, realized_pnl=-10.0, symbol=f"L{i}")
+    path = _make_db(rows)
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.win_rate_summary == "18 wins / 30 closed (60%)."
+    finally:
+        os.remove(path)
+
+
+def test_win_rate_summary_excludes_open_partial_and_flat_outcomes():
+    rows = []
+    for i in range(15):
+        rows += _closed_pair(100 + i * 2, 101 + i * 2, score=0.60, realized_pnl=10.0, symbol=f"W{i}")
+    for i in range(15):
+        rows += _closed_pair(200 + i * 2, 201 + i * 2, score=0.60, realized_pnl=-10.0, symbol=f"L{i}")
+    # FLAT (realized_pnl == 0.0) -- must not count as a win or a loss.
+    rows += _closed_pair(300, 301, score=0.60, realized_pnl=0.0, symbol="FLATTY")
+    # OPEN -- no matching sell -- must not count.
+    rows += [_row(id=302, symbol="OPENER", action="BUY", shares=10.0,
+                  timestamp="2026-08-01T00:00:00+00:00", ensemble_score=0.60)]
+    path = _make_db(rows)
+    try:
+        screen = _build_performance_learning_screen(path)
+        # Exactly 30 WIN/LOSS-countable outcomes -- FLAT and OPEN excluded
+        # from both numerator and denominator.
+        assert screen.win_rate_summary == "15 wins / 30 closed (50%)."
+    finally:
+        os.remove(path)
+
+
+def test_win_rate_summary_does_not_disturb_existing_summary_or_rows():
+    """Regression guard: adding win_rate_summary must not change the
+    pre-existing summary/outcome_rows fields at all -- this is an
+    addition, not a redesign."""
+    rows = [
+        _row(id=1, symbol="AMZN", action="BUY", shares=23.68,
+             timestamp="2026-07-16T16:50:00+00:00", price=256.09),
+        _row(id=2, symbol="AMZN", action="SELL_TIME_EXIT", shares=23.66,
+             timestamp="2026-09-02T14:33:00+00:00", price=254.92, order_id="o-2",
+             realized_pnl=-27.77, pnl_pct=-0.00234, holding_days=47),
+        _row(id=3, symbol="SLB", action="BUY", shares=139.75,
+             timestamp="2026-09-02T14:39:08+00:00", order_id="o-3"),
+    ]
+    path = _make_db(rows)
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.summary == (
+            "2 BUY decisions — 1 CLOSED · 0 PARTIAL · 1 OPEN · 0 AMBIGUOUS."
+        )
+        assert len(screen.outcome_rows) == 2
+        assert screen.win_rate_summary == (
+            "Not enough completed trades yet for a win rate (1 of 30 needed)."
+        )
+    finally:
+        os.remove(path)
+
+
 def test_regime_wiring_does_not_disturb_calibration_wiring():
     path = _make_db(_closed_pair(1, 2, score=0.62, realized_pnl=25.0, regime="TRENDING"))
     try:

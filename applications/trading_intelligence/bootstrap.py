@@ -169,6 +169,7 @@ from applications.trading_intelligence.services.decision_governance_query_servic
 from applications.trading_intelligence.contracts.decision_outcome_contract import (
     ExcludedSellReason,
     ExitBasis,
+    OutcomeDirection,
     OutcomeLineage,
     OutcomeStatus,
 )
@@ -201,6 +202,7 @@ from applications.trading_intelligence.ui.performance_learning.mock_data import 
     build_mock_screen as build_performance_learning_shell,
 )
 from applications.trading_intelligence.ui.performance_learning.screen import (
+    CALIBRATION_MIN_OUTCOMES,
     OutcomeHistoryRow,
     PerformanceLearningScreen,
 )
@@ -1282,6 +1284,36 @@ def _outcome_history_summary(lineage: OutcomeLineage) -> str:
     return summary
 
 
+def _outcome_history_win_rate_summary(lineage: OutcomeLineage) -> str:
+    """Win-rate headline fact, additive alongside _outcome_history_summary
+    -- never hard-coded, computed from the SAME OutcomeLineage (no extra
+    read). Counted exactly like DecisionCalibrationQueryService's own
+    bands: only CLOSED decisions whose outcome_direction is WIN or LOSS
+    (OPEN/PARTIAL/AMBIGUOUS status and FLAT/unset direction are excluded
+    from both the numerator and the denominator -- there is no existing
+    "win rate over all CLOSED including FLAT" convention anywhere in this
+    codebase to instead follow). Below CALIBRATION_MIN_OUTCOMES (the
+    project's existing "enough completed trades before a rate is worth
+    reading" floor, screen.py), an honest not-enough-data message is
+    returned instead of a misleading percentage -- never a fabricated or
+    small-sample rate."""
+    wins = sum(
+        1 for o in lineage.decisions
+        if o.status is OutcomeStatus.CLOSED and o.outcome_direction is OutcomeDirection.WIN
+    )
+    losses = sum(
+        1 for o in lineage.decisions
+        if o.status is OutcomeStatus.CLOSED and o.outcome_direction is OutcomeDirection.LOSS
+    )
+    total = wins + losses
+    if total < CALIBRATION_MIN_OUTCOMES:
+        return (
+            f"Not enough completed trades yet for a win rate "
+            f"({total} of {CALIBRATION_MIN_OUTCOMES} needed)."
+        )
+    return f"{wins} wins / {total} closed ({wins / total:.0%})."
+
+
 def _build_performance_learning_screen(
     db_path: Optional[str] = None, ledger_db_path: Optional[str] = None
 ) -> PerformanceLearningScreen:
@@ -1336,6 +1368,7 @@ def _build_performance_learning_screen(
             outcome_rows=tuple(_outcome_history_row(o) for o in lineage.decisions),
             outcome_health=result.health,
             summary=_outcome_history_summary(lineage),
+            win_rate_summary=_outcome_history_win_rate_summary(lineage),
             calibration_health=result.health,
             calibration_bands=calibration_bands,
             regime_outcome_health=result.health,

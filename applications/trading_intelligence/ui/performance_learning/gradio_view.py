@@ -400,6 +400,10 @@ class PerformanceLearningUI:
                 visible=populated and screen.summary is not None,
             )
             gr.HTML(
+                self._format_summary_html(screen.win_rate_summary),
+                visible=populated and screen.win_rate_summary is not None,
+            )
+            gr.HTML(
                 self._format_outcome_unavailable_html(screen),
                 visible=not screen.outcome_history_available,
             )

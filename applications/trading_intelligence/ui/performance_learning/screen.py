@@ -138,6 +138,15 @@ class PerformanceLearningScreen:
     outcome_rows: Tuple[OutcomeHistoryRow, ...] = ()
     outcome_health: Optional[IntegrationHealth] = None
     summary: Optional[str] = None
+    # Win-rate headline: an additive fact alongside `summary`, populated by
+    # the composition root from the SAME OutcomeLineage (no extra read).
+    # `win_rate_summary` is a plain, ready-to-render string, matching
+    # `summary`'s own shape -- either a real "N wins / M closed (X%)" fact
+    # or an honest "not enough completed trades yet" message when the
+    # countable (CLOSED, WIN/LOSS) sample is below the project's existing
+    # CALIBRATION_MIN_OUTCOMES floor. `None` only when the outcome read
+    # itself is unavailable (mirrors `summary`).
+    win_rate_summary: Optional[str] = None
     # Wave 3C (ADR-064): the composition root reads the published Trust
     # Ledger snapshot through the Wave 3A source + Wave 3B query service and
     # attaches the result here. `ledger_health` carries the
