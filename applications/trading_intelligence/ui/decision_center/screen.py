@@ -174,6 +174,11 @@ class DecisionDetailArea:
     # unmodified by controller.py, which is allowed to call services/.
     news_cache_diff: Optional["NewsCacheSnapshotDiff"] = None
     news_cache_diff_status: ReadStatus = ReadStatus.OK
+    # Sprint 7 "Recommendation Since Decision": same forward-reference-
+    # string convention as news_cache_diff above, for the same reason --
+    # RecommendationDiff lives in applications.trading_intelligence.services.
+    recommendation_diff: Optional["RecommendationDiff"] = None
+    recommendation_diff_status: ReadStatus = ReadStatus.OK
 
     @property
     def is_empty(self) -> bool:

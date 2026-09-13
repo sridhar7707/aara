@@ -734,3 +734,87 @@ def test_load_decision_detail_does_not_query_news_cache_diff_for_a_missing_decis
     assert detail_area.is_empty is True
     assert detail_area.news_cache_diff is None
     assert detail_area.news_cache_diff_status is ReadStatus.OK
+
+
+class _InMemoryRecommendationDiffSource:
+    """Fake recommendation diff collaborator -- duck-typed like
+    _InMemoryNewsCacheDiffSource above (no services/ wrapper, no ABC)."""
+
+    def __init__(self, diff_by_decision=None):
+        self._diff_by_decision = diff_by_decision or {}
+
+    def get_diff(self, symbol, decision_timestamp):
+        return self._diff_by_decision.get(symbol)
+
+
+class _BoomRecommendationDiffSource:
+    def get_diff(self, symbol, decision_timestamp):
+        raise TradingIntelligenceReadError("boom")
+
+
+def test_load_decision_detail_attaches_recommendation_diff_when_collaborator_present():
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": _make_contract(symbol="AAPL")})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        recommendation_diff_source=_InMemoryRecommendationDiffSource({"AAPL": "some-rec-diff"}),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.recommendation_diff == "some-rec-diff"
+    assert detail.recommendation_diff_status is ReadStatus.OK
+
+
+def test_load_decision_detail_recommendation_diff_is_none_when_collaborator_absent():
+    """No recommendation_diff_source injected -- the Sentinel path's
+    existing construction must keep working unchanged, with an honest
+    OK/None result, never an error, and never a read attempt."""
+    controller = _make_controller(decisions={"dec-001": _make_contract()})
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.recommendation_diff is None
+    assert detail.recommendation_diff_status is ReadStatus.OK
+
+
+def test_load_decision_detail_reports_recommendation_diff_error_but_keeps_other_concerns():
+    contract = _make_contract()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource({"dec-001": [_make_entry()]})),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        recommendation_diff_source=_BoomRecommendationDiffSource(),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.decision is not None
+    assert detail.evidence == (_make_entry(),)
+    assert detail.evidence_status is ReadStatus.OK
+    assert detail.recommendation_diff is None
+    assert detail.recommendation_diff_status is ReadStatus.ERROR
+
+
+def test_load_decision_detail_does_not_query_recommendation_diff_for_a_missing_decision():
+    class _AssertNotCalledRecommendationDiffSource:
+        def get_diff(self, symbol, decision_timestamp):
+            raise AssertionError(
+                "recommendation diff must not be queried for a missing decision"
+            )
+
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource()),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        recommendation_diff_source=_AssertNotCalledRecommendationDiffSource(),
+    )
+
+    detail_area = controller.load_decision_detail("missing-decision")
+
+    assert detail_area.is_empty is True
+    assert detail_area.recommendation_diff is None
+    assert detail_area.recommendation_diff_status is ReadStatus.OK

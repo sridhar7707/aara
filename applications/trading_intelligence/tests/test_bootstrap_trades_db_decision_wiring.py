@@ -41,6 +41,12 @@ CREATE TABLE trades (
 CREATE TABLE news_cache (
     symbol TEXT, fetch_date TEXT, headlines_json TEXT, cached_at TEXT,
     PRIMARY KEY (symbol, fetch_date)
+);
+CREATE TABLE recommendations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL,
+    prediction_date TEXT NOT NULL, recommendation TEXT, confidence REAL,
+    prev_recommendation TEXT, price_at_recommendation REAL, created_at TEXT,
+    UNIQUE(symbol, prediction_date)
 )
 """
 
@@ -91,6 +97,14 @@ def test_build_application_sentinel_path_has_no_news_cache_diff_source():
     assert ui._controller._news_cache_diff_source is None
 
 
+def test_build_application_sentinel_path_has_no_recommendation_diff_source():
+    """Coexistence: build_application() (the Sentinel path) has no
+    trades.db to read at all, so it must not be given a recommendation
+    diff collaborator either."""
+    ui = build_application()
+    assert ui._controller._recommendation_diff_source is None
+
+
 # -- build_application_from_trades_snapshot() --------------------------
 
 def test_none_db_path_is_safe_and_builds():
@@ -134,6 +148,24 @@ def test_seeded_db_wires_a_real_news_cache_diff_source():
         detail = ui._controller.load_decision_detail("trade-45")
         assert detail.news_cache_diff is None
         assert detail.news_cache_diff_status is ReadStatus.OK
+    finally:
+        os.remove(path)
+
+
+def test_seeded_db_wires_a_real_recommendation_diff_source():
+    """Confirms build_application_from_trades_snapshot() actually
+    constructs and injects TradesDbRecommendationDiffSource into the
+    controller -- not asserting a specific diff (today's real date is not
+    under this test's control), only that the collaborator is wired and
+    the read path is safe/honest (an empty temp DB has no recommendations
+    rows for any date, so the honest result is OK/None, never an error)."""
+    path = _seeded_db()
+    try:
+        ui = build_application_from_trades_snapshot(path)
+        assert ui._controller._recommendation_diff_source is not None
+        detail = ui._controller.load_decision_detail("trade-45")
+        assert detail.recommendation_diff is None
+        assert detail.recommendation_diff_status is ReadStatus.OK
     finally:
         os.remove(path)
 

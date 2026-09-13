@@ -48,6 +48,12 @@ prevents evidence/governance/approvals/audit-trail from loading, and vice
 versa. When no collaborator is injected (the Sentinel path's existing
 4-arg construction), the result is an honest ReadStatus.OK / None -- never
 an error, and no read is attempted at all.
+
+Sprint 7 "Recommendation Since Decision": recommendation_diff_source is a
+sixth, optional collaborator (default None), added separately from
+news_cache_diff_source and following the identical duck-typed,
+independently-isolated pattern -- a failure here never affects any other
+concern, and vice versa.
 """
 from typing import List, Optional
 
@@ -76,12 +82,14 @@ class DecisionCenterController:
         governance_query_service: DecisionGovernanceQueryService,
         audit_source: SentinelAuditSource,
         news_cache_diff_source=None,
+        recommendation_diff_source=None,
     ):
         self._query_service = query_service
         self._evidence_query_service = evidence_query_service
         self._governance_query_service = governance_query_service
         self._audit_source = audit_source
         self._news_cache_diff_source = news_cache_diff_source
+        self._recommendation_diff_source = recommendation_diff_source
 
     def load_decisions(self, decision_ids: List[str]) -> DecisionListArea:
         views = self._query_service.list_decision_views(decision_ids)
@@ -138,6 +146,19 @@ class DecisionCenterController:
             news_cache_diff = None
             news_cache_diff_status = ReadStatus.OK
 
+        if self._recommendation_diff_source is not None:
+            try:
+                recommendation_diff = self._recommendation_diff_source.get_diff(
+                    view.symbol, view.updated_at
+                )
+                recommendation_diff_status = ReadStatus.OK
+            except TradingIntelligenceReadError:
+                recommendation_diff = None
+                recommendation_diff_status = ReadStatus.ERROR
+        else:
+            recommendation_diff = None
+            recommendation_diff_status = ReadStatus.OK
+
         return DecisionDetailArea(
             decision=view,
             evidence_reference=evidence_reference, risk_reference=risk_reference,
@@ -146,6 +167,8 @@ class DecisionCenterController:
             approvals=approvals, approvals_status=approvals_status,
             audit_trail=audit_trail, audit_trail_status=audit_trail_status,
             news_cache_diff=news_cache_diff, news_cache_diff_status=news_cache_diff_status,
+            recommendation_diff=recommendation_diff,
+            recommendation_diff_status=recommendation_diff_status,
         )
 
     def load_screen(

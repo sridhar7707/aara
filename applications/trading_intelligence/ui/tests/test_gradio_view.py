@@ -24,6 +24,7 @@ from applications.trading_intelligence.projections.governance_entry import Gover
 from applications.trading_intelligence.services.news_cache_snapshot_diff import (
     NewsCacheSnapshotDiff,
 )
+from applications.trading_intelligence.services.recommendation_diff import RecommendationDiff
 from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _ACCESSIBLE_NAME_SETUP_JS,
     _ACTION_BADGE_CLASSES,
@@ -1433,6 +1434,122 @@ def test_render_detail_includes_news_cache_diff_as_the_new_final_element():
 
     assert len(result) == 11
     assert "No change in cached headlines since this decision" in result[10]
+
+
+# --- Sprint 7: "Recommendation Since Decision" evidence, appended into the
+# SAME "Evidence Since Decision" HTML string as the news-cache evidence --
+# no new tuple slot, no _DetailValues change.
+
+def _make_recommendation_diff(**overrides):
+    defaults = dict(
+        symbol="AAPL",
+        before_prediction_date="2026-09-01", after_prediction_date="2026-09-05",
+        before_recommendation="BUY", after_recommendation="BUY",
+        before_confidence=0.61, after_confidence=0.58,
+        is_unchanged=True,
+    )
+    defaults.update(overrides)
+    return RecommendationDiff(**defaults)
+
+
+def test_recommendation_evidence_appears_alongside_news_evidence_in_the_same_html():
+    news_diff = _make_diff(is_identical=True)
+    rec_diff = _make_recommendation_diff(is_unchanged=True)
+    area = DecisionDetailArea(
+        decision=_make_view(), news_cache_diff=news_diff, recommendation_diff=rec_diff,
+    )
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "No change in cached headlines since this decision" in out
+    assert "BUY" in out
+
+
+def test_recommendation_evidence_changed_renders_then_and_now():
+    rec_diff = _make_recommendation_diff(
+        before_recommendation="BUY", after_recommendation="WAIT", is_unchanged=False,
+    )
+    area = DecisionDetailArea(decision=_make_view(), recommendation_diff=rec_diff)
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "Recommendation Then" in out and "BUY" in out
+    assert "Recommendation Now" in out and "WAIT" in out
+
+
+def test_recommendation_evidence_unchanged_renders_factually():
+    rec_diff = _make_recommendation_diff(
+        before_recommendation="BUY", after_recommendation="BUY", is_unchanged=True,
+    )
+    area = DecisionDetailArea(decision=_make_view(), recommendation_diff=rec_diff)
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "BUY" in out
+    assert "Recommendation Then" not in out
+    assert "Recommendation Now" not in out
+
+
+def test_recommendation_evidence_shows_confidence_then_and_now_when_available():
+    rec_diff = _make_recommendation_diff(before_confidence=0.61, after_confidence=0.48)
+    area = DecisionDetailArea(decision=_make_view(), recommendation_diff=rec_diff)
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "Confidence Then" in out and "0.61" in out
+    assert "Confidence Now" in out and "0.48" in out
+
+
+def test_recommendation_evidence_unavailable_state_is_honest_not_an_error():
+    area = DecisionDetailArea(
+        decision=_make_view(), recommendation_diff=None,
+        recommendation_diff_status=ReadStatus.OK,
+    )
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "aara-error-message" not in out
+
+
+def test_recommendation_evidence_error_state_uses_the_existing_error_convention():
+    area = DecisionDetailArea(
+        decision=_make_view(), recommendation_diff=None,
+        recommendation_diff_status=ReadStatus.ERROR,
+    )
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert 'class="aara-error-message"' in out
+
+
+def test_recommendation_evidence_html_escapes_recommendation_values():
+    rec_diff = _make_recommendation_diff(
+        before_recommendation="<script>alert(1)</script>",
+        after_recommendation="BUY",
+        is_unchanged=False,
+    )
+    area = DecisionDetailArea(decision=_make_view(), recommendation_diff=rec_diff)
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "<script>" not in out
+    assert "&lt;script&gt;" in out
+
+
+def test_recommendation_evidence_does_not_grow_detail_values_arity():
+    """The design constraint this slice must satisfy: recommendation
+    evidence is concatenated into the SAME tuple slot as the news-cache
+    evidence -- _DetailValues stays at 11 elements."""
+    rec_diff = _make_recommendation_diff(is_unchanged=False)
+    controller = _FakeController(
+        detail_area=DecisionDetailArea(decision=_make_view(), recommendation_diff=rec_diff)
+    )
+    ui = DecisionCenterUI(controller, ["dec-001"])
+
+    result = ui._render_detail("dec-001")
+
+    assert len(result) == 11
+    assert "Recommendation Then" in result[10]
 
 
 def test_feature_drivers_production_pair_list_renders_name_colon_value():

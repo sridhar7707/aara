@@ -704,6 +704,17 @@ _NEWS_CACHE_DIFF_UNAVAILABLE_HTML = (
     f'<div class="aara-empty-message">{html.escape(_NEWS_CACHE_DIFF_UNAVAILABLE_MESSAGE)}</div>'
 )
 
+# Sprint 7 "Recommendation Since Decision": purely descriptive recorded-
+# recommendation comparison between the decision's own date and today --
+# same discipline as the news-cache facts above. Rendered into the SAME
+# "Evidence Since Decision" HTML string (see _format_news_cache_diff_html)
+# -- no new section, no new _DetailValues slot.
+_RECOMMENDATION_DIFF_UNAVAILABLE_MESSAGE = "No recommendation history available yet for today."
+_RECOMMENDATION_DIFF_ERROR_MESSAGE = "Recommendation history is temporarily unavailable."
+_RECOMMENDATION_DIFF_UNAVAILABLE_HTML = (
+    f'<div class="aara-empty-message">{html.escape(_RECOMMENDATION_DIFF_UNAVAILABLE_MESSAGE)}</div>'
+)
+
 # MVP Loading States slice: _empty_detail()'s prior "" for why/evidence/
 # governance/approval/audit rendered as literal blank space under each
 # section heading -- no cue that the blank is because nothing is selected
@@ -1911,22 +1922,38 @@ class DecisionCenterUI:
 
     @staticmethod
     def _format_news_cache_diff_html(detail_area: DecisionDetailArea) -> str:
-        """Sprint 7 "Evidence Since Decision": a purely descriptive
-        comparison of the cached news headlines on file for this decision's
-        own date versus today's date (news_cache_snapshot_diff.py,
-        unmodified). Reuses the same <details class="aara-payload-
-        disclosure"> + aara-record-field markup every other trades.db
-        disclosure already uses -- no new CSS class. Four states, matching
-        every other section's existing health convention: a genuine read
-        error (ReadStatus.ERROR) uses the same _error_message_html()
-        wrapper every other section's error state already uses; a healthy
-        read with nothing to compare (news_cache_diff is None,
-        ReadStatus.OK) is an honest not-cached message, never an error; an
-        identical comparison states plainly that nothing changed; any real
-        change lists literal counts and the literal added/removed headline
-        strings verbatim -- nothing here interprets headline meaning,
-        scores it, or calls it material, severe, urgent, invalidating, or
-        an alert."""
+        """Sprint 7 "Evidence Since Decision": the single HTML string
+        rendered into the one "Evidence Since Decision" section/output --
+        the purely descriptive news-cache comparison
+        (_news_cache_evidence_html) followed by the purely descriptive
+        recommendation comparison (_format_recommendation_diff_html),
+        concatenated. Both facts share this one section/output slot
+        deliberately: adding the second fact must not grow _DetailValues,
+        change _on_row_select's arity, or touch build()'s component
+        wiring -- see trades_db_recommendation_diff_source.py's own
+        module docstring for the full rationale."""
+        return (
+            DecisionCenterUI._news_cache_evidence_html(detail_area)
+            + DecisionCenterUI._format_recommendation_diff_html(detail_area)
+        )
+
+    @staticmethod
+    def _news_cache_evidence_html(detail_area: DecisionDetailArea) -> str:
+        """A purely descriptive comparison of the cached news headlines on
+        file for this decision's own date versus today's date
+        (news_cache_snapshot_diff.py, unmodified). Reuses the same
+        <details class="aara-payload-disclosure"> + aara-record-field
+        markup every other trades.db disclosure already uses -- no new CSS
+        class. Four states, matching every other section's existing health
+        convention: a genuine read error (ReadStatus.ERROR) uses the same
+        _error_message_html() wrapper every other section's error state
+        already uses; a healthy read with nothing to compare
+        (news_cache_diff is None, ReadStatus.OK) is an honest not-cached
+        message, never an error; an identical comparison states plainly
+        that nothing changed; any real change lists literal counts and the
+        literal added/removed headline strings verbatim -- nothing here
+        interprets headline meaning, scores it, or calls it material,
+        severe, urgent, invalidating, or an alert."""
         if detail_area.news_cache_diff_status is ReadStatus.ERROR:
             return DecisionCenterUI._error_message_html(_NEWS_CACHE_DIFF_ERROR_MESSAGE)
         diff = detail_area.news_cache_diff
@@ -1940,6 +1967,64 @@ class DecisionCenterUI:
         ]
         fields += [("Added", headline) for headline in diff.added_headlines]
         fields += [("Removed", headline) for headline in diff.removed_headlines]
+        rows = "".join(
+            '<div class="aara-record-field">'
+            f'<span class="record-label">{html.escape(label)}</span>'
+            f'<span class="record-value">{html.escape(value)}</span>'
+            "</div>"
+            for label, value in fields
+        )
+        return (
+            '<details class="aara-payload-disclosure">'
+            "<summary>Details</summary>"
+            f'<div class="aara-record-card-fields">{rows}</div>'
+            "</details>"
+        )
+
+    @staticmethod
+    def _format_recommendation_diff_html(detail_area: DecisionDetailArea) -> str:
+        """Sprint 7 "Recommendation Since Decision": a purely descriptive
+        comparison of the recorded recommendation for this decision's own
+        date versus today's date (recommendation_diff.py, unmodified).
+        Same markup and health-state conventions as
+        _news_cache_evidence_html above. `is_unchanged` (plain equality,
+        computed in recommendation_diff.py, never re-derived here) decides
+        only which factual rows render -- a single "Recommendation" row
+        when unchanged, or "Recommendation Then"/"Recommendation Now" when
+        it differs; confidence-then/now rows are added only when that
+        value is actually present, never fabricated. Nothing here calls a
+        change material, significant, urgent, invalidating, an alert, or
+        interprets it as bullish/bearish/stronger/weaker."""
+        if detail_area.recommendation_diff_status is ReadStatus.ERROR:
+            return DecisionCenterUI._error_message_html(_RECOMMENDATION_DIFF_ERROR_MESSAGE)
+        diff = detail_area.recommendation_diff
+        if diff is None:
+            return _RECOMMENDATION_DIFF_UNAVAILABLE_HTML
+
+        fields = []
+        if diff.is_unchanged:
+            if diff.after_recommendation is not None:
+                fields.append(
+                    ("Recommendation", DecisionCenterUI._format_evidence_value(diff.after_recommendation))
+                )
+        else:
+            if diff.before_recommendation is not None:
+                fields.append(
+                    ("Recommendation Then", DecisionCenterUI._format_evidence_value(diff.before_recommendation))
+                )
+            if diff.after_recommendation is not None:
+                fields.append(
+                    ("Recommendation Now", DecisionCenterUI._format_evidence_value(diff.after_recommendation))
+                )
+        if diff.before_confidence is not None:
+            fields.append(
+                ("Confidence Then", DecisionCenterUI._format_evidence_value(diff.before_confidence))
+            )
+        if diff.after_confidence is not None:
+            fields.append(
+                ("Confidence Now", DecisionCenterUI._format_evidence_value(diff.after_confidence))
+            )
+
         rows = "".join(
             '<div class="aara-record-field">'
             f'<span class="record-label">{html.escape(label)}</span>'
