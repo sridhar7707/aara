@@ -1001,15 +1001,18 @@ _AUDIT_PAYLOAD_ALLOWED_KEYS = frozenset({
 # source (adapters/trade_decision_derivation.py) puts its values as
 # TOP-LEVEL keys on EvidenceEntry.data -- NOT inside the ADR-037
 # data["metadata"] sub-dict that _format_evidence_detail_html reads -- so
-# without an explicit path they were derived but never shown. These three
+# without an explicit path they were derived but never shown. These four
 # evidence_type strings are the only ones that source emits; every other
 # type still routes through the unchanged ADR-037 metadata path. Both paths
 # render into the same <details class="aara-payload-disclosure"> +
 # aara-record-field markup, so no new CSS and no layout change. Values are
-# display-only: nothing is recomputed, and no stop_loss / take_profit /
-# risk_reward_ratio / outcome field is ever present in this data to begin
-# with (see the derivation module's own docstring).
-_TRADES_EVIDENCE_TYPES = frozenset({"MODEL_ENSEMBLE", "FEATURE_DRIVERS", "AI_RATIONALE"})
+# display-only: nothing is recomputed; stop_loss / take_profit /
+# risk_reward_ratio are surfaced only via RISK_PARAMETERS, each field
+# present only when its trades.db column is non-NULL (see the derivation
+# module's own docstring). No outcome field is ever present in this data.
+_TRADES_EVIDENCE_TYPES = frozenset({
+    "MODEL_ENSEMBLE", "FEATURE_DRIVERS", "AI_RATIONALE", "RISK_PARAMETERS",
+})
 
 # Fixed render order + human labels for MODEL_ENSEMBLE's data keys. A key is
 # rendered only when actually present in EvidenceEntry.data (the derivation
@@ -1023,6 +1026,15 @@ _MODEL_ENSEMBLE_FIELD_LABELS = (
     ("ensemble", "Ensemble"),
     ("threshold", "Threshold"),
     ("regime", "Regime"),
+)
+
+# Fixed render order + human labels for RISK_PARAMETERS' data keys. Same
+# presence-only convention as _MODEL_ENSEMBLE_FIELD_LABELS -- a missing key
+# is skipped, never rendered as "None".
+_RISK_PARAMETERS_FIELD_LABELS = (
+    ("stop_loss", "Stop Loss"),
+    ("take_profit", "Take Profit"),
+    ("risk_reward_ratio", "Risk/Reward Ratio"),
 )
 
 
@@ -1710,6 +1722,12 @@ class DecisionCenterUI:
             if text is None or not str(text).strip():
                 return []
             return [("Rationale", str(text).strip())]
+        if entry.evidence_type == "RISK_PARAMETERS":
+            return [
+                (label, DecisionCenterUI._format_evidence_value(data[key]))
+                for key, label in _RISK_PARAMETERS_FIELD_LABELS
+                if key in data
+            ]
         return []
 
     @staticmethod

@@ -29,8 +29,10 @@ Wave 1 mapping rules (locked -- see the Wave 1 decision record):
 * ``ai_reasoning`` is surfaced ONLY as a bounded ``AI_RATIONALE`` evidence
   entry -- never as a governance/approval fact, never by restructuring the
   Why section.
-* ``stop_loss`` / ``take_profit`` / ``risk_reward_ratio`` are NOT surfaced
-  anywhere in Wave 1.
+* ``stop_loss`` / ``take_profit`` / ``risk_reward_ratio`` are surfaced as a
+  bounded ``RISK_PARAMETERS`` evidence entry, each field present only when
+  its column is non-``NULL`` -- never fabricated, never coerced, never
+  recomputed.
 
 An unparseable ``timestamp`` raises :class:`TradingIntelligenceReadError`
 rather than yielding a fabricated timeline instant -- the source/controller
@@ -160,10 +162,21 @@ def _model_ensemble_data(row: TradeDecisionRow) -> dict:
     return data
 
 
+def _risk_parameters_data(row: TradeDecisionRow) -> dict:
+    data: dict = {}
+    if row.stop_loss is not None:
+        data["stop_loss"] = row.stop_loss
+    if row.take_profit is not None:
+        data["take_profit"] = row.take_profit
+    if row.risk_reward_ratio is not None:
+        data["risk_reward_ratio"] = row.risk_reward_ratio
+    return data
+
+
 def to_evidence_entries(row: TradeDecisionRow) -> List[EvidenceEntry]:
     """At most one entry each of MODEL_ENSEMBLE / FEATURE_DRIVERS /
-    AI_RATIONALE, in that order, omitting any with no real content.
-    Bounded at ``_MAX_EVIDENCE_ENTRIES``."""
+    AI_RATIONALE / RISK_PARAMETERS, in that order, omitting any with no
+    real content. Bounded at ``_MAX_EVIDENCE_ENTRIES``."""
     attached_at = parse_timestamp(row.timestamp)
     entries: List[EvidenceEntry] = []
 
@@ -195,6 +208,16 @@ def to_evidence_entries(row: TradeDecisionRow) -> List[EvidenceEntry]:
             source=_EVIDENCE_SOURCE,
             attached_at=attached_at,
             data={"text": rationale},
+        ))
+
+    risk_data = _risk_parameters_data(row)
+    if risk_data:
+        entries.append(EvidenceEntry(
+            evidence_id=f"{row.decision_id}-risk",
+            evidence_type="RISK_PARAMETERS",
+            source=_EVIDENCE_SOURCE,
+            attached_at=attached_at,
+            data=risk_data,
         ))
 
     return entries[:_MAX_EVIDENCE_ENTRIES]

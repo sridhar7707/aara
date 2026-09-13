@@ -150,7 +150,7 @@ def test_trade_45_produces_a_complete_screen(trade_45_db):
     assert detail.timestamp_display == "2026-09-02 09:39 CDT"
 
     assert [e.evidence_type for e in detail.evidence] == [
-        "MODEL_ENSEMBLE", "FEATURE_DRIVERS", "AI_RATIONALE",
+        "MODEL_ENSEMBLE", "FEATURE_DRIVERS", "AI_RATIONALE", "RISK_PARAMETERS",
     ]
     assert detail.evidence_status is ReadStatus.OK
     assert [g.policy_id for g in detail.governance] == ["BUY_THRESHOLD"]

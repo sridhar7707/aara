@@ -1327,6 +1327,31 @@ def test_feature_drivers_list_form_renders_each_item():
     assert out.count("Driver") >= 2
 
 
+def test_risk_parameters_evidence_renders_its_data_values():
+    entry = _make_entry(evidence_type="RISK_PARAMETERS", source="aara-bot", data={
+        "stop_loss": 53.2437, "take_profit": 65.1426, "risk_reward_ratio": 2.0,
+    })
+    out = _trades_evidence_html(entry)
+
+    assert '<details class="aara-payload-disclosure">' in out
+    assert "Stop Loss" in out and "53.2437" in out
+    assert "Take Profit" in out and "65.1426" in out
+    assert "Risk/Reward Ratio" in out and "2" in out
+    _assert_index_order(out, "Stop Loss", "Take Profit", "Risk/Reward Ratio")
+
+
+def test_risk_parameters_omits_absent_keys_instead_of_rendering_none():
+    entry = _make_entry(evidence_type="RISK_PARAMETERS", source="aara-bot", data={
+        "stop_loss": 53.2437,
+    })
+    out = _trades_evidence_html(entry)
+
+    assert "Stop Loss" in out
+    assert "Take Profit" not in out
+    assert "Risk/Reward Ratio" not in out
+    assert "None" not in out
+
+
 def test_feature_drivers_production_pair_list_renders_name_colon_value():
     """Production shape: a JSON array of [name, value] pairs. Each pair
     renders as 'name: value' in source order -- not a Python list repr."""

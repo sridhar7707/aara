@@ -131,10 +131,10 @@ def test_to_evidence_entries_trade_45_has_three_ordered_entries():
     entries = d.to_evidence_entries(_row())
 
     assert [e.evidence_type for e in entries] == [
-        "MODEL_ENSEMBLE", "FEATURE_DRIVERS", "AI_RATIONALE",
+        "MODEL_ENSEMBLE", "FEATURE_DRIVERS", "AI_RATIONALE", "RISK_PARAMETERS",
     ]
     assert [e.evidence_id for e in entries] == [
-        "trade-45-model", "trade-45-drivers", "trade-45-rationale",
+        "trade-45-model", "trade-45-drivers", "trade-45-rationale", "trade-45-risk",
     ]
     assert all(e.source == "aara-bot" for e in entries)
     assert all(e.attached_at == _TS_DT for e in entries)
@@ -172,6 +172,7 @@ def test_to_evidence_entries_no_model_ensemble_entry_when_nothing_numeric():
         ensemble_score=None, xgb_prob=0.0, lstm_prob=0.0,
         sentiment_score=0.0, macro_score=0.0, regime=None,
         feature_drivers_raw=None, ai_reasoning=None,
+        stop_loss=None, take_profit=None, risk_reward_ratio=None,
     ))
     assert entries == []
 
@@ -182,6 +183,7 @@ def test_to_evidence_entries_no_feature_entry_for_empty_or_malformed_json(bad):
         ensemble_score=None, xgb_prob=0.0, lstm_prob=0.0,
         sentiment_score=0.0, macro_score=0.0, regime=None,
         feature_drivers_raw=bad, ai_reasoning=None,
+        stop_loss=None, take_profit=None, risk_reward_ratio=None,
     ))
     assert entries == []
 
@@ -192,12 +194,39 @@ def test_to_evidence_entries_no_rationale_entry_for_blank_ai_reasoning(blank):
         ensemble_score=None, xgb_prob=0.0, lstm_prob=0.0,
         sentiment_score=0.0, macro_score=0.0, regime=None,
         feature_drivers_raw=None, ai_reasoning=blank,
+        stop_loss=None, take_profit=None, risk_reward_ratio=None,
     ))
     assert entries == []
 
 
 def test_to_evidence_entries_bounded_at_four():
     assert len(d.to_evidence_entries(_row())) <= 4
+
+
+def test_to_evidence_entries_risk_parameters_all_three_populated():
+    entries = d.to_evidence_entries(_row())
+    risk = entries[3]
+    assert risk.evidence_type == "RISK_PARAMETERS"
+    assert risk.data == {
+        "stop_loss": 53.2437,
+        "take_profit": 65.1426,
+        "risk_reward_ratio": 2.0,
+    }
+
+
+def test_to_evidence_entries_risk_parameters_subset_populated():
+    entries = d.to_evidence_entries(_row(take_profit=None))
+    risk = next(e for e in entries if e.evidence_type == "RISK_PARAMETERS")
+    assert risk.data == {"stop_loss": 53.2437, "risk_reward_ratio": 2.0}
+    assert "take_profit" not in risk.data
+    assert None not in risk.data.values()
+
+
+def test_to_evidence_entries_no_risk_parameters_entry_when_all_three_none():
+    entries = d.to_evidence_entries(_row(
+        stop_loss=None, take_profit=None, risk_reward_ratio=None,
+    ))
+    assert "RISK_PARAMETERS" not in [e.evidence_type for e in entries]
 
 
 def test_to_evidence_entries_json_list_drivers_supported():

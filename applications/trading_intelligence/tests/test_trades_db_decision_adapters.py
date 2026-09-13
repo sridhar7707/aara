@@ -161,7 +161,7 @@ def test_list_decisions_returns_empty_list_when_source_unavailable(missing_reade
 def test_get_evidence_trade_45(reader):
     entries = TradesDbEvidenceSource(reader).get_evidence("trade-45")
     assert [e.evidence_type for e in entries] == [
-        "MODEL_ENSEMBLE", "FEATURE_DRIVERS", "AI_RATIONALE",
+        "MODEL_ENSEMBLE", "FEATURE_DRIVERS", "AI_RATIONALE", "RISK_PARAMETERS",
     ]
 
 
