@@ -267,4 +267,9 @@ CSS = """
   white-space: nowrap;
   border: 0;
 }
+
+/* Sprint 1: Portfolio Drawdown chart. */
+.ri-portfolio-drawdown-chart {
+  margin: 4px 0;
+}
 """

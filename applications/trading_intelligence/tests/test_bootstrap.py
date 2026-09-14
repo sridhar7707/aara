@@ -243,7 +243,7 @@ def test_build_application_creates_no_decisions():
 
     assert list_rows == []
     assert list_empty_html == (
-        '<div class="aara-empty-message">No decisions recorded yet.</div>'
+        '<div class="aara-empty-message aara-empty">No decisions recorded yet.</div>'
     )
 
 

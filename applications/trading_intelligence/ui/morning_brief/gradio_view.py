@@ -47,10 +47,11 @@ one of them).
 """
 import html
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import gradio as gr
+import pandas as pd
 
 from applications.trading_intelligence.ui.integration_health_view import (
     CSS as _INTEGRATION_HEALTH_CSS,
@@ -61,6 +62,7 @@ from applications.trading_intelligence.ui.morning_brief.screen import (
     PORTFOLIO_SNAPSHOT_TITLE,
     MorningBriefScreen,
     MorningBriefSection,
+    PortfolioHistoryPoint,
 )
 from applications.trading_intelligence.ui.morning_brief.theme import CSS
 from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
@@ -106,6 +108,19 @@ _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION = (
 )
 _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML = (
     f'<div class="mb-subtitle">{html.escape(_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION)}</div>'
+)
+
+# Sprint 1: recent-window portfolio value trend, alongside the Portfolio
+# Snapshot section's existing point-in-time summary. Same
+# unavailable/empty-vs-populated convention as every other integration
+# section on this screen -- no fabricated chart data.
+_PORTFOLIO_HISTORY_UNAVAILABLE_MESSAGE = (
+    "Portfolio value trend is not available -- the managed portfolio "
+    "snapshot history could not be read in this environment."
+)
+_PORTFOLIO_HISTORY_EMPTY_MESSAGE = "No portfolio history is recorded yet."
+_PORTFOLIO_HISTORY_SECTION_LABEL_HTML = (
+    '<div class="mb-section-label">Portfolio Value Trend</div>'
 )
 
 # Local primitive, not a cross-package import (same "duplicate the
@@ -213,7 +228,32 @@ class MorningBriefUI:
                     gr.HTML(_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML)
                 section_bodies.append(gr.HTML(self._section_body_html(section)))
 
-            outputs = [rendered_at_output, snapshot_output, *section_bodies]
+            gr.HTML(_PORTFOLIO_HISTORY_SECTION_LABEL_HTML)
+            history_message_value, history_message_visible = (
+                self._portfolio_history_message_state(initial)
+            )
+            portfolio_history_message_output = gr.HTML(
+                history_message_value, visible=history_message_visible,
+            )
+            history_dataframe, history_visible = self._portfolio_history_chart_state(initial)
+            portfolio_history_chart = gr.LinePlot(
+                value=history_dataframe,
+                x="as_of",
+                y="portfolio_value",
+                x_title="Date",
+                y_title="Portfolio Value ($)",
+                visible=history_visible,
+                elem_classes=["mb-portfolio-history-chart"],
+            )
+            portfolio_history_caption_output = gr.HTML(
+                self._portfolio_history_caption_html(initial)
+            )
+
+            outputs = [
+                rendered_at_output, snapshot_output, *section_bodies,
+                portfolio_history_message_output, portfolio_history_chart,
+                portfolio_history_caption_output,
+            ]
 
             # Same disable -> render -> enable double-submit guard chain as
             # ui/decision_center/ and ui/portfolio_intelligence/: a second
@@ -263,6 +303,10 @@ class MorningBriefUI:
         its own explicit unavailable message -- there is no
         mock/illustrative fallback anywhere in this path."""
         screen = self._screen_provider()
+        history_message_value, history_message_visible = (
+            self._portfolio_history_message_state(screen)
+        )
+        history_dataframe, history_visible = self._portfolio_history_chart_state(screen)
         return (
             gr.update(value=_format_rendered_at_html(self._now())),
             gr.update(
@@ -272,6 +316,9 @@ class MorningBriefUI:
                 gr.update(value=self._section_body_html(section))
                 for section in screen.sections
             ),
+            gr.update(value=history_message_value, visible=history_message_visible),
+            gr.update(value=history_dataframe, visible=history_visible),
+            gr.update(value=self._portfolio_history_caption_html(screen)),
         )
 
     @staticmethod
@@ -312,3 +359,71 @@ class MorningBriefUI:
                 "</div>"
             )
         return body
+
+    # --- Sprint 1: Portfolio Value Trend --------------------------------
+    #
+    # Same duplicated-primitive convention as everything else in this
+    # self-contained package: shaped identically to
+    # ui/portfolio_intelligence/gradio_view.py's own portfolio-history
+    # chart helpers, but not imported from it.
+
+    @staticmethod
+    def _portfolio_history_message_state(screen: MorningBriefScreen) -> Tuple[str, bool]:
+        if not screen.portfolio_history_is_available:
+            return (
+                render_unavailable(
+                    screen.portfolio_history_health,
+                    fallback_message=_PORTFOLIO_HISTORY_UNAVAILABLE_MESSAGE,
+                ),
+                True,
+            )
+        if screen.portfolio_history_is_empty:
+            return (
+                f'<div class="mb-unavailable-message">'
+                f'{html.escape(_PORTFOLIO_HISTORY_EMPTY_MESSAGE)}</div>',
+                True,
+            )
+        return ("", False)
+
+    @staticmethod
+    def _portfolio_history_chart_state(
+        screen: MorningBriefScreen,
+    ) -> Tuple[pd.DataFrame, bool]:
+        if screen.portfolio_history_is_available and not screen.portfolio_history_is_empty:
+            return (
+                MorningBriefUI._format_portfolio_history_dataframe(screen.portfolio_history),
+                True,
+            )
+        return (MorningBriefUI._format_portfolio_history_dataframe(()), False)
+
+    @staticmethod
+    def _format_portfolio_history_dataframe(
+        points: Tuple[PortfolioHistoryPoint, ...],
+    ) -> pd.DataFrame:
+        """Two real columns only -- each point's own as_of instant and its
+        own portfolio_value, verbatim from portfolio_snapshots (already
+        windowed to a recent range by bootstrap.py). No derived column
+        (return, drawdown, or any other computed metric) is ever added
+        here, matching Portfolio Intelligence's own chart's scope guard."""
+        return pd.DataFrame(
+            {
+                "as_of": [pd.Timestamp(point.as_of) for point in points],
+                "portfolio_value": [point.portfolio_value for point in points],
+            }
+        )
+
+    @staticmethod
+    def _portfolio_history_caption_html(screen: MorningBriefScreen) -> str:
+        """Honest freshness line for the trend chart -- the most recent
+        point's own real timestamp, using the exact same "as of" wording
+        every other section on this screen already uses. Empty when there
+        is nothing to caption; the message state above already explains
+        the unavailable/empty cases."""
+        if not screen.portfolio_history_is_available or screen.portfolio_history_is_empty:
+            return ""
+        most_recent_as_of = screen.portfolio_history[-1].as_of
+        return (
+            '<div class="mb-subtitle">'
+            f"{html.escape(_SECTION_AS_OF_PREFIX + most_recent_as_of)}"
+            "</div>"
+        )

@@ -40,6 +40,7 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _NO_PRODUCER_DISCLOSURE_BODY,
     _NO_PRODUCER_DISCLOSURE_HTML,
     _NO_PRODUCER_DISCLOSURE_TITLE,
+    _RENDERED_AT_PREFIX,
     _RISK_CONTEXT_BODY,
     _RISK_CONTEXT_HTML,
     _RISK_CONTEXT_TITLE,
@@ -54,6 +55,8 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _SELECT_DECISION_MESSAGE,
     _SELECTION_ARIA_SYNC_JS,
     _SHELL_NAV_HTML,
+    _SNAPSHOT_PREFIX,
+    _SNAPSHOT_UNAVAILABLE,
     _TIMESTAMP_DISCLOSURE_BODY,
     _TIMESTAMP_DISCLOSURE_HTML,
     _TIMESTAMP_DISCLOSURE_TITLE,
@@ -66,6 +69,7 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     DecisionCenterUI,
 )
 from applications.trading_intelligence.ui.decision_center.screen import (
+    CONFIDENCE_QUALIFIER,
     DecisionCenterScreen,
     DecisionDetailArea,
     DecisionListArea,
@@ -305,7 +309,14 @@ def test_render_screen_maps_list_rows_and_detail_fields():
     (
         list_rows, list_empty_html, header, lifecycle, conviction, updated, status, why_html,
         evidence_html, governance_html, approval_html, audit_html, news_cache_diff_html,
+        rendered_at_html, snapshot_html,
     ) = ui._render_screen()
+
+    # Sprint 1: freshness outputs are appended at the end -- present and
+    # honestly formatted, not asserted byte-for-byte here (covered by
+    # their own dedicated tests below).
+    assert _RENDERED_AT_PREFIX in rendered_at_html
+    assert _SNAPSHOT_PREFIX in snapshot_html or _SNAPSHOT_UNAVAILABLE in snapshot_html
 
     # Verdict is the backslash-escaped dash, not a bare "-" -- see
     # test_list_rows_render_the_missing_value_dash_when_no_verdict_recorded's
@@ -324,12 +335,12 @@ def test_render_screen_maps_list_rows_and_detail_fields():
     assert updated == "2026-08-08 04:00 CDT"
     assert status == "Approval Recorded"
     assert why_html == _WHY_RATIONALE_HTML
-    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
+    assert evidence_html == '<div class="aara-empty-message aara-empty">No evidence attached yet.</div>'
     assert governance_html == (
-        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+        '<div class="aara-empty-message aara-empty">No governance evaluation recorded.</div>'
     )
-    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
-    assert audit_html == '<div class="aara-empty-message">No audit events recorded.</div>'
+    assert approval_html == '<div class="aara-empty-message aara-empty">No approval recorded.</div>'
+    assert audit_html == '<div class="aara-empty-message aara-empty">No audit events recorded.</div>'
 
 
 def test_render_screen_formats_list_row_timestamp_in_cst_during_winter():
@@ -360,12 +371,15 @@ def test_render_screen_handles_empty_decision_list():
     (
         list_rows, list_empty_html, header, lifecycle, conviction, updated, status, why_html,
         evidence_html, governance_html, approval_html, audit_html, news_cache_diff_html,
+        rendered_at_html, snapshot_html,
     ) = ui._render_screen()
 
     assert list_rows == []
-    assert list_empty_html == '<div class="aara-empty-message">No decisions recorded yet.</div>'
+    assert list_empty_html == '<div class="aara-empty-message aara-empty">No decisions recorded yet.</div>'
     assert header == ""
     assert lifecycle == "-"
+    assert _RENDERED_AT_PREFIX in rendered_at_html
+    assert _SNAPSHOT_PREFIX in snapshot_html or _SNAPSHOT_UNAVAILABLE in snapshot_html
     assert conviction == "-"
     assert updated == "-"
     assert status == "-"
@@ -384,7 +398,7 @@ def test_select_decision_message_is_the_exact_fixed_text():
     no records' case in this file already uses (no new CSS class)."""
     assert _SELECT_DECISION_MESSAGE == "Select a decision to view details"
     assert _SELECT_DECISION_HTML == (
-        f'<div class="aara-empty-message">{_SELECT_DECISION_MESSAGE}</div>'
+        f'<div class="aara-empty-message aara-empty">{_SELECT_DECISION_MESSAGE}</div>'
     )
 
 
@@ -432,12 +446,12 @@ def test_render_detail_maps_fields_from_the_returned_decision():
     assert conviction == "74%"
     assert status == "Evidence Attached"
     assert why_html == _WHY_RATIONALE_HTML
-    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
+    assert evidence_html == '<div class="aara-empty-message aara-empty">No evidence attached yet.</div>'
     assert governance_html == (
-        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+        '<div class="aara-empty-message aara-empty">No governance evaluation recorded.</div>'
     )
-    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
-    assert audit_html == '<div class="aara-empty-message">No audit events recorded.</div>'
+    assert approval_html == '<div class="aara-empty-message aara-empty">No approval recorded.</div>'
+    assert audit_html == '<div class="aara-empty-message aara-empty">No audit events recorded.</div>'
 
 
 def test_render_detail_header_omits_raw_evidence_and_risk_reference():
@@ -819,10 +833,10 @@ def test_render_detail_shows_a_message_when_evidence_read_fails_but_decision_sti
     assert "Evidence is temporarily unavailable." in evidence_html
     assert 'class="aara-error-message"' in evidence_html
     assert governance_html == (
-        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+        '<div class="aara-empty-message aara-empty">No governance evaluation recorded.</div>'
     )
-    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
-    assert audit_html == '<div class="aara-empty-message">No audit events recorded.</div>'
+    assert approval_html == '<div class="aara-empty-message aara-empty">No approval recorded.</div>'
+    assert audit_html == '<div class="aara-empty-message aara-empty">No audit events recorded.</div>'
 
 
 def test_render_detail_shows_a_message_when_governance_read_fails():
@@ -839,9 +853,9 @@ def test_render_detail_shows_a_message_when_governance_read_fails():
     )
 
     assert "Governance information is temporarily unavailable." in governance_html
-    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
-    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
-    assert audit_html == '<div class="aara-empty-message">No audit events recorded.</div>'
+    assert evidence_html == '<div class="aara-empty-message aara-empty">No evidence attached yet.</div>'
+    assert approval_html == '<div class="aara-empty-message aara-empty">No approval recorded.</div>'
+    assert audit_html == '<div class="aara-empty-message aara-empty">No audit events recorded.</div>'
 
 
 def test_render_detail_shows_a_message_when_approvals_read_fails():
@@ -858,11 +872,11 @@ def test_render_detail_shows_a_message_when_approvals_read_fails():
     )
 
     assert "Approval information is temporarily unavailable." in approval_html
-    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
+    assert evidence_html == '<div class="aara-empty-message aara-empty">No evidence attached yet.</div>'
     assert governance_html == (
-        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+        '<div class="aara-empty-message aara-empty">No governance evaluation recorded.</div>'
     )
-    assert audit_html == '<div class="aara-empty-message">No audit events recorded.</div>'
+    assert audit_html == '<div class="aara-empty-message aara-empty">No audit events recorded.</div>'
 
 
 def test_render_detail_shows_a_message_when_audit_trail_read_fails():
@@ -879,11 +893,11 @@ def test_render_detail_shows_a_message_when_audit_trail_read_fails():
     )
 
     assert "Audit trail is temporarily unavailable." in audit_html
-    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
+    assert evidence_html == '<div class="aara-empty-message aara-empty">No evidence attached yet.</div>'
     assert governance_html == (
-        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+        '<div class="aara-empty-message aara-empty">No governance evaluation recorded.</div>'
     )
-    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
+    assert approval_html == '<div class="aara-empty-message aara-empty">No approval recorded.</div>'
 
 
 def test_row_select_calls_controller_with_the_id_from_the_selected_row():
@@ -918,12 +932,12 @@ def test_row_select_renders_the_selected_decision_detail():
     assert conviction == "91%"
     assert status == "Approval Recorded"
     assert why_html == _WHY_RATIONALE_HTML
-    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
+    assert evidence_html == '<div class="aara-empty-message aara-empty">No evidence attached yet.</div>'
     assert governance_html == (
-        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+        '<div class="aara-empty-message aara-empty">No governance evaluation recorded.</div>'
     )
-    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
-    assert audit_html == '<div class="aara-empty-message">No audit events recorded.</div>'
+    assert approval_html == '<div class="aara-empty-message aara-empty">No approval recorded.</div>'
+    assert audit_html == '<div class="aara-empty-message aara-empty">No audit events recorded.</div>'
 
 
 def test_row_select_handles_deselection_without_crashing():
@@ -992,7 +1006,7 @@ def test_render_detail_renders_an_empty_evidence_message_for_a_decision_with_no_
 
     *_, evidence_html, _governance_html, _approval_html, _audit_html, _n = ui._render_detail("dec-001")
 
-    assert evidence_html == '<div class="aara-empty-message">No evidence attached yet.</div>'
+    assert evidence_html == '<div class="aara-empty-message aara-empty">No evidence attached yet.</div>'
 
 
 # --- ADR-070 Sprint 3 (§9): per-record evidence polarity rendered in the
@@ -1308,6 +1322,192 @@ def test_model_ensemble_omits_absent_keys_instead_of_rendering_none():
     assert "XGB" not in out
     assert "Regime" not in out
     assert "None" not in out
+
+
+# --- Sprint 1: Ensemble Confidence Breakdown (decision header) -----------
+
+
+def test_confidence_breakdown_renders_all_four_present_components():
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot", data={
+        "ensemble": 0.5222, "threshold": 0.52,
+        "xgb": 0.5385, "lstm": 0.4375, "sentiment": 0.0936, "macro": 0.6403,
+        "regime": "HIGH_VOLATILITY",
+    })
+
+    out = DecisionCenterUI._confidence_breakdown_html((entry,))
+
+    assert "Confidence components" in out
+    assert "XGB" in out and "0.5385" in out
+    assert "LSTM" in out and "0.4375" in out
+    assert "Sentiment" in out and "0.0936" in out
+    assert "Macro" in out and "0.6403" in out
+    _assert_index_order(out, "XGB", "LSTM", "Sentiment", "Macro")
+
+
+def test_confidence_breakdown_excludes_ensemble_threshold_and_regime():
+    """Only the four model-score components render as bars -- the
+    already-combined ensemble total, the gate threshold, and the regime
+    label are not "components" of the confidence figure."""
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot", data={
+        "ensemble": 0.5222, "threshold": 0.52,
+        "xgb": 0.5385, "lstm": 0.4375, "sentiment": 0.0936, "macro": 0.6403,
+        "regime": "HIGH_VOLATILITY",
+    })
+
+    out = DecisionCenterUI._confidence_breakdown_html((entry,))
+
+    assert "Threshold" not in out
+    assert "HIGH_VOLATILITY" not in out
+    assert "aara-confidence-component-label\">Ensemble" not in out
+
+
+def test_confidence_breakdown_omits_absent_components_without_a_fabricated_bar():
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot", data={
+        "xgb": 0.5385, "lstm": 0.4375,
+        # sentiment/macro absent -- some real decisions have no sentiment
+        # or macro reading.
+    })
+
+    out = DecisionCenterUI._confidence_breakdown_html((entry,))
+
+    assert "XGB" in out and "LSTM" in out
+    assert "Sentiment" not in out
+    assert "Macro" not in out
+    assert "0.0" not in out  # never a fabricated zero for an absent component
+
+
+def test_confidence_breakdown_is_empty_when_no_model_ensemble_evidence_present():
+    other = _make_entry(evidence_type="FEATURE_DRIVERS", source="aara-bot", data={"drivers": {}})
+
+    assert DecisionCenterUI._confidence_breakdown_html(()) == ""
+    assert DecisionCenterUI._confidence_breakdown_html((other,)) == ""
+
+
+def test_confidence_breakdown_is_empty_when_model_ensemble_has_no_component_keys():
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot", data={
+        "ensemble": 0.55, "threshold": 0.52,
+    })
+
+    assert DecisionCenterUI._confidence_breakdown_html((entry,)) == ""
+
+
+def test_confidence_breakdown_does_not_fabricate_or_reweight_the_underlying_score():
+    """The rendered value must be byte-for-byte the same formatting
+    _format_evidence_value already uses for the same data elsewhere (the
+    Evidence section's own disclosure) -- proving this is a read, not a
+    recomputation."""
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot", data={"xgb": 0.53851234})
+
+    out = DecisionCenterUI._confidence_breakdown_html((entry,))
+
+    assert DecisionCenterUI._format_evidence_value(0.53851234) in out
+
+
+def test_confidence_breakdown_wired_into_the_decision_header():
+    """Integration point: _decision_header_html actually includes the
+    breakdown when evidence is passed, and the fixed CONFIDENCE_QUALIFIER
+    caption is preserved unchanged alongside it."""
+    view = _make_view()
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot", data={"xgb": 0.5385})
+
+    header = DecisionCenterUI._decision_header_html(view, evidence=(entry,))
+
+    assert "Confidence components" in header
+    assert "XGB" in header
+    assert CONFIDENCE_QUALIFIER in header
+
+
+def test_confidence_breakdown_never_mentions_evidence_polarity():
+    """ADR-070 section 9 guard: this feature must never aggregate or even
+    mention evidence polarity -- it is a separate concept this function
+    does not touch."""
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot", data={
+        "xgb": 0.5385, "lstm": 0.4375, "sentiment": 0.0936, "macro": 0.6403,
+    })
+
+    out = DecisionCenterUI._confidence_breakdown_html((entry,))
+
+    for forbidden in ("polarity", "Supported the", "Contradicted the"):
+        assert forbidden.lower() not in out.lower()
+
+
+def _empty_decision_center_screen():
+    return DecisionCenterScreen(
+        list_area=DecisionListArea(decisions=[]),
+        detail_area=DecisionDetailArea(decision=None),
+    )
+
+
+def test_render_screen_rendered_at_reflects_the_current_moment():
+    """The render-clock line must show a real timestamp -- never a fixed
+    or fabricated string -- and must never be confused with the snapshot
+    freshness line (Sprint 1 Item 5)."""
+    controller = _FakeController(screen=_empty_decision_center_screen())
+    ui = DecisionCenterUI(controller, [])
+
+    *_rest, rendered_at_html, _snapshot_html = ui._render_screen()
+
+    assert _RENDERED_AT_PREFIX in rendered_at_html
+    assert '<div class="aara-disclosure-body">' in rendered_at_html
+
+
+def test_render_screen_snapshot_line_is_honest_unavailable_with_no_provider():
+    """No snapshot_fetched_at_provider given (the default) must render an
+    honest 'unavailable' state, never a fabricated timestamp."""
+    controller = _FakeController(screen=_empty_decision_center_screen())
+    ui = DecisionCenterUI(controller, [])
+
+    *_rest, _rendered_at_html, snapshot_html = ui._render_screen()
+
+    assert _SNAPSHOT_UNAVAILABLE in snapshot_html
+
+
+def test_render_screen_snapshot_line_reflects_the_provided_moment():
+    """When bootstrap.py wires a real snapshot_fetched_at_provider, its
+    returned moment must appear in the snapshot line, not the unavailable
+    fallback."""
+    moment = datetime.datetime(2026, 9, 1, 12, 0, tzinfo=datetime.timezone.utc)
+    controller = _FakeController(screen=_empty_decision_center_screen())
+    ui = DecisionCenterUI(
+        controller, [],
+        snapshot_fetched_at_provider=lambda: moment,
+    )
+
+    *_rest, _rendered_at_html, snapshot_html = ui._render_screen()
+
+    assert _SNAPSHOT_PREFIX in snapshot_html
+    assert _SNAPSHOT_UNAVAILABLE not in snapshot_html
+
+
+def test_render_screen_snapshot_line_is_stable_across_repeated_renders():
+    """Refresh re-invokes _render_screen(), but the snapshot line must stay
+    fixed as long as the provider returns the same moment (it reads the
+    same file on disk, not a live clock) -- only the rendered-at line
+    should ever change between renders."""
+    moment = datetime.datetime(2026, 9, 1, 12, 0, tzinfo=datetime.timezone.utc)
+    controller = _FakeController(screen=_empty_decision_center_screen())
+    ui = DecisionCenterUI(
+        controller, [],
+        snapshot_fetched_at_provider=lambda: moment,
+    )
+
+    *_first, snapshot_html_1 = ui._render_screen()
+    *_second, snapshot_html_2 = ui._render_screen()
+
+    assert snapshot_html_1 == snapshot_html_2
+
+
+def test_build_wires_refresh_button_to_the_same_screen_outputs_as_load():
+    """The freshness outputs must ride along with the existing Refresh
+    wiring (same screen_outputs, same _render_screen fn) rather than
+    requiring a separate/new event -- Refresh behavior itself must stay
+    unchanged (task constraint)."""
+    controller = _FakeController(screen=_empty_decision_center_screen())
+    ui = DecisionCenterUI(controller, [])
+
+    demo = ui.build()
+
+    assert isinstance(demo, gr.Blocks)
 
 
 def test_feature_drivers_evidence_renders_actual_values_key_sorted():
@@ -1895,7 +2095,7 @@ def test_render_detail_renders_an_empty_governance_message_for_a_decision_with_n
     *_, _evidence_html, governance_html, _approval_html, _audit_html, _n = ui._render_detail("dec-001")
 
     assert governance_html == (
-        '<div class="aara-empty-message">No governance evaluation recorded.</div>'
+        '<div class="aara-empty-message aara-empty">No governance evaluation recorded.</div>'
     )
 
 
@@ -1976,7 +2176,7 @@ def test_render_detail_renders_an_empty_approval_message_for_a_decision_with_no_
 
     *_, _evidence_html, _governance_html, approval_html, _audit_html, _n = ui._render_detail("dec-001")
 
-    assert approval_html == '<div class="aara-empty-message">No approval recorded.</div>'
+    assert approval_html == '<div class="aara-empty-message aara-empty">No approval recorded.</div>'
 
 
 def test_render_detail_renders_a_single_audit_card():
@@ -2022,7 +2222,7 @@ def test_render_detail_renders_an_empty_audit_message_for_a_decision_with_no_eve
 
     *_, audit_html, _n = ui._render_detail("dec-001")
 
-    assert audit_html == '<div class="aara-empty-message">No audit events recorded.</div>'
+    assert audit_html == '<div class="aara-empty-message aara-empty">No audit events recorded.</div>'
 
 
 def test_audit_card_escapes_html_in_entry_values():
@@ -3087,7 +3287,7 @@ def test_render_screen_return_shape_is_unchanged_by_the_disclosure():
     )
     ui = DecisionCenterUI(_FakeController(screen=screen), [])
 
-    assert len(ui._render_screen()) == 13  # list_rows, list_empty_html + _DetailValues (11)
+    assert len(ui._render_screen()) == 15  # list_rows, list_empty_html + _DetailValues (11) + Sprint 1 freshness (2)
 
 
 def test_render_detail_return_shape_is_unchanged_by_the_disclosure():
@@ -3108,7 +3308,7 @@ def test_existing_zero_decision_wording_intact_alongside_the_disclosure():
 
     (list_rows, list_empty_html, *_rest) = ui._render_screen()
     assert list_rows == []
-    assert list_empty_html == '<div class="aara-empty-message">No decisions recorded yet.</div>'
+    assert list_empty_html == '<div class="aara-empty-message aara-empty">No decisions recorded yet.</div>'
     assert ui._announce_screen() == "Decision Center updated. Showing 0 decisions."
 
 

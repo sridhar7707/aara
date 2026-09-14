@@ -32,6 +32,20 @@ OVERNIGHT_HOLDINGS_NEWS_TITLE = "Overnight Holdings News"
 
 
 @dataclass(frozen=True)
+class PortfolioHistoryPoint:
+    """Sprint 1: one real portfolio_snapshots row, for a recent-window trend
+    chart alongside the Portfolio Snapshot section's existing point-in-time
+    summary. Duplicated from ui/portfolio_intelligence/screen.py's own type
+    of the same name rather than imported -- this package is self-contained
+    and does not cross-import any other screen package (see gradio_view.py's
+    own module docstring). No derived figure (return, drawdown, Sharpe, or
+    any other computed metric) is ever computed from this or carried on it;
+    it is portfolio_value at a point in time, nothing else."""
+    as_of: str
+    portfolio_value: float
+
+
+@dataclass(frozen=True)
 class MorningBriefSection:
     title: str
     unavailable_message: str
@@ -63,6 +77,27 @@ class MorningBriefScreen:
     market_mood_regime: MorningBriefSection
     candidate_screening_summary: MorningBriefSection
     overnight_holdings_news: MorningBriefSection
+    # Sprint 1: recent-window portfolio value trend, alongside (not
+    # replacing) the Portfolio Snapshot section's own point-in-time summary
+    # above. None means unavailable (the portfolio_snapshots read failed or
+    # no snapshot exists in this environment) -- an empty tuple is a
+    # genuine "connected, no rows in this window yet" result, distinct from
+    # unavailable, matching PortfolioScreen.portfolio_history's own
+    # None-vs-empty convention.
+    portfolio_history: Optional[Tuple[PortfolioHistoryPoint, ...]] = None
+    portfolio_history_health: Optional[IntegrationHealth] = None
+
+    @property
+    def portfolio_history_is_available(self) -> bool:
+        return self.portfolio_history is not None
+
+    @property
+    def portfolio_history_is_empty(self) -> bool:
+        return self.portfolio_history is not None and len(self.portfolio_history) == 0
+
+    @property
+    def portfolio_history_empty_state_message(self) -> str:
+        return "No portfolio history is recorded yet."
 
     @property
     def sections(self) -> Tuple[MorningBriefSection, ...]:

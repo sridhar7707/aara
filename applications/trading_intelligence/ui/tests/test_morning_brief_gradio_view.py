@@ -19,6 +19,7 @@ from applications.trading_intelligence.ui.morning_brief.screen import (
     MARKET_MOOD_REGIME_TITLE,
     OVERNIGHT_HOLDINGS_NEWS_TITLE,
     PORTFOLIO_SNAPSHOT_TITLE,
+    PortfolioHistoryPoint,
 )
 from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
 
@@ -118,10 +119,10 @@ def test_portfolio_snapshot_carries_a_data_source_caption():
 
 def test_portfolio_snapshot_caption_is_static_not_a_dynamic_render_output():
     """The caption is a fixed disclosure -- it must not be wired into
-    _render()'s output list, so _OUTPUT_COUNT stays 6."""
+    _render()'s output list, so _OUTPUT_COUNT is unaffected by it."""
     ui = MorningBriefUI()
 
-    assert len(ui._render()) == _OUTPUT_COUNT  # unchanged: 6
+    assert len(ui._render()) == _OUTPUT_COUNT
     combined = "\n".join(_html_values(ui.build()))
     assert _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML in combined
 
@@ -281,7 +282,7 @@ def test_p2_spy_clause_rides_inside_the_existing_available_summary_output():
 
     combined = "\n".join(_html_values(ui.build()))
     assert spy_summary in combined
-    assert len(ui._render()) == _OUTPUT_COUNT  # unchanged: 6
+    assert len(ui._render()) == _OUTPUT_COUNT
 
 
 def test_candidate_screening_and_overnight_news_stay_unavailable_when_other_sections_are_real():
@@ -338,8 +339,9 @@ def test_default_render_shows_no_available_summary_markup():
 
 
 # render-clock line + operational-snapshot line + one body per
-# MorningBriefScreen.sections (4)
-_OUTPUT_COUNT = 6
+# MorningBriefScreen.sections (4) + Sprint 1 portfolio-history message,
+# chart, and caption (3)
+_OUTPUT_COUNT = 9
 
 
 def _refresh_button(demo):
@@ -467,7 +469,10 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
     updates = ui._render()
 
     baseline = build_mock_screen()
-    section_bodies = updates[2:]  # drop the render-clock + snapshot updates
+    # drop the render-clock + snapshot updates; stop before the Sprint 1
+    # portfolio-history message/chart/caption outputs, which are covered
+    # by their own dedicated tests.
+    section_bodies = updates[2:2 + len(baseline.sections)]
     assert len(section_bodies) == len(baseline.sections)
     for update, section in zip(section_bodies, baseline.sections):
         assert section.unavailable_message in update["value"]
@@ -558,7 +563,9 @@ def test_no_screen_and_no_provider_uses_the_mock_unavailable_screen():
 
     assert ui._screen == build_mock_screen()
     assert ui._screen.is_empty
-    body_updates = ui._render()[2:]  # drop render-clock + snapshot updates
+    # drop render-clock + snapshot updates; stop before the Sprint 1
+    # portfolio-history outputs (covered by their own dedicated tests).
+    body_updates = ui._render()[2:2 + len(ui._screen.sections)]
     for update in body_updates:
         assert "aara-integration-status" in update["value"]
 
@@ -606,3 +613,114 @@ def test_section_health_does_not_change_availability():
 
     assert with_health.portfolio_snapshot.is_available is False
     assert with_health.is_empty is True
+
+
+# --- Sprint 1: Portfolio Value Trend chart --------------------------------
+
+
+def _history_chart(demo):
+    charts = [b for b in demo.blocks.values() if isinstance(b, gr.LinePlot)]
+    assert len(charts) == 1
+    return charts[0]
+
+
+def test_portfolio_history_unavailable_renders_the_message_and_hides_the_chart():
+    """Default mock screen: portfolio_history is None (unavailable)."""
+    demo = MorningBriefUI().build()
+
+    html_values = _html_values(demo)
+    assert any("aara-integration-status" in v for v in html_values)
+    assert _history_chart(demo).visible is False
+
+
+def test_portfolio_history_empty_renders_the_message_and_hides_the_chart():
+    screen = replace(build_mock_screen(), portfolio_history=())
+    demo = MorningBriefUI(screen=screen).build()
+
+    html_values = _html_values(demo)
+    assert any("No portfolio history is recorded yet." in v for v in html_values)
+    assert _history_chart(demo).visible is False
+
+
+def test_portfolio_history_with_real_points_renders_the_chart_and_no_message():
+    points = (
+        PortfolioHistoryPoint(as_of="2026-09-01T12:00:00+00:00", portfolio_value=99000.0),
+        PortfolioHistoryPoint(as_of="2026-09-13T12:00:00+00:00", portfolio_value=100500.0),
+    )
+    screen = replace(build_mock_screen(), portfolio_history=points)
+    demo = MorningBriefUI(screen=screen).build()
+
+    chart = _history_chart(demo)
+    assert chart.visible is True
+    assert [row[1] for row in chart.value["data"]] == [99000.0, 100500.0]
+    # The portfolio-history message output specifically (index 6) is
+    # empty/hidden when real points are present -- other sections' own
+    # (unrelated, still-default-mock) unavailable text is out of scope here.
+    message_update = MorningBriefUI(screen=screen)._render()[6]
+    assert message_update["visible"] is False
+    assert message_update["value"] == ""
+
+
+def test_portfolio_history_caption_shows_the_most_recent_point_as_of():
+    points = (
+        PortfolioHistoryPoint(as_of="2026-09-01T12:00:00+00:00", portfolio_value=99000.0),
+        PortfolioHistoryPoint(as_of="2026-09-13T12:00:00+00:00", portfolio_value=100500.0),
+    )
+    screen = replace(build_mock_screen(), portfolio_history=points)
+
+    combined = "\n".join(_html_values(MorningBriefUI(screen=screen).build()))
+
+    assert f"{_SECTION_AS_OF_PREFIX}2026-09-13T12:00:00+00:00" in combined
+
+
+def test_portfolio_history_caption_is_absent_when_unavailable_or_empty():
+    # caption output is index 8 (see test_portfolio_history_refresh_updates_
+    # the_chart's indexing note).
+    unavailable_caption = MorningBriefUI()._render()[8]["value"]
+    empty_screen = replace(build_mock_screen(), portfolio_history=())
+    empty_caption = MorningBriefUI(screen=empty_screen)._render()[8]["value"]
+
+    assert unavailable_caption == ""
+    assert empty_caption == ""
+
+
+def test_portfolio_history_chart_has_no_derived_performance_metrics():
+    """Explicit scope guard, mirroring Portfolio Intelligence's own chart:
+    only the two real columns (timestamp, portfolio value) may ever appear
+    -- no Sharpe/alpha/beta/CAGR/ROI/drawdown or any other computed
+    metric."""
+    points = (PortfolioHistoryPoint(as_of="2026-09-13T12:00:00+00:00", portfolio_value=100500.0),)
+    screen = replace(build_mock_screen(), portfolio_history=points)
+
+    chart = _history_chart(MorningBriefUI(screen=screen).build())
+
+    assert set(chart.value["columns"]) == {"as_of", "portfolio_value"}
+
+
+def test_portfolio_history_refresh_updates_the_chart():
+    """Proves the chart is wired into the dynamic _render() output list
+    (not a static, build()-time-only component) -- a provider returning a
+    different screen on the next call must change what _render() reports
+    for the chart, exactly like every other dynamic output on this
+    screen."""
+    empty_screen = replace(build_mock_screen(), portfolio_history=())
+    points = (PortfolioHistoryPoint(as_of="2026-09-13T12:00:00+00:00", portfolio_value=100500.0),)
+    populated_screen = replace(build_mock_screen(), portfolio_history=points)
+    calls = []
+
+    def provider():
+        calls.append(True)
+        # call 1 is __init__'s own priming read; call 2 is the first
+        # explicit _render() below -- both should still see the empty
+        # screen, so `first` reflects unchanged state before the switch.
+        return empty_screen if len(calls) <= 2 else populated_screen
+
+    ui = MorningBriefUI(screen_provider=provider)
+    first = ui._render()
+    second = ui._render()
+
+    # chart output is index 7: rendered_at(0), snapshot(1), 4 sections
+    # (2-5), history message(6), history chart(7), history caption(8).
+    assert first[7]["visible"] is False
+    assert second[7]["visible"] is True
+    assert second[7]["value"]["portfolio_value"].tolist() == [100500.0]

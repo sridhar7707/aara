@@ -7,6 +7,7 @@ Both tables are populated in the fixture with deliberately different
 numbers, so the test can assert which one reached the UI.
 """
 import sqlite3
+from datetime import datetime, timezone
 
 import pytest
 
@@ -109,3 +110,103 @@ def test_portfolio_snapshot_unavailable_when_only_stale_capital_pools_exists(
     assert not section.is_available
     assert section.available_summary is None
     assert section.health.status is IntegrationStatus.API_ERROR
+
+
+# --- Sprint 1: Portfolio Value Trend (recent-window history) --------------
+
+
+def _fixed_now(monkeypatch, moment: datetime):
+    monkeypatch.setattr(bootstrap, "_now_utc", lambda: moment)
+
+
+def test_portfolio_history_windows_to_last_30_days_excluding_older_rows(
+    tmp_path, _no_alpaca_news, monkeypatch
+):
+    """Reuses the same LegacyPortfolioSnapshotSource.get_portfolio_history()
+    read Portfolio Intelligence's own chart makes (no new backend reader),
+    windowed here to the most recent 30 days -- a row from 75 days ago must
+    not appear, and the two in-window rows survive in ascending order."""
+    _fixed_now(monkeypatch, datetime(2026, 9, 14, 12, 0, tzinfo=timezone.utc))
+    path = tmp_path / "trades.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE portfolio_snapshots (
+            timestamp TEXT PRIMARY KEY, portfolio_value REAL, available_cash REAL,
+            open_positions INTEGER
+        );
+        -- 75 days before the fixed "now" -- outside the 30-day window.
+        INSERT INTO portfolio_snapshots VALUES ('2026-07-01T12:00:00+00:00', 90000.0, 30000.0, 4);
+        -- 13 days before -- inside the window.
+        INSERT INTO portfolio_snapshots VALUES ('2026-09-01T12:00:00+00:00', 99000.0, 55000.0, 5);
+        -- 1 day before -- inside the window, and the most recent row.
+        INSERT INTO portfolio_snapshots VALUES ('2026-09-13T12:00:00+00:00', 100500.0, 56000.0, 5);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    screen = bootstrap._build_morning_brief_screen(db_path=str(path))
+
+    assert screen.portfolio_history_is_available
+    assert not screen.portfolio_history_is_empty
+    assert [p.as_of for p in screen.portfolio_history] == [
+        "2026-09-01T12:00:00+00:00", "2026-09-13T12:00:00+00:00",
+    ]
+    assert [p.portfolio_value for p in screen.portfolio_history] == [99000.0, 100500.0]
+
+
+def test_portfolio_history_empty_when_every_row_is_outside_the_window(
+    tmp_path, _no_alpaca_news, monkeypatch
+):
+    """A real, connected read whose only rows are all older than 30 days is
+    a genuine 'connected, nothing in this window' result -- an empty tuple,
+    never None (unavailable) and never a fabricated point."""
+    _fixed_now(monkeypatch, datetime(2026, 9, 14, 12, 0, tzinfo=timezone.utc))
+    path = tmp_path / "trades.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE portfolio_snapshots (
+            timestamp TEXT PRIMARY KEY, portfolio_value REAL, available_cash REAL,
+            open_positions INTEGER
+        );
+        INSERT INTO portfolio_snapshots VALUES ('2026-01-01T12:00:00+00:00', 90000.0, 30000.0, 4);
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    screen = bootstrap._build_morning_brief_screen(db_path=str(path))
+
+    assert screen.portfolio_history_is_available
+    assert screen.portfolio_history_is_empty
+    assert screen.portfolio_history == ()
+
+
+def test_portfolio_history_unavailable_when_no_portfolio_snapshots_table(
+    tmp_path, _no_alpaca_news
+):
+    """Mirrors the Portfolio Snapshot section's own unavailable test --
+    portfolio_history stays None (never an empty tuple) when the table
+    itself cannot be read, matching the same None-vs-empty convention
+    PortfolioScreen.portfolio_history already uses."""
+    path = tmp_path / "trades.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        """
+        CREATE TABLE capital_pools (
+            id INTEGER PRIMARY KEY, name TEXT, status TEXT,
+            allocated_amount REAL, available_cash REAL, invested_amount REAL,
+            reserve REAL, realized_profit REAL, profit_withdrawn REAL
+        );
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    screen = bootstrap._build_morning_brief_screen(db_path=str(path))
+
+    assert not screen.portfolio_history_is_available
+    assert screen.portfolio_history is None
+    assert screen.portfolio_history_health.status is IntegrationStatus.API_ERROR

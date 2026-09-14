@@ -37,7 +37,7 @@ import logging
 import os
 import sys
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
 # TEMP-DIAG holdings-price: temporary tracing of the Portfolio Intelligence
@@ -194,7 +194,10 @@ from applications.trading_intelligence.ui.morning_brief.gradio_view import Morni
 from applications.trading_intelligence.ui.morning_brief.mock_data import (
     build_mock_screen as build_mock_morning_brief_screen,
 )
-from applications.trading_intelligence.ui.morning_brief.screen import MorningBriefScreen
+from applications.trading_intelligence.ui.morning_brief.screen import (
+    MorningBriefScreen,
+    PortfolioHistoryPoint as MorningBriefPortfolioHistoryPoint,
+)
 from applications.trading_intelligence.ui.performance_learning.gradio_view import (
     PerformanceLearningUI,
 )
@@ -214,7 +217,11 @@ from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     PortfolioScreen,
 )
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import RiskIntelligenceUI
-from applications.trading_intelligence.ui.risk_intelligence.screen import RiskScreen, RiskSnapshot
+from applications.trading_intelligence.ui.risk_intelligence.screen import (
+    DrawdownPoint,
+    RiskScreen,
+    RiskSnapshot,
+)
 from applications.trading_intelligence.ui.settings.gradio_view import SettingsUI
 
 
@@ -420,7 +427,17 @@ def build_application_from_trades_snapshot(db_path: Optional[str]) -> DecisionCe
         recommendation_diff_source=recommendation_diff_source,
         earnings_source=earnings_source,
     )
-    return DecisionCenterUI(controller, decision_ids)
+    # Sprint 1: same "Operational data snapshot" freshness indicator
+    # ui/morning_brief/, ui/portfolio_intelligence/, and
+    # ui/risk_intelligence/ already show -- db_path is fixed for the life
+    # of this DecisionCenterUI, so re-statting it on every render (via
+    # _snapshot_fetched_at, unchanged) correctly stays fixed across Refresh
+    # and only advances on a Space restart, exactly like the other three
+    # screens' own wiring.
+    return DecisionCenterUI(
+        controller, decision_ids,
+        snapshot_fetched_at_provider=lambda: _snapshot_fetched_at(db_path),
+    )
 
 
 # Composition-only fix for a regression found in live verification: Decision
@@ -690,6 +707,41 @@ def _format_section_as_of(raw: Optional[str]) -> Optional[str]:
     return parsed.astimezone(_MB_SECTION_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
 
 
+_MORNING_BRIEF_PORTFOLIO_HISTORY_WINDOW_DAYS = 30
+
+
+def _recent_morning_brief_portfolio_history(
+    points, window_days: int = _MORNING_BRIEF_PORTFOLIO_HISTORY_WINDOW_DAYS,
+) -> Tuple[MorningBriefPortfolioHistoryPoint, ...]:
+    """Sprint 1: windows the SAME real portfolio_snapshots history Portfolio
+    Intelligence's own equity chart reads
+    (LegacyPortfolioSnapshotSource.get_portfolio_history(), called once,
+    unchanged, in _build_morning_brief_screen() below) down to the most
+    recent `window_days` -- a pure display-window slice over already-fetched
+    real data, not a new backend reader and not a derived metric. Points
+    already arrive in ascending as_of order (the adapter's own
+    `ORDER BY timestamp ASC`); that order is preserved. A point whose as_of
+    cannot be parsed is dropped rather than guessed into or out of the
+    window -- the same "unparseable -> pass through / drop, never invent"
+    discipline _format_section_as_of uses."""
+    cutoff = _now_utc() - timedelta(days=window_days)
+    windowed = []
+    for point in points:
+        try:
+            parsed = datetime.fromisoformat(point.as_of)
+        except (TypeError, ValueError):
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        if parsed >= cutoff:
+            windowed.append(
+                MorningBriefPortfolioHistoryPoint(
+                    as_of=point.as_of, portfolio_value=point.portfolio_value,
+                )
+            )
+    return tuple(windowed)
+
+
 def _format_candidate_screening_summary(snapshot: CandidateScreeningSnapshot) -> str:
     """Pure formatting, no I/O -- always states the actual persisted
     screened_at date literally (never "today"), so a stale local
@@ -887,12 +939,27 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
                 as_of=_format_section_as_of(news_fetched_at.isoformat()),
             )
 
+    # Sprint 1: recent-window portfolio value trend. Reuses the exact same
+    # LegacyPortfolioSnapshotSource.get_portfolio_history() call Portfolio
+    # Intelligence's own equity chart already makes -- no new reader, no new
+    # SQL. Windowed to the last 30 days for this "single-glance daily
+    # summary" screen (see _recent_morning_brief_portfolio_history); the
+    # unwindowed full history remains Portfolio Intelligence's own view.
+    history_result = LegacyPortfolioSnapshotSource(**legacy_kwargs).get_portfolio_history()
+    portfolio_history = (
+        _recent_morning_brief_portfolio_history(history_result.value)
+        if history_result.value is not None
+        else None
+    )
+
     return replace(
         illustrative_screen,
         portfolio_snapshot=portfolio_snapshot,
         market_mood_regime=market_mood_regime,
         candidate_screening_summary=candidate_screening_summary,
         overnight_holdings_news=overnight_holdings_news,
+        portfolio_history=portfolio_history,
+        portfolio_history_health=history_result.health,
     )
 
 
@@ -1134,6 +1201,32 @@ def _format_risk_state_as_of(raw: str) -> str:
     return parsed.astimezone(_RISK_STATE_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
 
 
+def _compute_drawdown_history(points) -> Tuple[DrawdownPoint, ...]:
+    """Sprint 1: pure computation over the SAME real portfolio_snapshots
+    history Portfolio Intelligence's and Morning Brief's own charts read
+    (LegacyPortfolioSnapshotSource.get_portfolio_history(), called once,
+    unchanged, in _build_risk_intelligence_screen() below) -- not a new
+    backend reader, and no schema change; drawdown_pct is derived here in
+    Python from already-fetched real rows. Running peak and drawdown_pct
+    are computed left to right over the adapter's own ascending-as_of
+    order; the first point is always drawdown_pct=0.0 (it is its own
+    running peak so far). A non-positive peak (a fabricated-zero-value row
+    should already have been filtered by the adapter's own
+    `portfolio_value > 0` guard, but this stays defensive) yields
+    drawdown_pct=0.0 rather than a division error or a fabricated value."""
+    history = []
+    peak: Optional[float] = None
+    for point in points:
+        value = point.portfolio_value
+        if peak is None or value > peak:
+            peak = value
+        drawdown_pct = 0.0 if not peak or peak <= 0 else (peak - value) / peak * 100.0
+        history.append(
+            DrawdownPoint(as_of=point.as_of, portfolio_value=value, drawdown_pct=drawdown_pct)
+        )
+    return tuple(history)
+
+
 def _build_risk_intelligence_screen(db_path: Optional[str] = None) -> RiskScreen:
     """Assemble one real-or-unavailable RiskScreen from the operational
     `risk_state` table (Group C, mutable) via the read-only
@@ -1162,14 +1255,32 @@ def _build_risk_intelligence_screen(db_path: Optional[str] = None) -> RiskScreen
     # table simply has no risk_governor_state row; state_health carries
     # which of the two it was.
     state_result = LegacyRiskStateSource(**legacy_source_kwargs(db_path)).get_risk_state()
+    # Sprint 1: real portfolio drawdown over time -- independent of whether
+    # the current risk-state read above succeeded, same independence
+    # convention Portfolio Intelligence's own Alpaca sections already use
+    # relative to its Capital Summary.
+    history_result = LegacyPortfolioSnapshotSource(
+        **legacy_source_kwargs(db_path)
+    ).get_portfolio_history()
+    drawdown_history = (
+        _compute_drawdown_history(history_result.value)
+        if history_result.value is not None
+        else None
+    )
     if state_result.value is None:
-        return RiskScreen(state_health=state_result.health)
+        return RiskScreen(
+            state_health=state_result.health,
+            drawdown_history=drawdown_history,
+            drawdown_history_health=history_result.health,
+        )
     return RiskScreen(
         current=RiskSnapshot(
             state=state_result.value.state,
             as_of=_format_risk_state_as_of(state_result.value.as_of),
         ),
         state_health=state_result.health,
+        drawdown_history=drawdown_history,
+        drawdown_history_health=history_result.health,
     )
 
 

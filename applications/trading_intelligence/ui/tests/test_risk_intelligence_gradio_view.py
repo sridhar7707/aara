@@ -17,6 +17,7 @@ from applications.trading_intelligence.ui.risk_intelligence.gradio_view import (
     RiskIntelligenceUI,
 )
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
+    DrawdownPoint,
     RiskHistoryEntry,
     RiskScreen,
     RiskSnapshot,
@@ -590,7 +591,9 @@ def test_render_returns_one_update_per_dynamic_output():
     result = ui._render()
 
     assert isinstance(result, tuple)
-    assert len(result) == 12
+    # 12 pre-Sprint-1 outputs + 3 Sprint 1 portfolio-drawdown outputs
+    # (message, chart, disclaimer).
+    assert len(result) == 15
     assert all(isinstance(update, dict) for update in result)
 
 
@@ -848,3 +851,143 @@ def test_existing_current_state_and_history_rendering_is_unaffected():
         "</div>"
         "</div>"
     )
+
+
+# --- Sprint 1: Portfolio Drawdown chart ------------------------------------
+
+
+def _html_values(demo):
+    return [
+        block.value for block in demo.blocks.values()
+        if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
+    ]
+
+
+def _drawdown_chart(demo):
+    charts = [b for b in demo.blocks.values() if isinstance(b, gr.LinePlot)]
+    assert len(charts) == 1
+    return charts[0]
+
+
+def test_drawdown_unavailable_by_default_renders_the_message_and_hides_the_chart():
+    """Default RiskScreen(): drawdown_history is None (unavailable)."""
+    demo = RiskIntelligenceUI().build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "Portfolio drawdown is not available" in combined
+    assert _drawdown_chart(demo).visible is False
+
+
+def test_drawdown_empty_renders_the_message_and_hides_the_chart():
+    screen = RiskScreen(drawdown_history=())
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "No portfolio history is recorded yet." in combined
+    assert _drawdown_chart(demo).visible is False
+
+
+def test_drawdown_with_real_points_renders_the_chart_and_no_message():
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=0.0),
+        DrawdownPoint(as_of="2026-09-02T00:00:00+00:00", portfolio_value=95000.0, drawdown_pct=5.0),
+    )
+    screen = RiskScreen(drawdown_history=points)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    chart = _drawdown_chart(demo)
+    assert chart.visible is True
+    assert [row[1] for row in chart.value["data"]] == [0.0, 5.0]
+    combined = "\n".join(_html_values(demo))
+    assert "No portfolio history is recorded yet." not in combined
+    assert "Portfolio drawdown is not available" not in combined
+
+
+def test_drawdown_chart_has_only_the_two_real_columns():
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=0.0),
+    )
+    chart = _drawdown_chart(RiskIntelligenceUI(screen=RiskScreen(drawdown_history=points)).build())
+
+    assert set(chart.value["columns"]) == {"as_of", "drawdown_pct"}
+
+
+def _disclaimer_block(demo):
+    return next(
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.HTML) and isinstance(getattr(b, "value", None), str)
+        and "Independently observed" in b.value
+    )
+
+
+def test_drawdown_disclaimer_shown_only_alongside_a_real_populated_chart():
+    """The non-causal disclaimer element is always present in the tree
+    (constant value, like _OBSERVED_CLASSIFICATION_HTML) but must only be
+    VISIBLE alongside a real, populated chart -- never when there is no
+    chart to misread."""
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=0.0),
+    )
+    populated = RiskIntelligenceUI(screen=RiskScreen(drawdown_history=points)).build()
+    empty = RiskIntelligenceUI(screen=RiskScreen(drawdown_history=())).build()
+    unavailable = RiskIntelligenceUI().build()
+
+    assert _disclaimer_block(populated).visible is True
+    assert _disclaimer_block(empty).visible is False
+    assert _disclaimer_block(unavailable).visible is False
+
+
+def test_drawdown_disclaimer_never_claims_a_link_to_the_risk_state():
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=0.0),
+    )
+    combined = "\n".join(
+        _html_values(RiskIntelligenceUI(screen=RiskScreen(drawdown_history=points)).build())
+    )
+
+    assert "does not show, and must not be read as, a causal link" in combined
+    for causal_claim in ("caused by", "triggers", "correlates with", "results in"):
+        assert causal_claim not in combined.lower()
+
+
+def test_drawdown_is_available_even_when_current_risk_state_is_not():
+    """Independence proof at the rendering layer, mirroring the bootstrap-
+    level test of the same name: an unavailable current risk state must
+    not hide a real, available drawdown chart."""
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=0.0),
+    )
+    screen = RiskScreen(current=None, drawdown_history=points)  # current risk state unavailable
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    assert screen.is_available is False
+    assert _drawdown_chart(demo).visible is True
+
+
+def test_drawdown_refresh_updates_the_chart():
+    empty_screen = RiskScreen(drawdown_history=())
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=7.5),
+    )
+    populated_screen = RiskScreen(drawdown_history=points)
+    calls = []
+
+    def provider():
+        calls.append(True)
+        # call 1 is __init__'s own priming read; call 2 is the first
+        # explicit _render() below -- both should still see the empty
+        # screen, so `first` reflects unchanged state before the switch.
+        return empty_screen if len(calls) <= 2 else populated_screen
+
+    ui = RiskIntelligenceUI(screen_provider=provider)
+    first = ui._render()
+    second = ui._render()
+
+    # outputs order: rendered_at(0), snapshot(1), live_announcer(2),
+    # unavailable(3), observed(4), current_label(5), current_state(6),
+    # history_label(7), history_empty(8), history_table(9),
+    # history_detail_label(10), history_detail(11), drawdown_message(12),
+    # drawdown_chart(13), drawdown_disclaimer(14).
+    assert first[13]["visible"] is False
+    assert second[13]["visible"] is True
+    assert second[13]["value"]["drawdown_pct"].tolist() == [7.5]

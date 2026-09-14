@@ -63,4 +63,9 @@ CSS = """
   border-left: 2px solid var(--mb-color-gold);
   margin-bottom: 4px;
 }
+
+/* Sprint 1: Portfolio Value Trend chart. */
+.mb-portfolio-history-chart {
+  margin: 4px 0;
+}
 """

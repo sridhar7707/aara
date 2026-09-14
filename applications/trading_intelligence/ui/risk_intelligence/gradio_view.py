@@ -67,12 +67,14 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import gradio as gr
+import pandas as pd
 
 from applications.trading_intelligence.ui.integration_health_view import (
     CSS as _INTEGRATION_HEALTH_CSS,
     render_unavailable,
 )
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
+    DrawdownPoint,
     RiskHistoryEntry,
     RiskScreen,
     RiskSnapshot,
@@ -141,6 +143,38 @@ _OBSERVED_CLASSIFICATION_HTML = (
     "This risk state is read from the operational risk_state table and reflects "
     "the risk governor's most recently observed classification. It is not a "
     "confirmation that the system enforced this state or blocked any execution."
+    "</div>"
+    "</div>"
+)
+
+_DRAWDOWN_SECTION_LABEL_HTML = '<div class="ri-section-label">Portfolio Drawdown</div>'
+
+# Sprint 1: real portfolio drawdown over time, computed from the same
+# portfolio_snapshots history Portfolio Intelligence's and Morning Brief's
+# own charts read. Independent of whether the current risk-state read
+# above succeeded -- same "Portfolio Value Over Time" section shape
+# ui/portfolio_intelligence/gradio_view.py already uses.
+_DRAWDOWN_UNAVAILABLE_MESSAGE = (
+    "Portfolio drawdown is not available -- the managed portfolio "
+    "snapshot history could not be read in this environment."
+)
+_DRAWDOWN_EMPTY_MESSAGE = "No portfolio history is recorded yet."
+
+# Shown only alongside a real, populated drawdown chart. This data source
+# (the operational risk_state table) carries a single CURRENT observed
+# classification, never a historical series -- so this chart must never be
+# read as proof that any specific drawdown level caused, triggered, or
+# correlates with the risk state shown above. Two independently-observed
+# facts, never merged onto one plot, never implied to be causally linked.
+_DRAWDOWN_DISCLAIMER_HTML = (
+    '<div class="ri-disclosure">'
+    '<div class="ri-disclosure-title aara-disclosure-title">'
+    "Independently observed -- not a causal claim</div>"
+    '<div class="ri-disclosure-body aara-disclosure-body">'
+    "This chart shows real portfolio drawdown over time. The risk state above is a single "
+    "current observation, not a historical series recorded in this data source -- this chart "
+    "does not show, and must not be read as, a causal link between any drawdown level and the "
+    "risk state."
     "</div>"
     "</div>"
 )
@@ -268,6 +302,11 @@ def _table_update(state: Tuple[List[List[str]], bool]) -> Dict[str, Any]:
     return gr.update(value=rows, visible=visible)
 
 
+def _chart_update(state: Tuple[pd.DataFrame, bool]) -> Dict[str, Any]:
+    dataframe, visible = state
+    return gr.update(value=dataframe, visible=visible)
+
+
 class RiskIntelligenceUI:
     def __init__(
         self,
@@ -380,12 +419,37 @@ class RiskIntelligenceUI:
             detail_value, detail_visible = self._history_detail_output_state(initial)
             history_detail_output = gr.HTML(detail_value, visible=detail_visible)
 
+            gr.HTML(_DRAWDOWN_SECTION_LABEL_HTML)
+            drawdown_message_value, drawdown_message_visible = (
+                self._drawdown_message_state(initial)
+            )
+            drawdown_message_output = gr.HTML(
+                drawdown_message_value, visible=drawdown_message_visible,
+            )
+            drawdown_dataframe, drawdown_visible = self._drawdown_chart_state(initial)
+            drawdown_chart = gr.LinePlot(
+                value=drawdown_dataframe,
+                x="as_of",
+                y="drawdown_pct",
+                x_title="Date",
+                y_title="Drawdown (%)",
+                visible=drawdown_visible,
+                elem_classes=["ri-portfolio-drawdown-chart"],
+            )
+            drawdown_disclaimer_value, drawdown_disclaimer_visible = (
+                self._drawdown_disclaimer_state(initial)
+            )
+            drawdown_disclaimer_output = gr.HTML(
+                drawdown_disclaimer_value, visible=drawdown_disclaimer_visible,
+            )
+
             outputs = [
                 rendered_at_output, snapshot_output, live_announcer,
                 unavailable_output, observed_output,
                 current_state_label, current_state_output,
                 history_label, history_empty_output, history_table,
                 history_detail_label, history_detail_output,
+                drawdown_message_output, drawdown_chart, drawdown_disclaimer_output,
             ]
 
             # Same disable -> render -> enable double-submit guard chain as
@@ -447,6 +511,9 @@ class RiskIntelligenceUI:
             _table_update(self._history_table_state(screen)),
             _html_update(self._history_detail_label_state(screen)),
             _html_update(self._history_detail_output_state(screen)),
+            _html_update(self._drawdown_message_state(screen)),
+            _chart_update(self._drawdown_chart_state(screen)),
+            _html_update(self._drawdown_disclaimer_state(screen)),
         )
 
     # --- per-section state (value, visible), shared by build() and _render() ---
@@ -637,3 +704,55 @@ class RiskIntelligenceUI:
     @staticmethod
     def _format_empty_message_html(screen: RiskScreen) -> str:
         return f'<div class="ri-empty-message aara-empty">{html.escape(screen.empty_state_message)}</div>'
+
+    # --- Sprint 1: Portfolio Drawdown ------------------------------------
+    #
+    # Independent of screen.is_available (the current risk-state read) --
+    # same independence Portfolio Intelligence's own Alpaca sections
+    # already have relative to its Capital Summary.
+
+    @staticmethod
+    def _drawdown_message_state(screen: RiskScreen) -> Tuple[str, bool]:
+        if not screen.drawdown_history_is_available:
+            return (
+                render_unavailable(
+                    screen.drawdown_history_health,
+                    fallback_message=_DRAWDOWN_UNAVAILABLE_MESSAGE,
+                ),
+                True,
+            )
+        if screen.drawdown_history_is_empty:
+            return (
+                f'<div class="ri-empty-message aara-empty">'
+                f'{html.escape(_DRAWDOWN_EMPTY_MESSAGE)}</div>',
+                True,
+            )
+        return ("", False)
+
+    @staticmethod
+    def _drawdown_chart_state(screen: RiskScreen) -> Tuple[pd.DataFrame, bool]:
+        if screen.drawdown_history_is_available and not screen.drawdown_history_is_empty:
+            return (
+                RiskIntelligenceUI._format_drawdown_dataframe(screen.drawdown_history),
+                True,
+            )
+        return (RiskIntelligenceUI._format_drawdown_dataframe(()), False)
+
+    @staticmethod
+    def _drawdown_disclaimer_state(screen: RiskScreen) -> Tuple[str, bool]:
+        # Visible only alongside a real, populated chart -- no point
+        # disclaiming a causal reading of a chart that isn't shown.
+        shown = screen.drawdown_history_is_available and not screen.drawdown_history_is_empty
+        return (_DRAWDOWN_DISCLAIMER_HTML, shown)
+
+    @staticmethod
+    def _format_drawdown_dataframe(points: Tuple[DrawdownPoint, ...]) -> pd.DataFrame:
+        """Two columns: each point's own as_of instant and its own
+        drawdown_pct (already computed by bootstrap.py from real
+        portfolio_snapshots rows -- never recomputed or altered here)."""
+        return pd.DataFrame(
+            {
+                "as_of": [pd.Timestamp(point.as_of) for point in points],
+                "drawdown_pct": [point.drawdown_pct for point in points],
+            }
+        )

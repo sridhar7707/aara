@@ -48,6 +48,23 @@ class RiskHistoryEntry:
 
 
 @dataclass(frozen=True)
+class DrawdownPoint:
+    """Sprint 1: one real portfolio_snapshots row plus its own drawdown
+    from the running peak observed up to and including that point --
+    `drawdown_pct` is 0.0 at a new all-time-high point and a positive
+    percentage the further `portfolio_value` sits below the running peak.
+    This IS a derived figure, computed by bootstrap.py from the same real
+    portfolio_snapshots history Portfolio Intelligence's and Morning
+    Brief's own charts read -- unlike those two screens' own charts, whose
+    scope is deliberately limited to raw, non-derived values, Risk
+    Intelligence's whole purpose is risk-relevant derived context, so
+    drawdown is computed here by design, not smuggled in."""
+    as_of: str
+    portfolio_value: float
+    drawdown_pct: float
+
+
+@dataclass(frozen=True)
 class RiskSnapshot:
     state: str
     as_of: str
@@ -80,6 +97,25 @@ class RiskScreen:
     # LegacyRiskStateSource ReadResult -- carries whether the operational
     # risk_state table was HEALTHY (with or without a row) or unavailable.
     state_health: Optional[IntegrationHealth] = None
+    # Sprint 1: real portfolio drawdown over time, alongside (never
+    # overlaid onto, never implying a causal link with) the single current
+    # observed risk-state classification above. None means unavailable; an
+    # empty tuple is a genuine "connected, no rows yet" result -- same
+    # None-vs-empty convention as portfolio_history on the sibling screens.
+    drawdown_history: Optional[Tuple[DrawdownPoint, ...]] = None
+    drawdown_history_health: Optional[IntegrationHealth] = None
+
+    @property
+    def drawdown_history_is_available(self) -> bool:
+        return self.drawdown_history is not None
+
+    @property
+    def drawdown_history_is_empty(self) -> bool:
+        return self.drawdown_history is not None and len(self.drawdown_history) == 0
+
+    @property
+    def drawdown_history_empty_state_message(self) -> str:
+        return "No portfolio history is recorded yet."
 
     @property
     def is_available(self) -> bool:

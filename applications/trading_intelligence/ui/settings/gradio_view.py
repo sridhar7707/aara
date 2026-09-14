@@ -89,7 +89,7 @@ class SettingsUI:
     @staticmethod
     def _format_unavailable_message_html(area: SettingsArea) -> str:
         return (
-            '<div class="st-unavailable-message">'
+            '<div class="st-unavailable-message aara-disclosure-body">'
             f'{html.escape(area.unavailable_message)}'
             "</div>"
         )

@@ -686,6 +686,50 @@ footer { display: none !important; }
   color: var(--color-text-secondary);
 }
 
+/* Sprint 1 -- confidence component breakdown. Same calm, text-first
+   treatment as the qualifier/provenance lines above it: one flat navy
+   fill per bar (never red/green, never the only signal -- each bar
+   carries its own label and numeric value as real text), no gauge, no
+   motion. Sits directly under the confidence qualifier caption, inside
+   the same decision header block. */
+.aara-decision-header .aara-confidence-breakdown {
+  margin-top: var(--space-sm);
+}
+.aara-confidence-breakdown-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
+.aara-confidence-component {
+  display: grid;
+  grid-template-columns: 64px 1fr 44px;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: 2px;
+  font-size: 11px;
+}
+.aara-confidence-component-label {
+  color: var(--color-text-secondary);
+}
+.aara-confidence-component-track {
+  background: var(--color-border-subtle);
+  border-radius: var(--radius-badge);
+  height: 6px;
+  overflow: hidden;
+}
+.aara-confidence-component-fill {
+  background: var(--color-navy-primary);
+  height: 100%;
+}
+.aara-confidence-component-value {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+  text-align: right;
+}
+
 /* ADR-070 Sprint 3 (§9) -- per-record evidence polarity. One small, muted
    supporting label inside an evidence record's card, carrying only that
    record's own phrase ("Supported the BUY" / "Contradicted the BUY" /

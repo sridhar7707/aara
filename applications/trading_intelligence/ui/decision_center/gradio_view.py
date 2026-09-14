@@ -252,7 +252,8 @@ import base64
 import html
 import io
 import pathlib
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import gradio as gr
 from PIL import Image as PILImage
@@ -698,10 +699,10 @@ _NEWS_CACHE_DIFF_NO_CHANGE_MESSAGE = "No change in cached headlines since this d
 _NEWS_CACHE_DIFF_UNAVAILABLE_MESSAGE = "No cached headlines available yet for today."
 _NEWS_CACHE_DIFF_ERROR_MESSAGE = "Evidence since decision is temporarily unavailable."
 _NEWS_CACHE_DIFF_NO_CHANGE_HTML = (
-    f'<div class="aara-empty-message">{html.escape(_NEWS_CACHE_DIFF_NO_CHANGE_MESSAGE)}</div>'
+    f'<div class="aara-empty-message aara-empty">{html.escape(_NEWS_CACHE_DIFF_NO_CHANGE_MESSAGE)}</div>'
 )
 _NEWS_CACHE_DIFF_UNAVAILABLE_HTML = (
-    f'<div class="aara-empty-message">{html.escape(_NEWS_CACHE_DIFF_UNAVAILABLE_MESSAGE)}</div>'
+    f'<div class="aara-empty-message aara-empty">{html.escape(_NEWS_CACHE_DIFF_UNAVAILABLE_MESSAGE)}</div>'
 )
 
 # Sprint 7 "Recommendation Since Decision": purely descriptive recorded-
@@ -712,7 +713,7 @@ _NEWS_CACHE_DIFF_UNAVAILABLE_HTML = (
 _RECOMMENDATION_DIFF_UNAVAILABLE_MESSAGE = "No recommendation history available yet for today."
 _RECOMMENDATION_DIFF_ERROR_MESSAGE = "Recommendation history is temporarily unavailable."
 _RECOMMENDATION_DIFF_UNAVAILABLE_HTML = (
-    f'<div class="aara-empty-message">{html.escape(_RECOMMENDATION_DIFF_UNAVAILABLE_MESSAGE)}</div>'
+    f'<div class="aara-empty-message aara-empty">{html.escape(_RECOMMENDATION_DIFF_UNAVAILABLE_MESSAGE)}</div>'
 )
 
 # Sprint 7 "Earnings Proximity": purely descriptive current-value fact --
@@ -725,7 +726,7 @@ _EARNINGS_NOT_NEAR_LABEL = "Not near earnings"
 _EARNINGS_NOT_TRACKED_MESSAGE = "Not tracked"
 _EARNINGS_ERROR_MESSAGE = "Earnings information is temporarily unavailable."
 _EARNINGS_NOT_TRACKED_HTML = (
-    f'<div class="aara-empty-message">{html.escape(_EARNINGS_NOT_TRACKED_MESSAGE)}</div>'
+    f'<div class="aara-empty-message aara-empty">{html.escape(_EARNINGS_NOT_TRACKED_MESSAGE)}</div>'
 )
 
 # MVP Loading States slice: _empty_detail()'s prior "" for why/evidence/
@@ -735,7 +736,7 @@ _EARNINGS_NOT_TRACKED_HTML = (
 # gap. Reuses the same aara-empty-message class every other "this section
 # has no records" case in this file already uses (e.g. _EVIDENCE_EMPTY_MESSAGE
 # via _record_list_html) -- no new CSS class, no new component.
-_SELECT_DECISION_HTML = f'<div class="aara-empty-message">{html.escape(_SELECT_DECISION_MESSAGE)}</div>'
+_SELECT_DECISION_HTML = f'<div class="aara-empty-message aara-empty">{html.escape(_SELECT_DECISION_MESSAGE)}</div>'
 
 # Static, not decision-dependent -- see module docstring's V4 Decision Brief
 # and Detail Panel Polish pass notes. Rendered verbatim for every decision
@@ -933,6 +934,47 @@ _RISK_REFERENCE_NAV_LINK_JS = f"""
 # at build() time, never wired into detail_outputs/_DetailValues. Placed
 # in the list toolbar, directly associated with the Decisions table's own
 # "Last Updated" column.
+# Sprint 1: page-level freshness, matching the exact "Rendered at" /
+# "Operational data snapshot" pair ui/morning_brief/, ui/portfolio_
+# intelligence/, and ui/risk_intelligence/ already show -- Decision Center
+# had a Refresh button but no freshness indicator at all until now. Reuses
+# screen.py's own format_display_timestamp() (already imported, already
+# used for every per-decision timestamp on this screen) rather than
+# duplicating a timezone constant, since this is an intra-package reuse,
+# not a cross-package one.
+_RENDERED_AT_PREFIX = "Rendered at "
+_SNAPSHOT_PREFIX = "Operational data snapshot: "
+_SNAPSHOT_REFRESH_NOTE = " (fetched once per Space start; not re-downloaded on Refresh)"
+_SNAPSHOT_UNAVAILABLE = _SNAPSHOT_PREFIX + "unavailable"
+
+
+def _format_rendered_at_html(moment: datetime) -> str:
+    """Render-clock stamp for the whole screen -- when this render ran,
+    never a claim about any decision's own data freshness. Reuses the
+    existing muted-caption .aara-disclosure-body treatment rather than
+    introducing a new styled class."""
+    stamp = format_display_timestamp(moment)
+    return f'<div class="aara-disclosure-body">{html.escape(_RENDERED_AT_PREFIX + stamp)}</div>'
+
+
+def _format_snapshot_line_html(moment: Optional[datetime]) -> str:
+    """Freshness of the ADR-055 trades.db operational snapshot for this
+    Space process, shown as a line separate from the render clock so a
+    stale snapshot is never mistaken for realtime data. Fixed across
+    Refresh clicks (Refresh re-reads the same file); only advances on a
+    Space restart. `None` (no snapshot obtained) renders an honest
+    "unavailable", never a fabricated timestamp. Mirrors ui/morning_brief/,
+    ui/portfolio_intelligence/, and ui/risk_intelligence/ exactly."""
+    if moment is None:
+        return f'<div class="aara-disclosure-body">{html.escape(_SNAPSHOT_UNAVAILABLE)}</div>'
+    stamp = format_display_timestamp(moment)
+    return (
+        '<div class="aara-disclosure-body">'
+        f"{html.escape(_SNAPSHOT_PREFIX + stamp + _SNAPSHOT_REFRESH_NOTE)}"
+        "</div>"
+    )
+
+
 _TIMESTAMP_DISCLOSURE_TITLE = "About Last Updated"
 _TIMESTAMP_DISCLOSURE_BODY = (
     '"Last Updated" may represent the latest governance workflow event '
@@ -1086,6 +1128,19 @@ _MODEL_ENSEMBLE_FIELD_LABELS = (
     ("regime", "Regime"),
 )
 
+# Sprint 1: the four component scores that feed the ensemble confidence
+# calculation (the same keys _MODEL_ENSEMBLE_FIELD_LABELS already renders
+# as text rows in the Evidence section's disclosure) -- "ensemble" itself,
+# "threshold", and "regime" are excluded here since they are not
+# components of the confidence figure (ensemble is the already-combined
+# total; the other two are gating metadata, not model scores).
+_MODEL_ENSEMBLE_COMPONENT_LABELS = (
+    ("xgb", "XGB"),
+    ("lstm", "LSTM"),
+    ("sentiment", "Sentiment"),
+    ("macro", "Macro"),
+)
+
 # Fixed render order + human labels for RISK_PARAMETERS' data keys. Same
 # presence-only convention as _MODEL_ENSEMBLE_FIELD_LABELS -- a missing key
 # is skipped, never rendered as "None".
@@ -1097,9 +1152,32 @@ _RISK_PARAMETERS_FIELD_LABELS = (
 
 
 class DecisionCenterUI:
-    def __init__(self, controller: DecisionCenterController, decision_ids: List[str]):
+    def __init__(
+        self,
+        controller: DecisionCenterController,
+        decision_ids: List[str],
+        *,
+        snapshot_fetched_at_provider: Optional[
+            Callable[[], Optional[datetime]]
+        ] = None,
+    ):
         self._controller = controller
         self._decision_ids = list(decision_ids)
+        # Sprint 1: mirrors ui/morning_brief/, ui/portfolio_intelligence/,
+        # and ui/risk_intelligence/'s own constructor parameter exactly --
+        # bootstrap.py's `_snapshot_fetched_at` bound to the runtime
+        # snapshot path. Re-called on every render but reads the same
+        # file, so its value is stable across Refresh; that stability is
+        # the point. Default: a provider returning `None` (pure shell /
+        # tests / the Sentinel-path build_application(), which has no
+        # trades.db snapshot at all).
+        self._snapshot_fetched_at_provider = snapshot_fetched_at_provider or (
+            lambda: None
+        )
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now(timezone.utc)
 
     def build(self) -> gr.Blocks:
         with gr.Blocks(
@@ -1114,6 +1192,10 @@ class DecisionCenterUI:
             gr.HTML(_SHELL_NAV_HTML, elem_classes=["aara-shell-nav"])
 
             gr.HTML(_PAGE_HEADER_HTML, elem_classes=["aara-page-header"])
+            rendered_at_output = gr.HTML(_format_rendered_at_html(self._now()))
+            snapshot_output = gr.HTML(
+                _format_snapshot_line_html(self._snapshot_fetched_at_provider())
+            )
             gr.HTML(_SCOPE_NOTE_HTML, elem_classes=["aara-scope-note"])
             # P1 accessibility slice: visually hidden, screen-reader-only
             # live region -- see _LIVE_REGION_SETUP_JS above for how
@@ -1252,7 +1334,10 @@ class DecisionCenterUI:
                 status_output, why_output, evidence_output, governance_output, approval_output,
                 audit_output, news_cache_diff_output,
             ]
-            screen_outputs = [list_output, list_empty_output] + detail_outputs
+            screen_outputs = (
+                [list_output, list_empty_output] + detail_outputs
+                + [rendered_at_output, snapshot_output]
+            )
             # Session-scoped (per Gradio Blocks session, not a self attribute --
             # see this module's own docstring on why DecisionCenterUI holds no
             # mutable state on self) so Refresh can re-select the decision the
@@ -1313,7 +1398,7 @@ class DecisionCenterUI:
 
     def _render_screen(
         self, selected_id: Optional[str] = None,
-    ) -> Tuple[List[List[str]], str, str, str, str, str, str, str, str, str, str, str]:
+    ) -> Tuple[List[List[str]], str, str, str, str, str, str, str, str, str, str, str, str, str]:
         """selected_id is None only when nothing has been explicitly picked
         yet (initial demo.load(), or Refresh before any row click) --
         controller.load_screen()'s own default for that case is
@@ -1331,7 +1416,19 @@ class DecisionCenterUI:
         list_rows = self._format_list_rows(screen.list_area)
         list_empty_message = self._format_list_empty_message_html(screen.list_area)
         detail_values = self._format_detail(screen.detail_area)
-        return (list_rows, list_empty_message) + detail_values
+        rendered_at_html = _format_rendered_at_html(self._now())
+        snapshot_html = _format_snapshot_line_html(self._snapshot_fetched_at_provider())
+        # Sprint 1 freshness outputs are APPENDED at the end, never
+        # prepended/inserted -- every existing caller across this test
+        # suite indexes list_rows/list_empty_html at fixed positions 0/1
+        # (and several unpack detail_values via `*rest`), matching the same
+        # "append, never reorder" discipline _DetailValues itself already
+        # follows (see this file's own "must not grow _DetailValues... or
+        # touch build()'s component wiring" comments elsewhere).
+        return (
+            (list_rows, list_empty_message) + detail_values
+            + (rendered_at_html, snapshot_html)
+        )
 
     def _newest_decision_id(self) -> Optional[str]:
         """Same ordering key as _format_list_rows (updated_at descending) --
@@ -1523,7 +1620,7 @@ class DecisionCenterUI:
         never appears alongside real rows."""
         if list_area.empty_state_message is None:
             return ""
-        return f'<div class="aara-empty-message">{html.escape(list_area.empty_state_message)}</div>'
+        return f'<div class="aara-empty-message aara-empty">{html.escape(list_area.empty_state_message)}</div>'
 
     @staticmethod
     def _list_action_badge_html(action: str) -> str:
@@ -1595,6 +1692,7 @@ class DecisionCenterUI:
         return (
             DecisionCenterUI._decision_header_html(
                 decision, detail_area.evidence_reference, detail_area.risk_reference,
+                detail_area.evidence,
             ),
             DecisionCenterUI._lifecycle_track_html(
                 decision.status, detail_area.decision_created_display,
@@ -2162,6 +2260,7 @@ class DecisionCenterUI:
         decision: DecisionView,
         evidence_reference: Optional[str] = None,
         risk_reference: Optional[str] = None,
+        evidence: Tuple[EvidenceEntry, ...] = (),
     ) -> str:
         badge = DecisionCenterUI._action_badge_html(decision.action)
         references_html = DecisionCenterUI._raw_reference_fields_html(
@@ -2171,8 +2270,63 @@ class DecisionCenterUI:
             '<div class="aara-decision-header">'
             f'<div class="identity-line">{html.escape(decision.symbol)} &middot; {badge}</div>'
             f"{DecisionCenterUI._recommendation_context_html(decision)}"
+            f"{DecisionCenterUI._confidence_breakdown_html(evidence)}"
             f"{references_html}"
             "</div>"
+        )
+
+    @staticmethod
+    def _model_ensemble_entry(
+        evidence: Tuple[EvidenceEntry, ...],
+    ) -> Optional[EvidenceEntry]:
+        return next((e for e in evidence if e.evidence_type == "MODEL_ENSEMBLE"), None)
+
+    @staticmethod
+    def _confidence_breakdown_html(evidence: Tuple[EvidenceEntry, ...]) -> str:
+        """Sprint 1: a visual breakdown of the XGB/LSTM/sentiment/macro
+        component scores already attached as MODEL_ENSEMBLE evidence --
+        the same numbers the Evidence section's own disclosure already
+        renders as text rows (_trades_evidence_rows), shown here so a
+        reader does not have to expand that card just to see what the
+        headline confidence percentage is actually made of.
+
+        Reads EvidenceEntry.data verbatim -- never recomputes, re-weights,
+        or otherwise touches the ensemble calculation itself (that lives
+        entirely in bot/strategy/ensemble.py, untouched). Not a
+        calibration claim: this shows the recorded inputs to one already-
+        computed score, never an accuracy/outcome figure, and never
+        aggregates evidence polarity (ADR-070 §9 is unaffected -- polarity
+        is a separate concept this function does not touch).
+
+        Empty string when no MODEL_ENSEMBLE evidence is attached, or none
+        of its four component keys are present -- never a fabricated bar."""
+        entry = DecisionCenterUI._model_ensemble_entry(evidence)
+        if entry is None:
+            return ""
+        data = entry.data or {}
+        bars = []
+        for key, label in _MODEL_ENSEMBLE_COMPONENT_LABELS:
+            value = data.get(key)
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                continue
+            pct = max(0.0, min(1.0, float(value))) * 100.0
+            bars.append(
+                '<div class="aara-confidence-component">'
+                f'<span class="aara-confidence-component-label">{html.escape(label)}</span>'
+                '<div class="aara-confidence-component-track">'
+                f'<div class="aara-confidence-component-fill" style="width:{pct:.1f}%"></div>'
+                "</div>"
+                '<span class="aara-confidence-component-value">'
+                f'{html.escape(DecisionCenterUI._format_evidence_value(value))}</span>'
+                "</div>"
+            )
+        if not bars:
+            return ""
+        return (
+            '<div class="aara-confidence-breakdown">'
+            '<div class="aara-confidence-breakdown-label">Confidence components</div>'
+            + "".join(bars)
+            + "</div>"
         )
 
     @staticmethod
@@ -2368,7 +2522,7 @@ class DecisionCenterUI:
         unescaped -- the same treatment _record_card_html already gives its
         own state_variant parameter."""
         if not cards:
-            return f'<div class="aara-empty-message">{html.escape(empty_message)}</div>'
+            return f'<div class="aara-empty-message aara-empty">{html.escape(empty_message)}</div>'
         return (
             f'<div class="aara-record-list aara-record-list--{section_variant}">'
             + "".join(cards) + "</div>"
