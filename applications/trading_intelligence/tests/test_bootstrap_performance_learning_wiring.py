@@ -478,6 +478,142 @@ def test_win_rate_summary_does_not_disturb_existing_summary_or_rows():
         os.remove(path)
 
 
+# --- Sprint 1 Phase 3: Loss/failure-analysis callout wiring -------------
+
+
+def test_loss_review_summary_is_none_when_outcome_history_unavailable():
+    screen = _build_performance_learning_screen("no_such_loss_review_db_xyz.db")
+    assert screen.loss_review_summary is None
+
+
+def test_loss_review_summary_states_no_losses_for_empty_db():
+    path = _empty_db()
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.loss_review_summary == (
+            "No closed BUY decisions have realized a loss in the current "
+            "trades snapshot."
+        )
+    finally:
+        os.remove(path)
+
+
+def test_loss_review_summary_states_no_losses_when_all_closed_are_wins():
+    rows = []
+    rows += _closed_pair(1, 2, score=0.62, realized_pnl=90.0, symbol="AAA")  # WIN
+    rows += _closed_pair(3, 4, score=0.63, realized_pnl=15.0, symbol="BBB")  # WIN
+    path = _make_db(rows)
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.loss_review_summary == (
+            "No closed BUY decisions have realized a loss in the current "
+            "trades snapshot."
+        )
+    finally:
+        os.remove(path)
+
+
+def test_loss_review_summary_reports_count_and_pct_and_day_range_for_losses():
+    rows = [
+        # LOSS: -0.23%, 47 days
+        _row(id=1, symbol="AMZN", action="BUY", shares=23.68,
+             timestamp="2026-07-16T16:50:00+00:00", price=256.09),
+        _row(id=2, symbol="AMZN", action="SELL_TIME_EXIT", shares=23.66,
+             timestamp="2026-09-02T14:33:00+00:00", price=254.92, order_id="o-2",
+             realized_pnl=-27.77, pnl_pct=-0.00234, holding_days=47),
+        # LOSS: -9.8%, 3 days
+        _row(id=3, symbol="MS", action="BUY", shares=10.0,
+             timestamp="2026-07-01T00:00:00+00:00", price=100.0),
+        _row(id=4, symbol="MS", action="SELL_STOP", shares=10.0,
+             timestamp="2026-07-04T00:00:00+00:00", price=90.2, order_id="o-4",
+             realized_pnl=-98.0, pnl_pct=-0.098, holding_days=3),
+        # WIN -- must not be counted as a loss
+        _row(id=5, symbol="BBB", action="BUY", shares=10.0,
+             timestamp="2026-07-01T00:00:00+00:00", price=10.0),
+        _row(id=6, symbol="BBB", action="SELL_TIME_EXIT", shares=10.0,
+             timestamp="2026-07-05T00:00:00+00:00", price=11.0, order_id="o-6",
+             realized_pnl=10.0, pnl_pct=0.10, holding_days=4),
+    ]
+    path = _make_db(rows)
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.loss_review_summary == (
+            "2 of 3 closed BUY decisions realized a loss. "
+            "Realized loss range: -9.80% to -0.23%. "
+            "Holding period range: 3 to 47 days."
+        )
+    finally:
+        os.remove(path)
+
+
+def test_loss_review_summary_singular_holding_period_when_all_losses_match():
+    rows = []
+    rows += _closed_pair(1, 2, score=0.6, realized_pnl=-10.0, symbol="AAA")
+    path = _make_db(rows)
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert "Holding period: 19 days." in screen.loss_review_summary
+    finally:
+        os.remove(path)
+
+
+def test_loss_review_summary_excludes_open_partial_ambiguous_and_flat():
+    """Same exclusion rule as win_rate_summary: only CLOSED + LOSS counts
+    toward the loss review -- OPEN, PARTIAL, AMBIGUOUS, and FLAT must never
+    inflate the loss count or total."""
+    rows = []
+    # CLOSED LOSS -- the only decision that should count
+    rows += _closed_pair(1, 2, score=0.6, realized_pnl=-10.0, symbol="LOSER")
+    # FLAT -- zero P&L, not a loss
+    rows += _closed_pair(3, 4, score=0.6, realized_pnl=0.0, symbol="FLATTY")
+    # OPEN -- no matching sell
+    rows += [_row(id=5, symbol="OPENER", action="BUY", shares=10.0,
+                  timestamp="2026-08-01T00:00:00+00:00", ensemble_score=0.6)]
+    # PARTIAL -- partial-quantity exit
+    rows += [
+        _row(id=6, symbol="PARTIALS", action="BUY", shares=100.0,
+             timestamp="2026-08-01T00:00:00+00:00", ensemble_score=0.6),
+        _row(id=7, symbol="PARTIALS", action="SELL_TIME_EXIT", shares=40.0,
+             timestamp="2026-08-05T00:00:00+00:00", order_id="o-7",
+             realized_pnl=-5.0, pnl_pct=-0.01, holding_days=4),
+    ]
+    path = _make_db(rows)
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.loss_review_summary.startswith("1 of 1 closed BUY decisions")
+    finally:
+        os.remove(path)
+
+
+def test_loss_review_summary_does_not_disturb_existing_summary_fields():
+    """Regression guard: adding loss_review_summary must not change the
+    pre-existing summary/win_rate_summary/outcome_rows fields -- this is an
+    addition, not a redesign."""
+    rows = [
+        _row(id=1, symbol="AMZN", action="BUY", shares=23.68,
+             timestamp="2026-07-16T16:50:00+00:00", price=256.09),
+        _row(id=2, symbol="AMZN", action="SELL_TIME_EXIT", shares=23.66,
+             timestamp="2026-09-02T14:33:00+00:00", price=254.92, order_id="o-2",
+             realized_pnl=-27.77, pnl_pct=-0.00234, holding_days=47),
+    ]
+    path = _make_db(rows)
+    try:
+        screen = _build_performance_learning_screen(path)
+        assert screen.summary == (
+            "1 BUY decisions — 1 CLOSED · 0 PARTIAL · 0 OPEN · 0 AMBIGUOUS."
+        )
+        assert screen.win_rate_summary == (
+            "Not enough completed trades yet for a win rate (1 of 30 needed)."
+        )
+        assert screen.loss_review_summary == (
+            "1 of 1 closed BUY decisions realized a loss. "
+            "Realized loss range: -0.23% to -0.23%. "
+            "Holding period: 47 days."
+        )
+    finally:
+        os.remove(path)
+
+
 def test_regime_wiring_does_not_disturb_calibration_wiring():
     path = _make_db(_closed_pair(1, 2, score=0.62, realized_pnl=25.0, regime="TRENDING"))
     try:
@@ -520,6 +656,15 @@ def test_production_snapshot_maps_to_expected_outcome_history():
     directions = Counter(r.direction for r in rows if r.status == "CLOSED")
     assert directions["WIN"] == 7
     assert directions["LOSS"] == 8
+
+    # Sprint 1 Phase 3: the real production sample is exactly n=15 closed
+    # decisions -- well below CALIBRATION_MIN_OUTCOMES (30) -- so the loss
+    # review callout must never claim a pattern or statistical significance
+    # at this sample size; it only reports what was recorded.
+    assert screen.loss_review_summary is not None
+    assert screen.loss_review_summary.startswith(
+        "8 of 15 closed BUY decisions realized a loss."
+    )
 
     assert screen.summary == (
         "19 BUY decisions — 15 CLOSED · 1 PARTIAL · 3 OPEN · 0 AMBIGUOUS. "

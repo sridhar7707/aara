@@ -93,6 +93,19 @@ _OUTCOME_HISTORY_EMPTY_MESSAGE = (
     "No BUY decisions are present in the current trades snapshot."
 )
 
+# Sprint 1 Phase 3: a concise, purely descriptive callout listing what the
+# SAME Wave 2A lineage (already fetched for Outcome History / win_rate_
+# summary above) recorded for closed BUY decisions that realized a loss.
+# Never a cause, pattern, prediction, or statistical-significance claim --
+# see bootstrap.py's _loss_review_summary() for exactly what is and is not
+# computed.
+LOSS_REVIEW_DISCLAIMER = (
+    "A factual description of closed BUY decisions that realized a loss, "
+    "from the same outcome data as Outcome History above. This describes "
+    "what was recorded -- it does not explain why any decision lost, "
+    "identify a pattern, or claim statistical significance."
+)
+
 
 @dataclass(frozen=True)
 class PerformanceLearningSection:
@@ -147,6 +160,15 @@ class PerformanceLearningScreen:
     # CALIBRATION_MIN_OUTCOMES floor. `None` only when the outcome read
     # itself is unavailable (mirrors `summary`).
     win_rate_summary: Optional[str] = None
+    # Sprint 1 Phase 3: purely descriptive loss/failure-analysis callout,
+    # populated by the composition root from the SAME OutcomeLineage
+    # win_rate_summary above uses (no extra read). A ready-to-render string
+    # stating what was recorded -- count and real min/max range -- for
+    # closed BUY decisions that realized a loss; never a cause, pattern, or
+    # predictive claim. `None` only when the outcome read itself is
+    # unavailable (mirrors `summary`/`win_rate_summary`); a HEALTHY read
+    # with zero losses still yields a real, honest "no losses" string.
+    loss_review_summary: Optional[str] = None
     # Wave 3C (ADR-064): the composition root reads the published Trust
     # Ledger snapshot through the Wave 3A source + Wave 3B query service and
     # attaches the result here. `ledger_health` carries the

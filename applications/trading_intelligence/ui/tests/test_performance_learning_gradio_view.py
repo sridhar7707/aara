@@ -17,9 +17,11 @@ from applications.trading_intelligence.ui.performance_learning.screen import (
     ATTRIBUTION_BREAKDOWN_TITLE,
     CALIBRATION_CONTENT_HEADING,
     CALIBRATION_MIN_OUTCOMES,
+    LOSS_REVIEW_DISCLAIMER,
     MODEL_CONFIDENCE_CALIBRATION_TITLE,
     OUTCOME_HISTORY_TITLE,
     REGIME_OUTCOMES_TITLE,
+    OutcomeHistoryRow,
     PerformanceLearningScreen,
     PerformanceLearningSection,
 )
@@ -142,6 +144,118 @@ def test_no_illustrative_data_disclosure_is_rendered():
 
     combined = "\n".join(_html_values(demo))
     assert "Illustrative Data" not in combined
+
+
+# --- Sprint 1 Phase 3: Loss/failure-analysis callout render ---------------
+
+
+_OUTCOME_ROW = OutcomeHistoryRow(
+    decision="AMZN BUY · trade-38", entry_date="2026-07-16 11:50 CDT", status="CLOSED",
+    exit_date="2026-09-02 09:33 CDT", holding_days="47", realized_pnl_usd="-27.77",
+    realized_pnl_pct="-0.23%", exit_basis="Bot fill",
+    pairing_method="WINDOW_SINGLE_BOT_EXIT", pairing_confidence="HIGH", direction="LOSS",
+)
+
+
+def _populated_outcome_screen(*, loss_review_summary):
+    return replace(
+        build_mock_screen(),
+        outcome_health=IntegrationHealth.healthy(_CAL_PROVIDER),
+        outcome_rows=(_OUTCOME_ROW,),
+        summary="1 BUY decisions — 1 CLOSED · 0 PARTIAL · 0 OPEN · 0 AMBIGUOUS.",
+        win_rate_summary="Not enough completed trades yet for a win rate (1 of 30 needed).",
+        loss_review_summary=loss_review_summary,
+    )
+
+
+def test_loss_review_hidden_by_default_when_outcome_history_unavailable():
+    demo = PerformanceLearningUI().build()
+
+    visible = _visible_html(demo)
+    assert LOSS_REVIEW_DISCLAIMER not in visible
+
+
+def test_loss_review_callout_renders_the_summary_and_disclaimer_when_populated():
+    screen = _populated_outcome_screen(
+        loss_review_summary=(
+            "1 of 1 closed BUY decisions realized a loss. "
+            "Realized loss range: -0.23% to -0.23%. Holding period: 47 days."
+        ),
+    )
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    visible = _visible_html(demo)
+    assert "1 of 1 closed BUY decisions realized a loss." in visible
+    assert "Realized loss range: -0.23% to -0.23%." in visible
+    assert LOSS_REVIEW_DISCLAIMER in visible
+
+
+def test_loss_review_callout_renders_the_honest_no_losses_message():
+    screen = _populated_outcome_screen(
+        loss_review_summary=(
+            "No closed BUY decisions have realized a loss in the current "
+            "trades snapshot."
+        ),
+    )
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    visible = _visible_html(demo)
+    assert "No closed BUY decisions have realized a loss" in visible
+    # the disclaimer still accompanies the honest "no losses" fact
+    assert LOSS_REVIEW_DISCLAIMER in visible
+
+
+def test_loss_review_never_claims_a_cause_pattern_or_significance():
+    """Task guardrail: the callout's own SUMMARY sentence must be
+    descriptive, never predictive -- it must never claim a cause, an
+    identified pattern, or statistical significance. (The accompanying
+    LOSS_REVIEW_DISCLAIMER legitimately names and explicitly negates these
+    same concepts -- e.g. "...does not explain why any decision lost,
+    identify a pattern, or claim statistical significance" -- so this check
+    is scoped to the summary text only, not the full rendered block.)"""
+    summary = (
+        "2 of 3 closed BUY decisions realized a loss. "
+        "Realized loss range: -9.80% to -0.23%. "
+        "Holding period range: 3 to 47 days."
+    )
+    screen = _populated_outcome_screen(loss_review_summary=summary)
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    visible = _visible_html(demo)
+    assert summary in visible
+    lowered = summary.lower()
+    for forbidden in (
+        "because", "caused by", "due to", "predict", "significant",
+        "pattern", "likely to", "tends to", "correlat",
+    ):
+        assert forbidden not in lowered
+
+
+def test_loss_review_html_escapes_interpolated_summary():
+    html_out = PerformanceLearningUI._format_loss_review_html(
+        _populated_outcome_screen(loss_review_summary="<script>alert(1)</script>")
+    )
+    assert "<script>" not in html_out
+    assert "&lt;script&gt;" in html_out
+
+
+def test_loss_review_is_empty_string_when_summary_is_none():
+    screen = _populated_outcome_screen(loss_review_summary=None)
+    assert PerformanceLearningUI._format_loss_review_html(screen) == ""
+
+
+def test_loss_review_does_not_disturb_win_rate_or_summary_rendering():
+    screen = _populated_outcome_screen(
+        loss_review_summary=(
+            "1 of 1 closed BUY decisions realized a loss. "
+            "Realized loss range: -0.23% to -0.23%. Holding period: 47 days."
+        ),
+    )
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    visible = _visible_html(demo)
+    assert screen.summary in visible
+    assert screen.win_rate_summary in visible
 
 
 # --- Sprint 4 #1: Model Confidence Calibration render ---------------------

@@ -1428,6 +1428,60 @@ def _outcome_history_win_rate_summary(lineage: OutcomeLineage) -> str:
     return f"{wins} wins / {total} closed ({wins / total:.0%})."
 
 
+_LOSS_REVIEW_NO_LOSSES_MESSAGE = (
+    "No closed BUY decisions have realized a loss in the current trades "
+    "snapshot."
+)
+
+
+def _loss_review_summary(lineage: OutcomeLineage) -> str:
+    """Sprint 1 Phase 3: a concise, purely descriptive loss/failure-analysis
+    callout -- computed from the SAME already-fetched OutcomeLineage
+    _outcome_history_win_rate_summary above already uses (no extra read, no
+    new source). Counted exactly like that function's own WIN/LOSS rule:
+    only CLOSED decisions whose outcome_direction is WIN or LOSS qualify
+    (OPEN/PARTIAL/AMBIGUOUS status and FLAT/unset direction are excluded
+    from both the loss count and the "of N closed" denominator, matching
+    win_rate_summary's own "N wins / M closed" shape exactly). Reports only
+    what was recorded: the count and the real min/max range of
+    realized_pnl_pct and holding_days across the losses -- never an
+    average, a cause, a pattern, or a statistical-significance claim,
+    matching CALIBRATION_DISCLAIMER's / REGIME_OUTCOMES_DISCLAIMER's own
+    "historical tally only" framing. When a qualifying loss is missing its
+    own realized_pnl_pct or holding_days (should not happen for a CLOSED
+    outcome, but Wave 2A does not guarantee it), that gap is stated
+    explicitly rather than silently dropped or fabricated."""
+    wins = [
+        o for o in lineage.decisions
+        if o.status is OutcomeStatus.CLOSED and o.outcome_direction is OutcomeDirection.WIN
+    ]
+    losses = [
+        o for o in lineage.decisions
+        if o.status is OutcomeStatus.CLOSED and o.outcome_direction is OutcomeDirection.LOSS
+    ]
+    if not losses:
+        return _LOSS_REVIEW_NO_LOSSES_MESSAGE
+    total = len(wins) + len(losses)
+    parts = [f"{len(losses)} of {total} closed BUY decisions realized a loss."]
+    pct_values = [o.realized_pnl_pct for o in losses if o.realized_pnl_pct is not None]
+    if pct_values:
+        parts.append(
+            f"Realized loss range: {min(pct_values):.2%} to {max(pct_values):.2%}."
+        )
+    else:
+        parts.append("Realized loss percentage is not recorded for these decisions.")
+    day_values = [o.holding_days for o in losses if o.holding_days is not None]
+    if day_values:
+        low, high = min(day_values), max(day_values)
+        if low == high:
+            parts.append(f"Holding period: {low} day{'s' if low != 1 else ''}.")
+        else:
+            parts.append(f"Holding period range: {low} to {high} days.")
+    else:
+        parts.append("Holding period is not recorded for these decisions.")
+    return " ".join(parts)
+
+
 def _build_performance_learning_screen(
     db_path: Optional[str] = None, ledger_db_path: Optional[str] = None
 ) -> PerformanceLearningScreen:
@@ -1483,6 +1537,7 @@ def _build_performance_learning_screen(
             outcome_health=result.health,
             summary=_outcome_history_summary(lineage),
             win_rate_summary=_outcome_history_win_rate_summary(lineage),
+            loss_review_summary=_loss_review_summary(lineage),
             calibration_health=result.health,
             calibration_bands=calibration_bands,
             regime_outcome_health=result.health,

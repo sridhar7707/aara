@@ -74,6 +74,17 @@ CSS = """
   color: var(--pl-color-text-secondary);
 }
 
+/* Sprint 1 Phase 3: the loss/failure-analysis callout. .pl-summary above
+   carries the factual sentence; this rule is only the disclaimer line
+   beneath it -- same italic/muted treatment as .pl-cal-disclaimer /
+   .pl-regime-disclaimer, no new literals. */
+.pl-loss-review-disclaimer {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--pl-color-text-secondary);
+  margin: 0 0 10px 0;
+}
+
 /* Sprint 4 #1: Model Confidence Calibration -- the "Historical outcome by
    ensemble score" tally. Same monospace/tabular-nums table conventions as
    .pl-outcome-table; colours from the shared --pl-* aliases, no new

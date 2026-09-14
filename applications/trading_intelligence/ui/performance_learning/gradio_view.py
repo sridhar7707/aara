@@ -66,6 +66,7 @@ from applications.trading_intelligence.ui.performance_learning.screen import (
     CALIBRATION_CONTENT_HEADING,
     CALIBRATION_DISCLAIMER,
     DECISION_LEDGER_INSPECTION_TITLE,
+    LOSS_REVIEW_DISCLAIMER,
     REGIME_OUTCOMES_DISCLAIMER,
     REGIME_OUTCOMES_TITLE,
     OutcomeHistoryRow,
@@ -404,6 +405,11 @@ class PerformanceLearningUI:
                 visible=populated and screen.win_rate_summary is not None,
             )
             gr.HTML(
+                self._format_loss_review_html(screen),
+                visible=populated and screen.loss_review_summary is not None,
+                elem_classes=["pl-loss-review"],
+            )
+            gr.HTML(
                 self._format_outcome_unavailable_html(screen),
                 visible=not screen.outcome_history_available,
             )
@@ -551,6 +557,25 @@ class PerformanceLearningUI:
         if not summary:
             return ""
         return f'<div class="pl-summary">{html.escape(summary)}</div>'
+
+    # --- Sprint 1 Phase 3: Loss/failure-analysis callout ------------------
+
+    @staticmethod
+    def _format_loss_review_html(screen: PerformanceLearningScreen) -> str:
+        """Concise, purely descriptive callout -- see bootstrap.py's
+        _loss_review_summary() for exactly what is and is not computed.
+        Empty string when there is nothing to show yet (outcome read
+        unavailable, or not populated) -- the caller's `visible=` already
+        gates on the same condition; this stays defensive against a direct
+        call with an unpopulated screen."""
+        summary = screen.loss_review_summary
+        if not summary:
+            return ""
+        return (
+            f'<div class="pl-summary">{html.escape(summary)}</div>'
+            f'<div class="pl-loss-review-disclaimer">'
+            f'{html.escape(LOSS_REVIEW_DISCLAIMER)}</div>'
+        )
 
     # --- Sprint 4 #1: Model Confidence Calibration -----------------------
 
