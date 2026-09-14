@@ -258,6 +258,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import gradio as gr
 from PIL import Image as PILImage
 
+from applications.trading_intelligence.contracts.decision_outcome_contract import (
+    DecisionOutcome,
+    OutcomeStatus,
+)
 from applications.trading_intelligence.projections.approval_entry import ApprovalStatus
 from applications.trading_intelligence.projections.decision_view import DecisionState, DecisionView
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
@@ -728,6 +732,22 @@ _EARNINGS_ERROR_MESSAGE = "Earnings information is temporarily unavailable."
 _EARNINGS_NOT_TRACKED_HTML = (
     f'<div class="aara-empty-message aara-empty">{html.escape(_EARNINGS_NOT_TRACKED_MESSAGE)}</div>'
 )
+
+# Decision -> Outcome linkage: a small, always-present section inside the
+# decision header (see _decision_header_html) showing the eventual,
+# purely-observed result of this BUY decision -- reusing the frozen Wave 2A
+# DecisionOutcome the SAME DecisionOutcomeQueryService already produces for
+# Performance & Learning's Outcome History. Every value below is read
+# verbatim from DecisionOutcome (or given plain display formatting only --
+# a percentage sign, a str() on an int); nothing is recomputed, re-ranked,
+# or re-scored, and no accuracy/quality/causal judgment of the decision
+# itself is ever formed. An outcome whose status is not CLOSED (OPEN,
+# PARTIAL, AMBIGUOUS) -- or no outcome at all -- renders the same honest
+# "not yet resolved" state; the real recorded status is still named when
+# known, never hidden, but never interpreted either.
+_OUTCOME_SECTION_LABEL = "Decision Outcome"
+_OUTCOME_ERROR_MESSAGE = "Outcome information is temporarily unavailable."
+_OUTCOME_NOT_YET_RESOLVED_MESSAGE = "Not yet resolved."
 
 # MVP Loading States slice: _empty_detail()'s prior "" for why/evidence/
 # governance/approval/audit rendered as literal blank space under each
@@ -1692,7 +1712,7 @@ class DecisionCenterUI:
         return (
             DecisionCenterUI._decision_header_html(
                 decision, detail_area.evidence_reference, detail_area.risk_reference,
-                detail_area.evidence,
+                detail_area.evidence, detail_area.outcome, detail_area.outcome_status,
             ),
             DecisionCenterUI._lifecycle_track_html(
                 decision.status, detail_area.decision_created_display,
@@ -2261,6 +2281,8 @@ class DecisionCenterUI:
         evidence_reference: Optional[str] = None,
         risk_reference: Optional[str] = None,
         evidence: Tuple[EvidenceEntry, ...] = (),
+        outcome: Optional[DecisionOutcome] = None,
+        outcome_status: ReadStatus = ReadStatus.OK,
     ) -> str:
         badge = DecisionCenterUI._action_badge_html(decision.action)
         references_html = DecisionCenterUI._raw_reference_fields_html(
@@ -2271,9 +2293,75 @@ class DecisionCenterUI:
             f'<div class="identity-line">{html.escape(decision.symbol)} &middot; {badge}</div>'
             f"{DecisionCenterUI._recommendation_context_html(decision)}"
             f"{DecisionCenterUI._confidence_breakdown_html(evidence)}"
+            f"{DecisionCenterUI._format_decision_outcome_html(outcome, outcome_status)}"
             f"{references_html}"
             "</div>"
         )
+
+    @staticmethod
+    def _format_decision_outcome_html(
+        outcome: Optional[DecisionOutcome], outcome_status: ReadStatus,
+    ) -> str:
+        """Decision -> Outcome linkage: always renders the "Decision
+        Outcome" label plus exactly one of three honest bodies -- see the
+        constants above this class for the full rationale. Never returns
+        an empty string (unlike _confidence_breakdown_html): the section
+        is always present, so a reader never wonders whether it was simply
+        omitted."""
+        if outcome_status is ReadStatus.ERROR:
+            body = DecisionCenterUI._error_message_html(_OUTCOME_ERROR_MESSAGE)
+        elif outcome is None or outcome.status is not OutcomeStatus.CLOSED:
+            body = DecisionCenterUI._outcome_not_yet_resolved_html(outcome)
+        else:
+            body = DecisionCenterUI._outcome_closed_fields_html(outcome)
+        return (
+            '<div class="aara-decision-outcome">'
+            f'<div class="aara-decision-outcome-label">{html.escape(_OUTCOME_SECTION_LABEL)}</div>'
+            f"{body}"
+            "</div>"
+        )
+
+    @staticmethod
+    def _outcome_not_yet_resolved_html(outcome: Optional[DecisionOutcome]) -> str:
+        """No fabricated outcome, no inference from current price, no
+        prediction -- states plainly that the decision has no realized
+        result yet. When a real (non-CLOSED) DecisionOutcome exists, its
+        actual recorded status (OPEN/PARTIAL/AMBIGUOUS) is named verbatim
+        alongside the honest "not yet resolved" framing -- a real recorded
+        fact, never an interpretation of it."""
+        if outcome is None:
+            message = _OUTCOME_NOT_YET_RESOLVED_MESSAGE
+        else:
+            message = (
+                f"{_OUTCOME_NOT_YET_RESOLVED_MESSAGE} "
+                f"(recorded status: {outcome.status.name})"
+            )
+        return f'<div class="aara-empty-message aara-empty">{html.escape(message)}</div>'
+
+    @staticmethod
+    def _outcome_closed_fields_html(outcome: DecisionOutcome) -> str:
+        """CLOSED only. Every value is DecisionOutcome's own recorded field,
+        given plain display formatting only (a percentage sign on an
+        already-real float, str() on an already-real int) -- never
+        transformed, reinterpreted, ranked, scored, or recalculated. A
+        field the outcome does not carry (e.g. a rare CLOSED row missing
+        its own realized_pnl_pct) is omitted, never fabricated as a
+        placeholder."""
+        fields = [("Status", outcome.status.name)]
+        if outcome.outcome_direction is not None:
+            fields.append(("Direction", outcome.outcome_direction.name))
+        if outcome.realized_pnl_pct is not None:
+            fields.append(("Realized P&L %", f"{outcome.realized_pnl_pct:.2%}"))
+        if outcome.holding_days is not None:
+            fields.append(("Holding Days", str(outcome.holding_days)))
+        rows = "".join(
+            '<div class="aara-record-field">'
+            f'<span class="record-label">{html.escape(label)}</span>'
+            f'<span class="record-value">{html.escape(value)}</span>'
+            "</div>"
+            for label, value in fields
+        )
+        return f'<div class="aara-record-card-fields">{rows}</div>'
 
     @staticmethod
     def _model_ensemble_entry(

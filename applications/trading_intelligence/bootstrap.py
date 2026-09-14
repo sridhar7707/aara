@@ -129,6 +129,9 @@ from applications.trading_intelligence.adapters.trades_db_decision_adapters impo
     TradesDbEvidenceSource,
     TradesDbGovernanceSource,
 )
+from applications.trading_intelligence.adapters.trades_db_decision_outcome_source import (
+    TradesDbDecisionOutcomeSource,
+)
 from applications.trading_intelligence.adapters.trades_db_decision_source import (
     TradesDbDecisionReader,
 )
@@ -420,12 +423,23 @@ def build_application_from_trades_snapshot(db_path: Optional[str]) -> DecisionCe
     earnings_source = TradesDbEarningsSource(
         LegacyEarningsSource(**legacy_source_kwargs(db_path))
     )
+    # Decision -> Outcome linkage: real-only on this path, same rationale as
+    # the three Sprint 7 collaborators above. Reuses the frozen Wave 2A
+    # DecisionOutcomeQueryService -- the exact same service/reader
+    # Performance & Learning's own outcome wiring already exercises
+    # (_build_performance_learning_screen) -- via one independent read
+    # (TradesDbOutcomeReader over the SAME db_path), not a shared instance,
+    # matching every other per-section adapter's own independence here.
+    outcome_source = TradesDbDecisionOutcomeSource(
+        DecisionOutcomeQueryService(TradesDbOutcomeReader(**legacy_source_kwargs(db_path)))
+    )
 
     controller = DecisionCenterController(
         query_service, evidence_query_service, governance_query_service, audit_source,
         news_cache_diff_source=news_cache_diff_source,
         recommendation_diff_source=recommendation_diff_source,
         earnings_source=earnings_source,
+        outcome_source=outcome_source,
     )
     # Sprint 1: same "Operational data snapshot" freshness indicator
     # ui/morning_brief/, ui/portfolio_intelligence/, and

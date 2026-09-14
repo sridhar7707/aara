@@ -61,6 +61,18 @@ independently-isolated pattern as the two above -- a failure here never
 affects any other concern, and vice versa. Unlike the other two, its
 `get_snapshot(symbol)` takes no timestamp, since earnings_cache carries no
 date dimension to compare against.
+
+Decision -> Outcome linkage: outcome_source is an eighth, optional
+collaborator (default None), following the identical duck-typed,
+independently-isolated pattern as the three above -- a failure here never
+affects any other concern, and vice versa. Its `get_outcome(decision_id)`
+takes only the already-known decision_id (no symbol/timestamp lookup
+needed, unlike news_cache_diff_source/recommendation_diff_source), backed
+by adapters/trades_db_decision_outcome_source.py wrapping the frozen Wave
+2A DecisionOutcomeQueryService -- the same service Performance & Learning
+already exercises. Nothing here recomputes, re-pairs, or re-derives an
+outcome; the value returned is passed through to DecisionDetailArea
+unmodified.
 """
 from typing import List, Optional
 
@@ -91,6 +103,7 @@ class DecisionCenterController:
         news_cache_diff_source=None,
         recommendation_diff_source=None,
         earnings_source=None,
+        outcome_source=None,
     ):
         self._query_service = query_service
         self._evidence_query_service = evidence_query_service
@@ -99,6 +112,7 @@ class DecisionCenterController:
         self._news_cache_diff_source = news_cache_diff_source
         self._recommendation_diff_source = recommendation_diff_source
         self._earnings_source = earnings_source
+        self._outcome_source = outcome_source
 
     def load_decisions(self, decision_ids: List[str]) -> DecisionListArea:
         views = self._query_service.list_decision_views(decision_ids)
@@ -179,6 +193,17 @@ class DecisionCenterController:
             earnings_snapshot = None
             earnings_status = ReadStatus.OK
 
+        if self._outcome_source is not None:
+            try:
+                outcome = self._outcome_source.get_outcome(decision_id)
+                outcome_status = ReadStatus.OK
+            except TradingIntelligenceReadError:
+                outcome = None
+                outcome_status = ReadStatus.ERROR
+        else:
+            outcome = None
+            outcome_status = ReadStatus.OK
+
         return DecisionDetailArea(
             decision=view,
             evidence_reference=evidence_reference, risk_reference=risk_reference,
@@ -190,6 +215,7 @@ class DecisionCenterController:
             recommendation_diff=recommendation_diff,
             recommendation_diff_status=recommendation_diff_status,
             earnings_snapshot=earnings_snapshot, earnings_status=earnings_status,
+            outcome=outcome, outcome_status=outcome_status,
         )
 
     def load_screen(

@@ -730,6 +730,23 @@ footer { display: none !important; }
   text-align: right;
 }
 
+/* Decision -> Outcome linkage -- same calm, text-first treatment as the
+   confidence breakdown above it: a small uppercase label followed by
+   plain record-field rows (reuses the already-styled .aara-record-field/
+   .record-label/.record-value classes every other detail section already
+   uses -- no new field styling introduced). Sits directly under the
+   confidence breakdown, inside the same decision header block. */
+.aara-decision-header .aara-decision-outcome {
+  margin-top: var(--space-sm);
+}
+.aara-decision-outcome-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
 /* ADR-070 Sprint 3 (§9) -- per-record evidence polarity. One small, muted
    supporting label inside an evidence record's card, carrying only that
    record's own phrase ("Supported the BUY" / "Contradicted the BUY" /

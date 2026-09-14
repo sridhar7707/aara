@@ -26,6 +26,13 @@ from applications.trading_intelligence.services.news_cache_snapshot_diff import 
 )
 from applications.trading_intelligence.services.recommendation_diff import RecommendationDiff
 from applications.trading_intelligence.adapters.legacy_earnings_source import EarningsSnapshot
+from applications.trading_intelligence.contracts.decision_outcome_contract import (
+    DecisionOutcome,
+    OutcomeDirection,
+    OutcomeStatus,
+    PairingConfidence,
+    PairingMethod,
+)
 from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _ACCESSIBLE_NAME_SETUP_JS,
     _ACTION_BADGE_CLASSES,
@@ -1429,6 +1436,195 @@ def test_confidence_breakdown_never_mentions_evidence_polarity():
 
     for forbidden in ("polarity", "Supported the", "Contradicted the"):
         assert forbidden.lower() not in out.lower()
+
+
+# --- Decision -> Outcome linkage ------------------------------------------
+
+
+def _make_outcome(**overrides):
+    defaults = dict(
+        decision_id="trade-1", symbol="AMZN", entry_trade_id=1,
+        entry_timestamp="2026-07-16T16:50:00", entry_price=256.09, entry_shares=23.68,
+        status=OutcomeStatus.CLOSED,
+        pairing_method=PairingMethod.WINDOW_SINGLE_BOT_EXIT,
+        pairing_confidence=PairingConfidence.HIGH,
+        outcome_direction=OutcomeDirection.LOSS,
+        realized_pnl_pct=-0.00234, realized_pnl_usd=-27.77, holding_days=47,
+    )
+    defaults.update(overrides)
+    return DecisionOutcome(**defaults)
+
+
+def test_decision_outcome_closed_renders_status_direction_pnl_and_holding_days():
+    outcome = _make_outcome()
+
+    out = DecisionCenterUI._format_decision_outcome_html(outcome, ReadStatus.OK)
+
+    assert "Decision Outcome" in out
+    assert "CLOSED" in out
+    assert "LOSS" in out
+    assert "-0.23%" in out
+    assert "47" in out
+
+
+def test_decision_outcome_open_renders_not_yet_resolved_with_real_status():
+    outcome = _make_outcome(
+        status=OutcomeStatus.OPEN, outcome_direction=None,
+        realized_pnl_pct=None, realized_pnl_usd=None, holding_days=None,
+    )
+
+    out = DecisionCenterUI._format_decision_outcome_html(outcome, ReadStatus.OK)
+
+    assert "Not yet resolved" in out
+    assert "OPEN" in out
+    # never a fabricated P&L / direction for an unresolved outcome
+    assert "%" not in out
+
+
+def test_decision_outcome_partial_renders_not_yet_resolved_with_real_status():
+    outcome = _make_outcome(status=OutcomeStatus.PARTIAL, outcome_direction=None)
+
+    out = DecisionCenterUI._format_decision_outcome_html(outcome, ReadStatus.OK)
+
+    assert "Not yet resolved" in out
+    assert "PARTIAL" in out
+
+
+def test_decision_outcome_none_renders_honest_not_yet_resolved_without_a_status():
+    """No outcome at all (collaborator absent, or a HEALTHY read with no
+    matching row) -- an honest 'not yet resolved' message, with no
+    parenthetical status since none was recorded."""
+    out = DecisionCenterUI._format_decision_outcome_html(None, ReadStatus.OK)
+
+    assert "Not yet resolved" in out
+    assert "(recorded status" not in out
+
+
+def test_decision_outcome_error_status_renders_shared_error_message():
+    out = DecisionCenterUI._format_decision_outcome_html(None, ReadStatus.ERROR)
+
+    assert "Decision Outcome" in out
+    assert "unavailable" in out.lower()
+    assert "Not yet resolved" not in out
+
+
+def test_decision_outcome_section_label_present_in_every_state():
+    """The section itself is never silently omitted -- unlike the
+    confidence breakdown, which can return "" entirely."""
+    for outcome, status in (
+        (_make_outcome(), ReadStatus.OK),
+        (_make_outcome(status=OutcomeStatus.OPEN, outcome_direction=None), ReadStatus.OK),
+        (None, ReadStatus.OK),
+        (None, ReadStatus.ERROR),
+    ):
+        out = DecisionCenterUI._format_decision_outcome_html(outcome, status)
+        assert "Decision Outcome" in out
+
+
+def test_decision_outcome_closed_values_are_exact_not_rounded_beyond_display():
+    """Display formatting (a percentage sign, str() on an int) is allowed;
+    the underlying figure itself must never be altered."""
+    outcome = _make_outcome(realized_pnl_pct=-0.098234, holding_days=3)
+
+    out = DecisionCenterUI._format_decision_outcome_html(outcome, ReadStatus.OK)
+
+    assert "-9.82%" in out  # exact 2-decimal display of -0.098234, no rounding surprise
+    assert ">3<" in out or "3</span>" in out
+
+
+def test_decision_outcome_omits_absent_fields_without_fabricating_them():
+    """A CLOSED outcome missing realized_pnl_pct/holding_days (should not
+    happen in practice, but Wave 2A does not guarantee it) must omit those
+    rows rather than show a fabricated placeholder."""
+    outcome = _make_outcome(realized_pnl_pct=None, holding_days=None)
+
+    out = DecisionCenterUI._format_decision_outcome_html(outcome, ReadStatus.OK)
+
+    assert "Realized P&L" not in out
+    assert "Holding Days" not in out
+    assert "CLOSED" in out
+    assert "LOSS" in out
+
+
+def test_decision_outcome_never_uses_causal_or_quality_language():
+    """Task guardrail: the outcome is an observed result, not a causal
+    evaluation of the decision -- across every render state."""
+    forbidden = (
+        "good decision", "bad decision", "successful decision", "failed decision",
+        "decision quality", "proved", "validated", "caused", "because the model",
+    )
+    states = [
+        DecisionCenterUI._format_decision_outcome_html(_make_outcome(), ReadStatus.OK),
+        DecisionCenterUI._format_decision_outcome_html(
+            _make_outcome(status=OutcomeStatus.OPEN, outcome_direction=None), ReadStatus.OK,
+        ),
+        DecisionCenterUI._format_decision_outcome_html(None, ReadStatus.OK),
+        DecisionCenterUI._format_decision_outcome_html(None, ReadStatus.ERROR),
+    ]
+    for out in states:
+        lowered = out.lower()
+        for phrase in forbidden:
+            assert phrase not in lowered
+
+
+def test_decision_header_html_wires_the_outcome_section_in():
+    view = _make_view()
+
+    out = DecisionCenterUI._decision_header_html(
+        view, None, None, (), _make_outcome(), ReadStatus.OK,
+    )
+
+    assert "Decision Outcome" in out
+    assert "CLOSED" in out
+
+
+def test_decision_header_html_outcome_defaults_to_not_yet_resolved():
+    """The two new params are optional -- an existing call site that does
+    not pass them (none exists in production, but this proves the default
+    is safe) still renders an honest state, never a crash."""
+    view = _make_view()
+
+    out = DecisionCenterUI._decision_header_html(view)
+
+    assert "Decision Outcome" in out
+    assert "Not yet resolved" in out
+
+
+def test_decision_header_html_outcome_coexists_with_confidence_breakdown_and_evidence():
+    """Regression guard: adding the outcome section must not disturb the
+    existing confidence-breakdown/evidence rendering it sits alongside in
+    the same header block."""
+    view = _make_view()
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot", data={
+        "xgb": 0.5385, "lstm": 0.4375, "sentiment": 0.0936, "macro": 0.6403,
+    })
+
+    out = DecisionCenterUI._decision_header_html(
+        view, None, None, (entry,), _make_outcome(), ReadStatus.OK,
+    )
+
+    assert "Confidence components" in out
+    assert "XGB" in out
+    assert CONFIDENCE_QUALIFIER in out
+    assert "Decision Outcome" in out
+    assert "CLOSED" in out
+
+
+def test_success_detail_output_tuple_shape_is_unchanged_by_the_outcome_section():
+    """Additive-only guard: the outcome section is folded into the header
+    string (the first _DetailValues element) -- it must never grow
+    _DetailValues' own arity, change _on_row_select's arity, or touch
+    build()'s component wiring."""
+    view = _make_view(decision_id="dec-outcome-1")
+    detail_area = DecisionDetailArea(
+        decision=view, outcome=_make_outcome(decision_id="dec-outcome-1"),
+        outcome_status=ReadStatus.OK,
+    )
+
+    detail_values = DecisionCenterUI._success_detail(detail_area)
+
+    assert len(detail_values) == 11
+    assert "Decision Outcome" in detail_values[0]
 
 
 def _empty_decision_center_screen():

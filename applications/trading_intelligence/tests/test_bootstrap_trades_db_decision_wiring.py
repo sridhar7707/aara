@@ -24,6 +24,11 @@ from applications.trading_intelligence.bootstrap import (
     build_application_from_trades_snapshot,
     build_trading_intelligence_app,
 )
+from applications.trading_intelligence.contracts.decision_outcome_contract import (
+    OutcomeDirection,
+    OutcomeStatus,
+)
+from applications.trading_intelligence.projections.trade_decision_row import decision_id_for
 from applications.trading_intelligence.ui.decision_center.gradio_view import DecisionCenterUI
 from applications.trading_intelligence.ui.decision_center.screen import ReadStatus
 
@@ -114,6 +119,14 @@ def test_build_application_sentinel_path_has_no_earnings_source():
     collaborator either."""
     ui = build_application()
     assert ui._controller._earnings_source is None
+
+
+def test_build_application_sentinel_path_has_no_outcome_source():
+    """Coexistence: build_application() (the Sentinel path) has no
+    trades.db to read at all, so it must not be given a Decision ->
+    Outcome collaborator either."""
+    ui = build_application()
+    assert ui._controller._outcome_source is None
 
 
 # -- build_application_from_trades_snapshot() --------------------------
@@ -226,6 +239,80 @@ def test_seeded_db_wires_a_real_earnings_source():
         detail = ui._controller.load_decision_detail("trade-45")
         assert detail.earnings_snapshot is None
         assert detail.earnings_status is ReadStatus.OK
+    finally:
+        os.remove(path)
+
+
+def test_seeded_db_wires_a_real_outcome_source():
+    """Confirms build_application_from_trades_snapshot() actually
+    constructs and injects TradesDbDecisionOutcomeSource into the
+    controller. trade-45 has no matching bot-fill exit in _seeded_db()
+    (trade-44's SELL_RECONCILE predates it), so the honest, real result is
+    a DecisionOutcome with status OPEN -- never None, and never an
+    error -- proving the shared decision_id lineage: the exact
+    "trade-45" id Decision Center's own list uses resolves to a real
+    outcome for that same underlying trades row."""
+    path = _seeded_db()
+    try:
+        ui = build_application_from_trades_snapshot(path)
+        assert ui._controller._outcome_source is not None
+        detail = ui._controller.load_decision_detail("trade-45")
+        assert detail.outcome is not None
+        assert detail.outcome.decision_id == "trade-45"
+        assert detail.outcome.status is OutcomeStatus.OPEN
+        assert detail.outcome_status is ReadStatus.OK
+    finally:
+        os.remove(path)
+
+
+def _seeded_db_with_closed_outcome():
+    """A BUY plus a real bot-fill SELL_TIME_EXIT inside its pairing window
+    -- the same shape services/decision_outcome_query_service.py's own
+    Wave 2A pairing resolves to a CLOSED outcome, used here to prove the
+    Decision -> Outcome linkage renders a real, closed result end-to-end."""
+    path = tempfile.mktemp(suffix=".db")
+    conn = sqlite3.connect(path)
+    conn.executescript(_DDL)
+    conn.execute(
+        "INSERT INTO trades (id, timestamp, symbol, action, ensemble_score, "
+        "feature_drivers, ai_reasoning) VALUES "
+        "(1, '2026-07-16T16:50:00', 'AMZN', 'BUY', 0.62, '{\"m\": 1}', 'reasoning')"
+    )
+    conn.execute(
+        "INSERT INTO trades (id, timestamp, symbol, action, realized_pnl, "
+        "pnl_pct, holding_days, order_id) VALUES "
+        "(2, '2026-09-02T14:33:00', 'AMZN', 'SELL_TIME_EXIT', -27.77, "
+        "-0.00234, 47, 'o-2')"
+    )
+    conn.commit()
+    conn.close()
+    return path
+
+
+def test_seeded_db_decision_outcome_renders_through_the_full_ui_layer():
+    """End-to-end proof, one level past test_seeded_db_wires_a_real_
+    outcome_source above: that test only reaches the controller -- this
+    proves the same seeded, real CLOSED outcome survives all the way
+    through the actual UI render call (DecisionCenterUI._render_screen(),
+    the exact function demo.load()/Refresh invoke in the real app), using
+    the real, production build_application_from_trades_snapshot() wiring
+    -- no fake controller, no test-only shortcut. The header is detail
+    output index 0 (see build()'s detail_outputs ordering) -- the Decision
+    Outcome section is rendered inside it (see gradio_view.py's
+    _decision_header_html)."""
+    path = _seeded_db_with_closed_outcome()
+    try:
+        ui = build_application_from_trades_snapshot(path)
+
+        list_rows, list_empty, *detail = ui._render_screen()
+
+        assert list_rows[0][0] == "trade-1"
+        header_html = detail[0]
+        assert "Decision Outcome" in header_html
+        assert "CLOSED" in header_html
+        assert "LOSS" in header_html
+        assert "-0.23%" in header_html
+        assert "47" in header_html
     finally:
         os.remove(path)
 

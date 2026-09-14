@@ -39,6 +39,13 @@ _sync_api = pytest.importorskip("playwright.sync_api")
 from applications.trading_intelligence.adapters.legacy_earnings_source import (  # noqa: E402
     EarningsSnapshot,
 )
+from applications.trading_intelligence.contracts.decision_outcome_contract import (  # noqa: E402
+    DecisionOutcome,
+    OutcomeDirection,
+    OutcomeStatus,
+    PairingConfidence,
+    PairingMethod,
+)
 from applications.trading_intelligence.projections.decision_view import (  # noqa: E402
     DecisionState,
     DecisionView,
@@ -56,6 +63,7 @@ from applications.trading_intelligence.ui.decision_center.screen import (  # noq
     DecisionCenterScreen,
     DecisionDetailArea,
     DecisionListArea,
+    ReadStatus,
 )
 
 os.environ.setdefault("GRADIO_ANALYTICS_ENABLED", "False")
@@ -253,6 +261,121 @@ def test_all_three_evidence_categories_render_together_in_the_real_browser(brows
             visible_text = page.inner_text("body")
             assert "New headline about AAPL" in visible_text
             assert "recommendation now" in visible_text.lower() and "WAIT" in visible_text
+            assert "Near earnings" in visible_text
+        finally:
+            context.close()
+
+
+# --- Decision -> Outcome linkage --------------------------------------------
+
+
+def _make_outcome(**overrides) -> DecisionOutcome:
+    defaults = dict(
+        decision_id=_DECISION_ID, symbol="AAPL", entry_trade_id=1,
+        entry_timestamp="2026-07-16T16:50:00", entry_price=256.09, entry_shares=23.68,
+        status=OutcomeStatus.CLOSED,
+        pairing_method=PairingMethod.WINDOW_SINGLE_BOT_EXIT,
+        pairing_confidence=PairingConfidence.HIGH,
+        outcome_direction=OutcomeDirection.LOSS,
+        realized_pnl_pct=-0.00234, realized_pnl_usd=-27.77, holding_days=47,
+    )
+    defaults.update(overrides)
+    return DecisionOutcome(**defaults)
+
+
+def _page_with_text(browser, url, expect_text):
+    """Opens `url` and polls real DOM text (never a timer) until
+    `expect_text` is actually visible -- same technique as
+    _page_with_evidence above, without the details-expansion step: the
+    Decision Outcome section (see gradio_view.py's
+    _format_decision_outcome_html) is plain, always-visible content, not
+    behind a <details> disclosure."""
+    context = browser.new_context()
+    page = context.new_page()
+    page.goto(url, wait_until="domcontentloaded", timeout=_TIMEOUT_MS)
+    page.wait_for_function(
+        """(needle) => document.body.innerText.includes(needle)""",
+        arg=expect_text,
+        timeout=_TIMEOUT_MS,
+    )
+    return context, page
+
+
+def test_decision_outcome_closed_renders_in_the_real_browser(browser):
+    """A real CLOSED outcome's factual fields render inside the decision
+    header, in a real browser, from seeded data -- proving the wiring
+    added by this capability actually reaches the rendered DOM, not just
+    the Python return value. The section label and field labels ("Status",
+    "Direction", etc.) are rendered visually all-caps via CSS
+    text-transform (see theme.py's .aara-decision-outcome-label /
+    .record-label rules, the same pattern .pl-section-label already uses
+    elsewhere) -- asserted case-insensitively, matching what a real user
+    visually sees, same as test_content_screens_e2e.py's own
+    ATTRIBUTION_BREAKDOWN_TITLE check. Values ("CLOSED", "LOSS", "-0.23%",
+    "47") carry no such transform and are asserted with their real case."""
+    outcome = _make_outcome()
+    detail_area = DecisionDetailArea(
+        decision=_make_view(), outcome=outcome, outcome_status=ReadStatus.OK,
+    )
+    with _launched_app(detail_area) as url:
+        context, page = _page_with_text(browser, url, "CLOSED")
+        try:
+            visible_text = page.inner_text("body")
+            assert "decision outcome" in visible_text.lower()
+            assert "CLOSED" in visible_text
+            assert "LOSS" in visible_text
+            assert "-0.23%" in visible_text
+            assert "47" in visible_text
+            # truthfulness guard: no causal/quality language anywhere on
+            # the rendered page, not only inside the outcome section.
+            lowered = visible_text.lower()
+            for forbidden in (
+                "good decision", "bad decision", "successful decision",
+                "failed decision", "decision quality", "proved", "validated",
+            ):
+                assert forbidden not in lowered
+        finally:
+            context.close()
+
+
+def test_decision_outcome_not_yet_resolved_renders_in_the_real_browser(browser):
+    """No outcome for this decision (collaborator returned None) -> the
+    honest 'Not yet resolved' state renders in a real browser -- never a
+    fabricated result, never inferred from current price. Unlike the
+    section/field labels, this message carries no uppercase CSS transform
+    (see theme.py's .aara-empty-message), so it is asserted with its real
+    case."""
+    detail_area = DecisionDetailArea(
+        decision=_make_view(), outcome=None, outcome_status=ReadStatus.OK,
+    )
+    with _launched_app(detail_area) as url:
+        context, page = _page_with_text(browser, url, "Not yet resolved")
+        try:
+            visible_text = page.inner_text("body")
+            assert "Not yet resolved" in visible_text
+            assert "decision outcome" in visible_text.lower()
+        finally:
+            context.close()
+
+
+def test_decision_outcome_coexists_with_evidence_since_decision_in_the_real_browser(browser):
+    """Regression guard, browser-level: a populated Decision Outcome
+    section and the pre-existing 'Evidence Since Decision' evidence cards
+    render together on the same page without either clobbering the other."""
+    outcome = _make_outcome()
+    snapshot = EarningsSnapshot(
+        symbol="AAPL", near_earnings=True, cached_at="2026-09-01T16:41:57+00:00",
+    )
+    detail_area = DecisionDetailArea(
+        decision=_make_view(), outcome=outcome, outcome_status=ReadStatus.OK,
+        earnings_snapshot=snapshot,
+    )
+    with _launched_app(detail_area) as url:
+        context, page = _page_with_evidence(browser, url, "Near earnings")
+        try:
+            visible_text = page.inner_text("body")
+            assert "decision outcome" in visible_text.lower()
+            assert "CLOSED" in visible_text
             assert "Near earnings" in visible_text
         finally:
             context.close()

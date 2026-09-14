@@ -184,6 +184,18 @@ class DecisionDetailArea:
     # EarningsSnapshot lives under adapters/ rather than services/.
     earnings_snapshot: Optional["EarningsSnapshot"] = None
     earnings_status: ReadStatus = ReadStatus.OK
+    # Decision -> Outcome linkage: same forward-reference-string convention
+    # as the three fields above, for the same reason -- DecisionOutcome
+    # lives in applications.trading_intelligence.contracts.
+    # decision_outcome_contract. `outcome` is the real, frozen Wave 2A
+    # DecisionOutcome for this decision's own decision_id (verbatim, never
+    # recomputed) when the read succeeded and a matching outcome exists;
+    # None when the read succeeded but no outcome exists yet, or when no
+    # outcome_source collaborator was injected (the Sentinel path's
+    # existing 7-arg construction) -- an honest "not yet resolved" state,
+    # never an error, in both cases.
+    outcome: Optional["DecisionOutcome"] = None
+    outcome_status: ReadStatus = ReadStatus.OK
 
     @property
     def is_empty(self) -> bool:

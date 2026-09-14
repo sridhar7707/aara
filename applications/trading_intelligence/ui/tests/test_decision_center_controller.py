@@ -901,3 +901,89 @@ def test_load_decision_detail_does_not_query_earnings_for_a_missing_decision():
     assert detail_area.is_empty is True
     assert detail_area.earnings_snapshot is None
     assert detail_area.earnings_status is ReadStatus.OK
+
+
+# --- Decision -> Outcome linkage ------------------------------------------
+
+
+class _InMemoryOutcomeSource:
+    """Fake outcome collaborator -- duck-typed like _InMemoryEarningsSource
+    above (no services/ wrapper, no ABC). get_outcome(decision_id) only --
+    no symbol, no timestamp, since the decision_id is already known."""
+
+    def __init__(self, outcome_by_decision_id=None):
+        self._outcome_by_decision_id = outcome_by_decision_id or {}
+
+    def get_outcome(self, decision_id):
+        return self._outcome_by_decision_id.get(decision_id)
+
+
+class _BoomOutcomeSource:
+    def get_outcome(self, decision_id):
+        raise TradingIntelligenceReadError("boom")
+
+
+def test_load_decision_detail_attaches_outcome_when_collaborator_present():
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": _make_contract()})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        outcome_source=_InMemoryOutcomeSource({"dec-001": "some-outcome"}),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.outcome == "some-outcome"
+    assert detail.outcome_status is ReadStatus.OK
+
+
+def test_load_decision_detail_outcome_is_none_when_collaborator_absent():
+    """No outcome_source injected -- the Sentinel path's existing
+    construction must keep working unchanged, with an honest OK/None
+    result, never an error, and never a read attempt."""
+    controller = _make_controller(decisions={"dec-001": _make_contract()})
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.outcome is None
+    assert detail.outcome_status is ReadStatus.OK
+
+
+def test_load_decision_detail_reports_outcome_error_but_keeps_other_concerns():
+    contract = _make_contract()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource({"dec-001": [_make_entry()]})),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        outcome_source=_BoomOutcomeSource(),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.decision is not None
+    assert detail.evidence == (_make_entry(),)
+    assert detail.evidence_status is ReadStatus.OK
+    assert detail.outcome is None
+    assert detail.outcome_status is ReadStatus.ERROR
+
+
+def test_load_decision_detail_does_not_query_outcome_for_a_missing_decision():
+    class _AssertNotCalledOutcomeSource:
+        def get_outcome(self, decision_id):
+            raise AssertionError("outcome must not be queried for a missing decision")
+
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource()),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        outcome_source=_AssertNotCalledOutcomeSource(),
+    )
+
+    detail_area = controller.load_decision_detail("missing-decision")
+
+    assert detail_area.is_empty is True
+    assert detail_area.outcome is None
+    assert detail_area.outcome_status is ReadStatus.OK
