@@ -413,6 +413,44 @@ def test_win_rate_summary_excludes_open_partial_and_flat_outcomes():
         os.remove(path)
 
 
+def test_win_rate_summary_excludes_partial_and_ambiguous_outcomes():
+    """PARTIAL (partial-quantity exit) and AMBIGUOUS (multiple unresolved
+    exits) are neither WIN nor LOSS -- like OPEN and FLAT, they must not
+    shift the win-rate numerator or denominator."""
+    rows = []
+    for i in range(15):
+        rows += _closed_pair(100 + i * 2, 101 + i * 2, score=0.60, realized_pnl=10.0, symbol=f"W{i}")
+    for i in range(15):
+        rows += _closed_pair(200 + i * 2, 201 + i * 2, score=0.60, realized_pnl=-10.0, symbol=f"L{i}")
+    # PARTIAL: buy 100 shares, sell only 40 -- not a full exit.
+    rows += [
+        _row(id=300, symbol="PARTIALS", action="BUY", shares=100.0,
+             timestamp="2026-08-01T00:00:00+00:00", ensemble_score=0.60),
+        _row(id=301, symbol="PARTIALS", action="SELL_TIME_EXIT", shares=40.0,
+             timestamp="2026-08-05T00:00:00+00:00", order_id="o-301",
+             realized_pnl=50.0, pnl_pct=0.05, holding_days=4),
+    ]
+    # AMBIGUOUS: buy followed by two independently-resolvable exits.
+    rows += [
+        _row(id=400, symbol="AMBIG", action="BUY", shares=100.0,
+             timestamp="2026-08-01T00:00:00+00:00", ensemble_score=0.60),
+        _row(id=401, symbol="AMBIG", action="SELL_TIME_EXIT", shares=50.0,
+             timestamp="2026-08-05T00:00:00+00:00", order_id="o-401",
+             realized_pnl=25.0, pnl_pct=0.025, holding_days=4),
+        _row(id=402, symbol="AMBIG", action="SELL_TIME_EXIT", shares=50.0,
+             timestamp="2026-08-06T00:00:00+00:00", order_id="o-402",
+             realized_pnl=25.0, pnl_pct=0.025, holding_days=5),
+    ]
+    path = _make_db(rows)
+    try:
+        screen = _build_performance_learning_screen(path)
+        # Still exactly 30 WIN/LOSS-countable outcomes -- PARTIAL and
+        # AMBIGUOUS excluded from both numerator and denominator.
+        assert screen.win_rate_summary == "15 wins / 30 closed (50%)."
+    finally:
+        os.remove(path)
+
+
 def test_win_rate_summary_does_not_disturb_existing_summary_or_rows():
     """Regression guard: adding win_rate_summary must not change the
     pre-existing summary/outcome_rows fields at all -- this is an

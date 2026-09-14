@@ -145,6 +145,38 @@ def test_seeded_db_exposes_trade_45_only():
         os.remove(path)
 
 
+def test_seeded_db_decision_renders_through_the_full_ui_layer():
+    """End-to-end wiring proof, one level past test_seeded_db_exposes_
+    trade_45_only above: that test only reaches the controller
+    (``ui._controller.load_decision_detail(...)``) -- this proves the same
+    seeded trades.db row survives all the way through the actual UI render
+    call (``DecisionCenterUI._render_screen()``, the exact function
+    ``demo.load()``/the Refresh button invoke in the real app), using the
+    real, production ``build_application_from_trades_snapshot()`` wiring --
+    no fake controller, no test-only shortcut."""
+    path = _seeded_db()
+    try:
+        ui = build_application_from_trades_snapshot(path)
+
+        list_rows, list_empty, *detail = ui._render_screen()
+
+        # The decision reached the rendered Decisions table.
+        assert list_rows[0][0] == "trade-45"
+        assert list_rows[0][1] == "SLB"
+        # The decision reached the rendered Evidence section (index 6 of
+        # the 11 detail outputs -- see build()'s detail_outputs ordering).
+        evidence_html = detail[6]
+        assert "MODEL_ENSEMBLE" in evidence_html
+        assert "FEATURE_DRIVERS" in evidence_html
+        # Rendered display label, not the domain-level evidence_type (still
+        # "AI_RATIONALE" -- the stored ai_reasoning text is a deterministic
+        # formatted summary, not independently generated AI reasoning).
+        assert "Entry Summary" in evidence_html
+        assert "reasoning" in evidence_html
+    finally:
+        os.remove(path)
+
+
 def test_seeded_db_wires_a_real_news_cache_diff_source():
     """Confirms build_application_from_trades_snapshot() actually
     constructs and injects TradesDbNewsCacheDiffSource into the controller

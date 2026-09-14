@@ -1767,8 +1767,37 @@ def test_all_three_trades_evidence_cards_render_together():
                     data={"text": "Cleared the threshold."}),
     )
     out = _trades_evidence_html(*entries)
-    assert "MODEL_ENSEMBLE" in out and "FEATURE_DRIVERS" in out and "AI_RATIONALE" in out
+    # AI_RATIONALE is the domain-level evidence_type (unchanged, used above
+    # to construct the entry); its rendered card badge shows the accurate
+    # human-facing label "Entry Summary" instead -- see
+    # test_ai_rationale_evidence_type_renders_as_entry_summary_label below.
+    assert "MODEL_ENSEMBLE" in out and "FEATURE_DRIVERS" in out and "Entry Summary" in out
+    assert "AI_RATIONALE" not in out
     assert "0.5385" in out and "momentum" in out and "Cleared the threshold." in out
+
+
+def test_ai_rationale_evidence_type_renders_as_entry_summary_label():
+    """The stored ai_reasoning text is a deterministic formatted summary,
+    not independently generated AI reasoning (2026-09 algorithm audit
+    finding) -- the evidence card's visible type badge must say so
+    honestly, without touching the domain-level evidence_type value
+    (still "AI_RATIONALE" everywhere else: the adapter, the audit trail,
+    and every other test asserting evidence_type)."""
+    entry = _make_entry(evidence_type="AI_RATIONALE", source="aara-bot",
+                         data={"text": "Cleared the threshold."})
+    out = _trades_evidence_html(entry)
+    assert "Entry Summary" in out
+    assert "AI_RATIONALE" not in out
+
+
+def test_non_rationale_evidence_types_display_label_is_unchanged():
+    """The display-label override is scoped to AI_RATIONALE only -- every
+    other evidence_type still renders as its own raw type string."""
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot",
+                         data={"ensemble": 0.52})
+    out = _trades_evidence_html(entry)
+    assert "MODEL_ENSEMBLE" in out
+    assert "Entry Summary" not in out
 
 
 def test_trades_evidence_detail_shows_no_risk_or_outcome_fields():

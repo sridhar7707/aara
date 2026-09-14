@@ -1052,6 +1052,26 @@ _TRADES_EVIDENCE_TYPES = frozenset({
     "MODEL_ENSEMBLE", "FEATURE_DRIVERS", "AI_RATIONALE", "RISK_PARAMETERS",
 })
 
+# Display-only label override (2026-09 algorithm audit finding): the stored
+# trades.db ai_reasoning text is a deterministic formatted summary built
+# from already-known numeric values (bot/_main_cycle.py), not independently
+# generated AI reasoning -- calling it "AI_RATIONALE" wherever a human
+# actually sees it overstates what it is. The domain-level evidence_type
+# string "AI_RATIONALE" is left completely unchanged everywhere else (the
+# adapter that constructs it, the audit trail, the dispatch branches a few
+# lines below in this same file, and every test asserting evidence_type) --
+# only the two places that render an evidence_type into visible/announced
+# text (the card's type badge below, and _why_summary_sentence's sentence)
+# pass it through this mapping first. Every other evidence_type is returned
+# unchanged.
+_EVIDENCE_TYPE_DISPLAY_LABELS = {
+    "AI_RATIONALE": "Entry Summary",
+}
+
+
+def _evidence_type_display_label(evidence_type: str) -> str:
+    return _EVIDENCE_TYPE_DISPLAY_LABELS.get(evidence_type, evidence_type)
+
 # Fixed render order + human labels for MODEL_ENSEMBLE's data keys. A key is
 # rendered only when actually present in EvidenceEntry.data (the derivation
 # already omits zero/absent model sub-scores and a missing regime), so a
@@ -1618,11 +1638,12 @@ class DecisionCenterUI:
         if len(evidence) == 1:
             entry = evidence[0]
             return (
-                f"1 {entry.evidence_type} signal from {entry.source}. "
-                f"{_WHY_EVIDENCE_CLARIFICATION}"
+                f"1 {_evidence_type_display_label(entry.evidence_type)} signal "
+                f"from {entry.source}. {_WHY_EVIDENCE_CLARIFICATION}"
             )
         descriptions = "; ".join(
-            f"{entry.evidence_type} from {entry.source}" for entry in evidence
+            f"{_evidence_type_display_label(entry.evidence_type)} from {entry.source}"
+            for entry in evidence
         )
         return f"{len(evidence)} signals: {descriptions}. {_WHY_EVIDENCE_CLARIFICATION}"
 
@@ -1662,7 +1683,7 @@ class DecisionCenterUI:
         polarity_rows = detail_area.evidence_polarity_rows
         cards = [
             DecisionCenterUI._record_card_html(
-                entry.evidence_type,
+                _evidence_type_display_label(entry.evidence_type),
                 "Attached",
                 [
                     ("Source", entry.source, False),

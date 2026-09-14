@@ -19,6 +19,13 @@ class XGBPredictor:
     def __init__(self):
         self.model = None
         self.val_auc: float = 0.0  # populated by train(); read by train_model.py for report
+        # True after predict_proba() returned its 0.5 fallback (no model,
+        # or a prediction error) rather than a genuine computed
+        # probability that happens to equal 0.5 -- see predict_proba()'s
+        # own docstring. Purely additive/introspective: predict_proba()'s
+        # return type and value are unchanged in every case, so ensemble.py
+        # and every other caller are unaffected.
+        self.last_prediction_is_fallback: bool = False
         self._load()
 
     def _load(self):
@@ -128,14 +135,23 @@ class XGBPredictor:
             logger.info(f"XGBoost trained and saved to {XGB_MODEL_PATH}")
 
     def predict_proba(self, row: pd.Series) -> float:
-        """Return probability (0-1) that price will be higher in {FORWARD_PERIODS} candles."""
+        """Return probability (0-1) that price will be higher in {FORWARD_PERIODS} candles.
+
+        Sets last_prediction_is_fallback to distinguish "model unavailable /
+        prediction failed" (fallback 0.5) from a genuine computed
+        probability that happens to equal 0.5 -- the return value itself is
+        unchanged in either case."""
         if self.model is None:
+            self.last_prediction_is_fallback = True
             return 0.5
         try:
             features = pd.DataFrame([row[FEATURE_COLS]])
-            return float(self.model.predict_proba(features)[0, 1])
+            result = float(self.model.predict_proba(features)[0, 1])
+            self.last_prediction_is_fallback = False
+            return result
         except Exception as e:
             logger.error(f"XGBoost predict failed: {e}")
+            self.last_prediction_is_fallback = True
             return 0.5
 
     def explain(self, row: pd.Series) -> list:

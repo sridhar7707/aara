@@ -57,6 +57,14 @@ class LSTMPredictor:
         self.scaler: StandardScaler | None = None
         self.val_loss: float = 1.0  # populated by train(); read by train_model.py for report
         self.is_degraded: bool = False  # True when loaded model val_loss > LSTM_DEGRADED_VAL_LOSS
+        # True after predict_proba() returned its 0.5 fallback (no model,
+        # too little history, a NaN sequence, or a prediction error) rather
+        # than a genuine computed probability that happens to equal 0.5 --
+        # see predict_proba()'s own docstring. Purely additive/
+        # introspective, a per-call sibling to is_degraded above:
+        # predict_proba()'s return type and value are unchanged in every
+        # case, so ensemble.py and every other caller are unaffected.
+        self.last_prediction_is_fallback: bool = False
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._load()
 
@@ -222,13 +230,20 @@ class LSTMPredictor:
         logger.info(f"LSTM training complete — best val_loss={best_val_loss:.4f}")
 
     def predict_proba(self, df: pd.DataFrame) -> float:
-        """Return probability (0–1) that price will be ≥0.3% higher in {FORWARD_PERIODS} bars."""
+        """Return probability (0–1) that price will be ≥0.3% higher in {FORWARD_PERIODS} bars.
+
+        Sets last_prediction_is_fallback to distinguish "model unavailable /
+        too little history / prediction failed" (fallback 0.5) from a
+        genuine computed probability that happens to equal 0.5 -- the
+        return value itself is unchanged in either case."""
         if self.model is None or len(df) < SEQ_LEN:
+            self.last_prediction_is_fallback = True
             return 0.5
         try:
             seq = df[FEATURE_COLS].values[-SEQ_LEN:].astype(np.float32)
             if np.isnan(seq).any():
                 logger.warning("LSTM predict: NaN in feature sequence — returning 0.5")
+                self.last_prediction_is_fallback = True
                 return 0.5
             if self.scaler is not None:
                 seq = self.scaler.transform(seq).astype(np.float32)
@@ -238,8 +253,11 @@ class LSTMPredictor:
             result = float(torch.sigmoid(torch.tensor(logit)).item())
             if math.isnan(result):
                 logger.warning("LSTM predict: output is NaN — returning 0.5")
+                self.last_prediction_is_fallback = True
                 return 0.5
+            self.last_prediction_is_fallback = False
             return result
         except Exception as e:
             logger.error(f"LSTM predict failed: {e}")
+            self.last_prediction_is_fallback = True
             return 0.5
