@@ -272,4 +272,57 @@ CSS = """
 .ri-portfolio-drawdown-chart {
   margin: 4px 0;
 }
+
+/* Concentration, Risk Parameters & Drawdown Context sprint: current-
+   drawdown one-liner near Current State -- same calm muted-caption
+   treatment as every other supporting fact on this page (.ri-subtitle /
+   .ri-disclosure-body), no new colour or weight vocabulary. */
+.ri-drawdown-context {
+  margin-top: var(--ri-space-8);
+  font-size: 12px;
+  color: var(--ri-color-text-secondary);
+}
+
+/* Concentration: same visual language as Portfolio Intelligence's own
+   Allocation by Holding bars (navy fill on a bordered track), one row per
+   open position instead of a page-wide allocation split. Duplicated
+   locally per this package's self-containment convention -- not shared
+   with ui/portfolio_intelligence/theme.py. */
+.ri-concentration-summary {
+  font-size: 13px;
+  color: var(--ri-color-text);
+  margin: var(--ri-space-2) 0 var(--ri-space-8) 0;
+}
+.ri-concentration-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ri-space-6);
+}
+.ri-concentration-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 52px;
+  align-items: center;
+  gap: var(--ri-space-10);
+  font-size: 12px;
+}
+.ri-concentration-symbol {
+  font-weight: 600;
+  color: var(--ri-color-navy);
+}
+.ri-concentration-bar {
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid var(--ri-color-border);
+}
+.ri-concentration-bar .fill {
+  background: var(--ri-color-navy);
+  height: 100%;
+}
+.ri-concentration-pct {
+  font-family: Monaco, "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--ri-color-text);
+}
 """

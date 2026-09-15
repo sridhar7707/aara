@@ -1,7 +1,11 @@
 import pytest
 
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
+    CURRENT_RISK_PARAMETERS,
+    ConcentrationHolding,
+    DrawdownPoint,
     RiskHistoryEntry,
+    RiskParameter,
     RiskScreen,
     RiskSnapshot,
 )
@@ -158,3 +162,162 @@ def test_risk_screen_stays_frozen():
 
     with pytest.raises(Exception):
         screen.current = _make_snapshot()
+
+
+# --- Concentration -----------------------------------------------------
+
+
+def test_concentration_holding_is_immutable():
+    holding = ConcentrationHolding(symbol="AAPL", weight_pct=45.0)
+
+    assert holding.symbol == "AAPL"
+    assert holding.weight_pct == 45.0
+    with pytest.raises(Exception):
+        holding.weight_pct = 50.0
+
+
+def test_concentration_unavailable_by_default():
+    """No concentration_holdings supplied -> unavailable, matching every
+    other None-vs-empty convention on this screen (drawdown_history,
+    history)."""
+    screen = RiskScreen()
+
+    assert screen.concentration_is_available is False
+    assert screen.concentration_holdings is None
+
+
+def test_concentration_populated():
+    holdings = (
+        ConcentrationHolding(symbol="AAPL", weight_pct=60.0),
+        ConcentrationHolding(symbol="MSFT", weight_pct=40.0),
+    )
+    screen = RiskScreen(concentration_holdings=holdings)
+
+    assert screen.concentration_is_available is True
+    assert screen.concentration_is_empty is False
+    assert screen.concentration_holdings == holdings
+
+
+def test_concentration_empty_is_a_real_healthy_zero_positions_state():
+    """An empty tuple is a genuine 'connected, no open positions' result,
+    distinct from None (unavailable) -- same convention as
+    drawdown_history_is_empty / portfolio_history_is_empty elsewhere in
+    this product."""
+    screen = RiskScreen(concentration_holdings=())
+
+    assert screen.concentration_is_available is True
+    assert screen.concentration_is_empty is True
+    assert screen.concentration_empty_state_message == (
+        "No open positions to show concentration for."
+    )
+
+
+def test_largest_concentration_holding_picks_the_highest_weight():
+    holdings = (
+        ConcentrationHolding(symbol="AAPL", weight_pct=30.0),
+        ConcentrationHolding(symbol="MSFT", weight_pct=55.0),
+        ConcentrationHolding(symbol="GOOGL", weight_pct=15.0),
+    )
+    screen = RiskScreen(concentration_holdings=holdings)
+
+    assert screen.largest_concentration_holding == ConcentrationHolding(
+        symbol="MSFT", weight_pct=55.0
+    )
+
+
+def test_largest_concentration_holding_breaks_ties_alphabetically():
+    """Deterministic tie-break -- same rule Portfolio Intelligence's own
+    Allocation by Holding bar list uses (weight_pct descending, symbol
+    ascending)."""
+    holdings = (
+        ConcentrationHolding(symbol="ZETA", weight_pct=50.0),
+        ConcentrationHolding(symbol="ALPHA", weight_pct=50.0),
+    )
+    screen = RiskScreen(concentration_holdings=holdings)
+
+    assert screen.largest_concentration_holding.symbol == "ALPHA"
+
+
+def test_largest_concentration_holding_none_when_unavailable():
+    screen = RiskScreen()
+
+    assert screen.largest_concentration_holding is None
+
+
+def test_largest_concentration_holding_none_when_empty():
+    screen = RiskScreen(concentration_holdings=())
+
+    assert screen.largest_concentration_holding is None
+
+
+def test_risk_screen_stays_frozen_for_concentration_fields():
+    screen = RiskScreen()
+
+    with pytest.raises(Exception):
+        screen.concentration_holdings = ()
+
+
+# --- Risk Parameters (static, read-only) --------------------------------
+
+
+def test_risk_parameter_is_immutable():
+    param = RiskParameter(label="Max Open Positions", value_display="8")
+
+    assert param.label == "Max Open Positions"
+    assert param.value_display == "8"
+    with pytest.raises(Exception):
+        param.value_display = "10"
+
+
+def test_current_risk_parameters_contains_the_six_documented_values():
+    labels = {p.label: p.value_display for p in CURRENT_RISK_PARAMETERS}
+
+    assert labels == {
+        "Max Position Size": "20% of portfolio",
+        "Max Risk Per Trade": "1.5% of portfolio",
+        "Max Position Drift": "25%",
+        "Max Open Positions": "8",
+        "Correlation Threshold": "0.85",
+        "MACD Confirmation Minimum": "Disabled",
+    }
+
+
+def test_current_risk_parameters_is_a_fixed_tuple_not_a_screen_field():
+    """Static, compile-time content -- never sourced from a RiskScreen
+    instance, never gated on availability/health (it is not a live read)."""
+    assert isinstance(CURRENT_RISK_PARAMETERS, tuple)
+    assert len(CURRENT_RISK_PARAMETERS) == 6
+
+
+# --- Current drawdown context --------------------------------------------
+
+
+def test_current_drawdown_pct_none_when_drawdown_history_unavailable():
+    screen = RiskScreen()
+
+    assert screen.current_drawdown_pct is None
+
+
+def test_current_drawdown_pct_none_when_drawdown_history_is_empty():
+    screen = RiskScreen(drawdown_history=())
+
+    assert screen.current_drawdown_pct is None
+
+
+def test_current_drawdown_pct_is_the_latest_points_own_value():
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=0.0),
+        DrawdownPoint(as_of="2026-09-02T00:00:00+00:00", portfolio_value=95000.0, drawdown_pct=5.0),
+    )
+    screen = RiskScreen(drawdown_history=points)
+
+    assert screen.current_drawdown_pct == 5.0
+
+
+def test_current_drawdown_pct_is_zero_at_a_new_peak():
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=0.0),
+    )
+    screen = RiskScreen(drawdown_history=points)
+
+    assert screen.current_drawdown_pct == 0.0

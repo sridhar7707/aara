@@ -65,6 +65,58 @@ class DrawdownPoint:
 
 
 @dataclass(frozen=True)
+class ConcentrationHolding:
+    """One open position's symbol plus its already-computed allocation
+    weight -- duplicated locally from ui/portfolio_intelligence/screen.py's
+    own PortfolioHolding rather than imported (this package must not
+    import ui/portfolio_intelligence/, per its own self-containment test,
+    test_risk_intelligence_structure.py). Populated by bootstrap.py from
+    the SAME PortfolioHolding.weight_pct Portfolio Intelligence's own
+    Allocation by Holding section already renders -- this package never
+    recomputes a weight itself."""
+    symbol: str
+    weight_pct: float
+
+
+@dataclass(frozen=True)
+class RiskParameter:
+    """One duplicated, read-only literal mirroring a value from the bot's
+    own root config.py -- NOT imported (this package's established
+    boundary convention; see adapters/legacy_risk_state_source.py's own
+    "duplicates the tiny SELECT it needs as a literal string rather than
+    importing bot's own writer" rule, applied here to a config constant
+    instead of a SQL SELECT). Display only: shown as the system's current
+    configuration, never as proof the UI itself enforces it -- enforcement,
+    if any, happens entirely in bot/risk/* and bot/_main_cycle.py, both
+    untouched by this package."""
+    label: str
+    value_display: str
+
+
+# Duplicated from config.py (repo root) -- MUST be kept in sync by hand
+# whenever config.py's own values change; there is no live read here, and
+# this package must never import config.py or bot.* (see
+# test_risk_intelligence_structure.py). Verified against config.py as of
+# the Risk Intelligence Concentration/Parameters/Drawdown-Context sprint
+# (baseline commit 5dac5d7). Each value's source name is noted so a future
+# manual sync is a simple diff, not a re-derivation.
+CURRENT_RISK_PARAMETERS: Tuple[RiskParameter, ...] = (
+    # config.py: MAX_POSITION_PCT = 0.20
+    RiskParameter(label="Max Position Size", value_display="20% of portfolio"),
+    # config.py: MAX_RISK_PER_TRADE_PCT = 0.015
+    RiskParameter(label="Max Risk Per Trade", value_display="1.5% of portfolio"),
+    # config.py: MAX_POSITION_DRIFT_PCT = 0.25
+    RiskParameter(label="Max Position Drift", value_display="25%"),
+    # config.py: MAX_POSITIONS = 8
+    RiskParameter(label="Max Open Positions", value_display="8"),
+    # config.py: CORRELATION_THRESHOLD = 0.85
+    RiskParameter(label="Correlation Threshold", value_display="0.85"),
+    # config.py: MACD_CONFIRMATION_MIN = -inf (Gate 7.9, disabled by default)
+    RiskParameter(label="MACD Confirmation Minimum", value_display="Disabled"),
+)
+
+
+@dataclass(frozen=True)
 class RiskSnapshot:
     state: str
     as_of: str
@@ -104,6 +156,16 @@ class RiskScreen:
     # None-vs-empty convention as portfolio_history on the sibling screens.
     drawdown_history: Optional[Tuple[DrawdownPoint, ...]] = None
     drawdown_history_health: Optional[IntegrationHealth] = None
+    # Concentration: real PortfolioHolding-derived weights, populated by the
+    # composition root from an independent positions -> prices ->
+    # _build_portfolio_holdings() read (the SAME chain Portfolio
+    # Intelligence's own Holdings/Allocation by Holding uses, invoked a
+    # second time here -- no new adapter, no new market-data source). None
+    # means unavailable (open positions or current prices could not be
+    # read); an empty tuple is a genuine "connected, no open positions"
+    # result -- same None-vs-empty convention as drawdown_history above.
+    concentration_holdings: Optional[Tuple[ConcentrationHolding, ...]] = None
+    concentration_health: Optional[IntegrationHealth] = None
 
     @property
     def drawdown_history_is_available(self) -> bool:
@@ -116,6 +178,46 @@ class RiskScreen:
     @property
     def drawdown_history_empty_state_message(self) -> str:
         return "No portfolio history is recorded yet."
+
+    @property
+    def current_drawdown_pct(self) -> Optional[float]:
+        """The most recently observed drawdown_history point's own
+        drawdown_pct -- 0.0 at a new peak, a positive figure the further
+        below it (this screen's own DrawdownPoint sign convention). None
+        when drawdown_history is unavailable or empty -- never fabricated,
+        and never computed from anything other than the already-fetched
+        history the Portfolio Drawdown chart itself renders."""
+        if not self.drawdown_history:
+            return None
+        return self.drawdown_history[-1].drawdown_pct
+
+    # --- Concentration -----------------------------------------------------
+
+    @property
+    def concentration_is_available(self) -> bool:
+        return self.concentration_holdings is not None
+
+    @property
+    def concentration_is_empty(self) -> bool:
+        return self.concentration_holdings is not None and len(self.concentration_holdings) == 0
+
+    @property
+    def concentration_empty_state_message(self) -> str:
+        return "No open positions to show concentration for."
+
+    @property
+    def largest_concentration_holding(self) -> Optional[ConcentrationHolding]:
+        """The single largest position by weight_pct -- weight_pct is
+        already the authoritative figure (bootstrap.py's
+        _build_portfolio_holdings), never recomputed here. Deterministic:
+        highest weight_pct first, ties broken alphabetically by symbol --
+        the same tie-break Portfolio Intelligence's own Allocation by
+        Holding bar list uses, so identical inputs always render the same
+        answer. None when concentration is unavailable or there are no
+        open positions."""
+        if not self.concentration_holdings:
+            return None
+        return min(self.concentration_holdings, key=lambda h: (-h.weight_pct, h.symbol))
 
     @property
     def is_available(self) -> bool:

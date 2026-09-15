@@ -17,6 +17,8 @@ from applications.trading_intelligence.ui.risk_intelligence.gradio_view import (
     RiskIntelligenceUI,
 )
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
+    CURRENT_RISK_PARAMETERS,
+    ConcentrationHolding,
     DrawdownPoint,
     RiskHistoryEntry,
     RiskScreen,
@@ -592,8 +594,10 @@ def test_render_returns_one_update_per_dynamic_output():
 
     assert isinstance(result, tuple)
     # 12 pre-Sprint-1 outputs + 3 Sprint 1 portfolio-drawdown outputs
-    # (message, chart, disclaimer).
-    assert len(result) == 15
+    # (message, chart, disclaimer) + 2 Concentration/Parameters/Drawdown-
+    # Context sprint outputs (current-drawdown-context line, concentration
+    # content). Risk Parameters is static and adds no dynamic output.
+    assert len(result) == 17
     assert all(isinstance(update, dict) for update in result)
 
 
@@ -991,3 +995,222 @@ def test_drawdown_refresh_updates_the_chart():
     assert first[13]["visible"] is False
     assert second[13]["visible"] is True
     assert second[13]["value"]["drawdown_pct"].tolist() == [7.5]
+
+
+# --- Concentration, Risk Parameters & Drawdown Context sprint ------------
+
+
+def _concentration_holdings(*pairs):
+    return tuple(ConcentrationHolding(symbol=symbol, weight_pct=pct) for symbol, pct in pairs)
+
+
+def test_concentration_unavailable_by_default_renders_the_honest_message():
+    """Default RiskScreen(): concentration_holdings is None (unavailable)
+    -- open positions or current prices could not be read."""
+    demo = RiskIntelligenceUI().build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "Concentration is not available" in combined
+
+
+def test_concentration_empty_renders_the_honest_no_positions_message():
+    screen = RiskScreen(concentration_holdings=())
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "No open positions to show concentration for." in combined
+
+
+def test_concentration_populated_renders_the_largest_holding_and_bar_list():
+    holdings = _concentration_holdings(("AAPL", 60.0), ("MSFT", 40.0))
+    screen = RiskScreen(concentration_holdings=holdings)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "AAPL" in combined
+    assert "MSFT" in combined
+    assert "60.0%" in combined
+    assert "40.0%" in combined
+    # the largest-holding one-liner
+    assert "Largest single holding: AAPL (60.0%)" in combined
+    assert "No open positions to show concentration for." not in combined
+    assert "Concentration is not available" not in combined
+
+
+def test_concentration_populated_renders_in_deterministic_weight_order():
+    """weight_pct descending, symbol ascending on ties -- same rule
+    largest_concentration_holding uses, proven here at the rendering
+    layer, not just the pure-function layer."""
+    holdings = _concentration_holdings(("ZETA", 50.0), ("ALPHA", 50.0), ("GAMMA", 10.0))
+    screen = RiskScreen(concentration_holdings=holdings)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    combined = "\n".join(_html_values(demo))
+    assert combined.index("ALPHA") < combined.index("ZETA") < combined.index("GAMMA")
+
+
+def test_concentration_never_implies_a_risk_violation_or_trading_signal():
+    """Task guardrail: concentration is a descriptive fact, never a
+    warning, alert, or recommendation. The section's own disclaimer
+    legitimately NAMES "violation"/"breach"/"signal" while denying them
+    ("not a risk violation... or a trading signal") -- these phrase-level
+    checks target an AFFIRMATIVE alarmed framing, not that honest
+    negation, mirroring this codebase's established guard-scoping pattern
+    for a constant's own disclaimer text."""
+    holdings = _concentration_holdings(("AAPL", 95.0))
+    screen = RiskScreen(concentration_holdings=holdings)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    lowered = "\n".join(_html_values(demo)).lower()
+    assert "not a risk violation" in lowered  # the honest disclaimer is present
+    for forbidden in (
+        "alert", "warning:", "exceeds limit", "is a violation", "in breach",
+        "trading signal:", "risk violation detected",
+    ):
+        assert forbidden not in lowered
+
+
+def test_concentration_uses_weight_pct_verbatim_never_recomputed():
+    """A single-holding weight_pct that does NOT sum to 100 (e.g. a
+    partially-stale fixture) must still render exactly as given -- this
+    section never renormalizes or recomputes a weight."""
+    holdings = _concentration_holdings(("AAPL", 37.5),)
+    screen = RiskScreen(concentration_holdings=holdings)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "37.5%" in combined
+
+
+def test_concentration_section_label_present():
+    demo = RiskIntelligenceUI().build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "Concentration" in combined
+
+
+# --- Risk Parameters (static) ---------------------------------------------
+
+
+def test_risk_parameters_section_renders_all_six_values_unconditionally():
+    """Static content: present regardless of screen state (even the
+    fully-unavailable default RiskScreen())."""
+    demo = RiskIntelligenceUI().build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "Risk Parameters" in combined
+    for param in CURRENT_RISK_PARAMETERS:
+        assert param.label in combined
+        assert param.value_display in combined
+
+
+def test_risk_parameters_section_identical_across_different_screens():
+    """Compile-time constant -- never varies with the RiskScreen passed
+    in, never gated on any health/availability field."""
+    unavailable = RiskIntelligenceUI().build()
+    populated = RiskIntelligenceUI(screen=_make_available_screen()).build()
+
+    unavailable_combined = "\n".join(_html_values(unavailable))
+    populated_combined = "\n".join(_html_values(populated))
+    for param in CURRENT_RISK_PARAMETERS:
+        assert param.value_display in unavailable_combined
+        assert param.value_display in populated_combined
+
+
+def test_risk_parameters_never_implies_the_ui_enforces_them():
+    demo = RiskIntelligenceUI().build()
+
+    lowered = "\n".join(_html_values(demo)).lower()
+    assert "current configuration" in lowered
+    for forbidden in ("enforced by this", "this system blocks", "guaranteed", "will prevent"):
+        assert forbidden not in lowered
+
+
+# --- Current drawdown context ---------------------------------------------
+
+
+def _drawdown_context_block(demo):
+    return [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.HTML)
+        and "ri-drawdown-context-output" in (b.elem_classes or [])
+    ]
+
+
+def test_drawdown_context_absent_by_default():
+    """Default RiskScreen(): drawdown_history is None -> no fabricated
+    'Portfolio down X% from peak' line."""
+    demo = RiskIntelligenceUI().build()
+
+    blocks = _drawdown_context_block(demo)
+    assert len(blocks) == 1
+    assert blocks[0].visible is False
+
+
+def test_drawdown_context_absent_when_history_is_empty():
+    screen = RiskScreen(drawdown_history=())
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    assert _drawdown_context_block(demo)[0].visible is False
+
+
+def test_drawdown_context_renders_the_real_percentage():
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=0.0),
+        DrawdownPoint(as_of="2026-09-02T00:00:00+00:00", portfolio_value=88000.0, drawdown_pct=12.0),
+    )
+    screen = RiskScreen(drawdown_history=points)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    block = _drawdown_context_block(demo)[0]
+    assert block.visible is True
+    assert "Portfolio down 12.0% from peak" in block.value
+
+
+def test_drawdown_context_is_independent_of_current_risk_state_availability():
+    """Same independence drawdown_history already has relative to Current
+    State elsewhere on this screen -- an unavailable current risk state
+    must not hide a real drawdown-context line."""
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=8.0),
+    )
+    screen = RiskScreen(current=None, drawdown_history=points)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    assert screen.is_available is False
+    assert _drawdown_context_block(demo)[0].visible is True
+
+
+def test_drawdown_context_never_implies_causality_with_risk_state():
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=8.0),
+    )
+    screen = RiskScreen(drawdown_history=points)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    lowered = _drawdown_context_block(demo)[0].value.lower()
+    for causal_claim in ("caused by", "triggered", "correlates with", "results in", "because"):
+        assert causal_claim not in lowered
+
+
+def test_drawdown_context_refresh_updates():
+    empty_screen = RiskScreen(drawdown_history=())
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=9.0),
+    )
+    populated_screen = RiskScreen(drawdown_history=points)
+    calls = []
+
+    def provider():
+        calls.append(True)
+        return empty_screen if len(calls) <= 2 else populated_screen
+
+    ui = RiskIntelligenceUI(screen_provider=provider)
+    first = ui._render()
+    second = ui._render()
+
+    # New outputs are appended at the end: index 15 is the current-drawdown-
+    # context line, index 16 is the concentration content.
+    assert first[15]["visible"] is False
+    assert second[15]["visible"] is True
+    assert "9.0%" in second[15]["value"]

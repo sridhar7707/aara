@@ -227,6 +227,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
 )
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import RiskIntelligenceUI
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
+    ConcentrationHolding,
     DrawdownPoint,
     RiskScreen,
     RiskSnapshot,
@@ -1329,6 +1330,40 @@ def _compute_drawdown_history(points) -> Tuple[DrawdownPoint, ...]:
     return tuple(history)
 
 
+def _build_concentration_holdings(db_path: Optional[str]):
+    """Concentration/Parameters/Drawdown-Context sprint: an independent
+    positions -> prices -> _build_portfolio_holdings() read, reusing the
+    SAME LegacyPositionSource / LivePriceSource / _build_portfolio_holdings
+    chain Portfolio Intelligence's own Holdings/Allocation by Holding
+    already uses (_build_portfolio_intelligence_screen above) -- invoked a
+    second, independent time here (own LegacyPositionSource instance, own
+    LivePriceSource call), matching every other per-section adapter's own
+    independence in this product (e.g. outcome_source / calibration_source
+    in Decision Center). No new adapter, no new market-data source.
+
+    Returns (holdings, health): holdings is None when positions or prices
+    could not be read (never mixing a real position with a fabricated
+    price); an empty tuple is a genuine "connected, no open positions"
+    result. weight_pct is taken verbatim from _build_portfolio_holdings --
+    never recomputed here."""
+    legacy_kwargs = legacy_source_kwargs(db_path)
+    positions_result = LegacyPositionSource(**legacy_kwargs).get_open_positions()
+    if positions_result.value is None:
+        return None, positions_result.health
+    if len(positions_result.value) == 0:
+        return (), positions_result.health
+    symbols = tuple(position.symbol for position in positions_result.value)
+    prices_result = LivePriceSource().get_current_prices(symbols)
+    if prices_result.value is None:
+        return None, prices_result.health
+    holdings = _build_portfolio_holdings(positions_result.value, prices_result.value)
+    concentration_holdings = tuple(
+        ConcentrationHolding(symbol=holding.symbol, weight_pct=holding.weight_pct)
+        for holding in holdings
+    )
+    return concentration_holdings, prices_result.health
+
+
 def _build_risk_intelligence_screen(db_path: Optional[str] = None) -> RiskScreen:
     """Assemble one real-or-unavailable RiskScreen from the operational
     `risk_state` table (Group C, mutable) via the read-only
@@ -1369,11 +1404,16 @@ def _build_risk_intelligence_screen(db_path: Optional[str] = None) -> RiskScreen
         if history_result.value is not None
         else None
     )
+    # Concentration/Parameters/Drawdown-Context sprint: independent of both
+    # reads above, same independence convention.
+    concentration_holdings, concentration_health = _build_concentration_holdings(db_path)
     if state_result.value is None:
         return RiskScreen(
             state_health=state_result.health,
             drawdown_history=drawdown_history,
             drawdown_history_health=history_result.health,
+            concentration_holdings=concentration_holdings,
+            concentration_health=concentration_health,
         )
     return RiskScreen(
         current=RiskSnapshot(
@@ -1383,6 +1423,8 @@ def _build_risk_intelligence_screen(db_path: Optional[str] = None) -> RiskScreen
         state_health=state_result.health,
         drawdown_history=drawdown_history,
         drawdown_history_health=history_result.health,
+        concentration_holdings=concentration_holdings,
+        concentration_health=concentration_health,
     )
 
 

@@ -74,6 +74,7 @@ from applications.trading_intelligence.ui.integration_health_view import (
     render_unavailable,
 )
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
+    CURRENT_RISK_PARAMETERS,
     DrawdownPoint,
     RiskHistoryEntry,
     RiskScreen,
@@ -149,6 +150,16 @@ _OBSERVED_CLASSIFICATION_HTML = (
 
 _DRAWDOWN_SECTION_LABEL_HTML = '<div class="ri-section-label">Portfolio Drawdown</div>'
 
+# Concentration/Parameters/Drawdown-Context sprint: a one-line current-
+# drawdown fact placed near Current State, derived from the SAME already-
+# fetched drawdown_history the Portfolio Drawdown chart below reads (its
+# own latest point) -- no new read. Independent of screen.is_available
+# (the current risk-state read), same independence drawdown_history
+# already has relative to Current State elsewhere on this screen. Never
+# implies a causal link between the drawdown level and the risk state.
+_DRAWDOWN_CONTEXT_PREFIX = "Portfolio down "
+_DRAWDOWN_CONTEXT_SUFFIX = "% from peak."
+
 # Sprint 1: real portfolio drawdown over time, computed from the same
 # portfolio_snapshots history Portfolio Intelligence's and Morning Brief's
 # own charts read. Independent of whether the current risk-state read
@@ -177,6 +188,40 @@ _DRAWDOWN_DISCLAIMER_HTML = (
     "risk state."
     "</div>"
     "</div>"
+)
+
+# Concentration/Parameters/Drawdown-Context sprint: how much of the open
+# positions' total market value sits in the single largest holding, reusing
+# the SAME positions -> prices -> _build_portfolio_holdings() chain
+# Portfolio Intelligence's own Holdings/Allocation by Holding already uses
+# (bootstrap.py invokes it a second, independent time for this screen -- no
+# new adapter, no new market-data source). Descriptive only: concentration
+# is never presented as a risk violation, a breach, or a trading signal --
+# this data source carries no such judgment.
+_CONCENTRATION_SECTION_LABEL_HTML = '<div class="ri-section-label">Concentration</div>'
+_CONCENTRATION_UNAVAILABLE_MESSAGE = (
+    "Concentration is not available -- open positions or current prices "
+    "could not be read in this environment."
+)
+_CONCENTRATION_EMPTY_MESSAGE = "No open positions to show concentration for."
+_CONCENTRATION_DISCLAIMER = (
+    "A factual description of how open-position value is distributed by "
+    "symbol. This is not a risk violation, a breach of any limit, or a "
+    "trading signal."
+)
+
+# Static, read-only "current configuration" fact card -- CURRENT_RISK_
+# PARAMETERS (screen.py) is a compile-time constant duplicated by hand from
+# config.py, never a live read, so this section never varies with the
+# RiskScreen passed in and is rendered exactly once in build() (no dynamic
+# output, no Refresh wiring needed). Explicitly labeled as configuration,
+# never as proof this UI enforces it -- enforcement, if any, happens
+# entirely in bot/risk/* and bot/_main_cycle.py, untouched by this package.
+_RISK_PARAMETERS_SECTION_LABEL_HTML = '<div class="ri-section-label">Risk Parameters</div>'
+_RISK_PARAMETERS_DISCLAIMER = (
+    "Current configuration values, shown for reference only. Displaying "
+    "them here is not a guarantee that this screen or any part of Trading "
+    "Intelligence enforces them."
 )
 
 _TRIGGER_REASON_UNAVAILABLE_HTML = (
@@ -395,6 +440,14 @@ class RiskIntelligenceUI:
             current_value, current_visible = self._current_state_output_state(initial)
             current_state_output = gr.HTML(current_value, visible=current_visible)
 
+            drawdown_context_value, drawdown_context_visible = (
+                self._current_drawdown_context_state(initial)
+            )
+            drawdown_context_output = gr.HTML(
+                drawdown_context_value, visible=drawdown_context_visible,
+                elem_classes=["ri-drawdown-context-output"],
+            )
+
             history_label_value, history_label_visible = self._history_label_state(initial)
             history_label = gr.HTML(history_label_value, visible=history_label_visible)
 
@@ -443,6 +496,20 @@ class RiskIntelligenceUI:
                 drawdown_disclaimer_value, visible=drawdown_disclaimer_visible,
             )
 
+            # Concentration: same static-label + single dynamic-content-block
+            # pattern ui/portfolio_intelligence/gradio_view.py's own
+            # Allocation by Holding section uses -- the label never changes,
+            # only the content (unavailable / empty / populated) below it.
+            gr.HTML(_CONCENTRATION_SECTION_LABEL_HTML)
+            concentration_output = gr.HTML(self._concentration_state(initial)[0])
+
+            # Risk Parameters: fully static -- CURRENT_RISK_PARAMETERS never
+            # varies with the RiskScreen passed in, so this is rendered once
+            # here and is deliberately NOT wired into outputs/_render()/
+            # Refresh -- there is nothing to re-fetch.
+            gr.HTML(_RISK_PARAMETERS_SECTION_LABEL_HTML)
+            gr.HTML(self._format_risk_parameters_html())
+
             outputs = [
                 rendered_at_output, snapshot_output, live_announcer,
                 unavailable_output, observed_output,
@@ -450,6 +517,7 @@ class RiskIntelligenceUI:
                 history_label, history_empty_output, history_table,
                 history_detail_label, history_detail_output,
                 drawdown_message_output, drawdown_chart, drawdown_disclaimer_output,
+                drawdown_context_output, concentration_output,
             ]
 
             # Same disable -> render -> enable double-submit guard chain as
@@ -514,6 +582,8 @@ class RiskIntelligenceUI:
             _html_update(self._drawdown_message_state(screen)),
             _chart_update(self._drawdown_chart_state(screen)),
             _html_update(self._drawdown_disclaimer_state(screen)),
+            _html_update(self._current_drawdown_context_state(screen)),
+            _html_update(self._concentration_state(screen)),
         )
 
     # --- per-section state (value, visible), shared by build() and _render() ---
@@ -755,4 +825,103 @@ class RiskIntelligenceUI:
                 "as_of": [pd.Timestamp(point.as_of) for point in points],
                 "drawdown_pct": [point.drawdown_pct for point in points],
             }
+        )
+
+    # --- Concentration, Risk Parameters & Drawdown Context sprint --------
+    #
+    # Concentration is independent of screen.is_available (the current
+    # risk-state read), same independence Portfolio Drawdown already has.
+    # Risk Parameters is fully static (no RiskScreen dependency at all).
+    # The current-drawdown-context line is independent of screen.is_available
+    # too, and reuses drawdown_history -- no new read.
+
+    @staticmethod
+    def _current_drawdown_context_state(screen: RiskScreen) -> Tuple[str, bool]:
+        """One concise line near Current State -- derived from the SAME
+        already-fetched drawdown_history the Portfolio Drawdown chart below
+        reads (its own latest point), never a new read. Honestly absent
+        (not fabricated) when drawdown_history is unavailable or empty."""
+        pct = screen.current_drawdown_pct
+        if pct is None:
+            return ("", False)
+        text = f"{_DRAWDOWN_CONTEXT_PREFIX}{pct:.1f}{_DRAWDOWN_CONTEXT_SUFFIX}"
+        return (f'<div class="ri-drawdown-context">{html.escape(text)}</div>', True)
+
+    @staticmethod
+    def _concentration_state(screen: RiskScreen) -> Tuple[str, bool]:
+        """Same always-visible-with-switching-content pattern
+        ui/portfolio_intelligence/gradio_view.py's own
+        _holding_allocation_state uses: one HTML block whose content
+        switches between the honest unavailable message, the honest empty
+        message, and the real populated bar list -- never a fabricated
+        holding."""
+        if not screen.concentration_is_available:
+            return (
+                render_unavailable(
+                    screen.concentration_health,
+                    fallback_message=_CONCENTRATION_UNAVAILABLE_MESSAGE,
+                ),
+                True,
+            )
+        if screen.concentration_is_empty:
+            return (
+                f'<div class="ri-empty-message aara-empty">'
+                f'{html.escape(_CONCENTRATION_EMPTY_MESSAGE)}</div>',
+                True,
+            )
+        return (RiskIntelligenceUI._format_concentration_html(screen), True)
+
+    @staticmethod
+    def _format_concentration_html(screen: RiskScreen) -> str:
+        """The largest-holding one-liner, a bar per open position (weight_
+        pct already the authoritative figure -- never recomputed here,
+        never renormalized), and a short disclaimer that this is a
+        descriptive fact, not a risk violation or trading signal.
+        Deterministic order: weight_pct descending, symbol ascending on
+        ties -- same rule RiskScreen.largest_concentration_holding uses, so
+        the summary line and the bar list always agree."""
+        largest = screen.largest_concentration_holding
+        summary_html = (
+            f'<div class="ri-concentration-summary">Largest single holding: '
+            f'{html.escape(largest.symbol)} ({largest.weight_pct:.1f}%).</div>'
+        )
+        ordered = sorted(screen.concentration_holdings, key=lambda h: (-h.weight_pct, h.symbol))
+        rows = "".join(
+            '<div class="ri-concentration-row">'
+            f'<span class="ri-concentration-symbol">{html.escape(holding.symbol)}</span>'
+            '<div class="ri-concentration-bar">'
+            f'<div class="fill" style="width:{max(0.0, min(100.0, holding.weight_pct)):.1f}%"></div>'
+            "</div>"
+            f'<span class="ri-concentration-pct">{holding.weight_pct:.1f}%</span>'
+            "</div>"
+            for holding in ordered
+        )
+        return (
+            f"{summary_html}"
+            f'<div class="ri-concentration-list">{rows}</div>'
+            f'<div class="ri-disclosure">'
+            f'<div class="ri-disclosure-body aara-disclosure-body">'
+            f"{html.escape(_CONCENTRATION_DISCLAIMER)}</div>"
+            "</div>"
+        )
+
+    @staticmethod
+    def _format_risk_parameters_html() -> str:
+        """Fully static -- CURRENT_RISK_PARAMETERS (screen.py) is a
+        compile-time constant, duplicated by hand from config.py, never a
+        live read. Rendered exactly once by build(); never wired into
+        outputs/_render()/Refresh, since there is nothing to re-fetch."""
+        rows = "".join(
+            '<div class="ri-record-field">'
+            f'<span class="record-label">{html.escape(param.label)}</span>'
+            f'<span class="record-value">{html.escape(param.value_display)}</span>'
+            "</div>"
+            for param in CURRENT_RISK_PARAMETERS
+        )
+        return (
+            f'<div class="ri-record-card-fields">{rows}</div>'
+            f'<div class="ri-disclosure">'
+            f'<div class="ri-disclosure-body aara-disclosure-body">'
+            f"{html.escape(_RISK_PARAMETERS_DISCLAIMER)}</div>"
+            "</div>"
         )

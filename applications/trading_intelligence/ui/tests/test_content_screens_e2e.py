@@ -88,6 +88,8 @@ from applications.trading_intelligence.ui.risk_intelligence.gradio_view import (
     RiskIntelligenceUI,
 )
 from applications.trading_intelligence.ui.risk_intelligence.screen import (  # noqa: E402
+    CURRENT_RISK_PARAMETERS,
+    ConcentrationHolding,
     DrawdownPoint,
     RiskScreen,
     RiskSnapshot,
@@ -531,7 +533,11 @@ def test_risk_intelligence_renders_real_current_state_and_drawdown_and_honest_hi
     disclosure) alongside a real, populated drawdown chart and its
     non-causal disclaimer; the risk-evaluation-history table -- which this
     data source structurally never populates -- keeps its own honest
-    'not recorded' message rather than an empty table."""
+    'not recorded' message rather than an empty table. Also proves the
+    Concentration/Parameters/Drawdown-Context sprint's three additions:
+    a real concentration bar list with the largest-holding one-liner, the
+    static Risk Parameters card, and the current-drawdown-context line
+    near Current State -- all from real seeded data, in the real browser."""
     screen = RiskScreen(
         current=RiskSnapshot(state="WARNING", as_of="2026-09-01 09:00 CDT"),
         state_health=_HEALTHY,
@@ -540,6 +546,11 @@ def test_risk_intelligence_renders_real_current_state_and_drawdown_and_honest_hi
             DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=95_000.0, drawdown_pct=5.0),
         ),
         drawdown_history_health=_HEALTHY,
+        concentration_holdings=(
+            ConcentrationHolding(symbol="AAPL", weight_pct=65.0),
+            ConcentrationHolding(symbol="MSFT", weight_pct=35.0),
+        ),
+        concentration_health=_HEALTHY,
     )
     ui = RiskIntelligenceUI(screen=screen)
     with _launched_app(ui) as url:
@@ -550,18 +561,46 @@ def test_risk_intelligence_renders_real_current_state_and_drawdown_and_honest_hi
             assert "2026-09-01 09:00 CDT" in visible_text
             assert "Independently observed" in visible_text
             assert "Risk evaluation history is not recorded in this data source." in visible_text
+            # Current drawdown context, near Current State.
+            assert "Portfolio down 5.0% from peak." in visible_text
+            # Concentration: largest-holding one-liner + both symbols.
+            assert "Largest single holding: AAPL (65.0%)." in visible_text
+            assert "AAPL" in visible_text and "MSFT" in visible_text
+            assert "65.0%" in visible_text and "35.0%" in visible_text
+            # .ri-section-label is rendered visually all-caps via CSS
+            # text-transform -- assert case-insensitively on the label,
+            # matching every other screen's own convention in this file.
+            assert "concentration" in visible_text.lower()
+            # Risk Parameters: static card, all six values present. Labels
+            # render visually all-caps via CSS text-transform (.record-label,
+            # see theme.py) -- assert case-insensitively on labels, exact
+            # case on values, matching this file's own established
+            # convention for the same CSS class elsewhere.
+            assert "risk parameters" in visible_text.lower()
+            lowered_visible_text = visible_text.lower()
+            for param in CURRENT_RISK_PARAMETERS:
+                assert param.label.lower() in lowered_visible_text
+                assert param.value_display in visible_text
         finally:
             context.close()
 
 
 def test_risk_intelligence_honest_unavailable_state(browser):
     """No real risk source in this environment -> the screen's single
-    explicit UNAVAILABLE message, never a fabricated state badge."""
+    explicit UNAVAILABLE message for Current State, plus the independent
+    honest unavailable message for Concentration -- never a fabricated
+    state badge or holding. Risk Parameters is static and still renders
+    (it is not gated on any data source)."""
     ui = RiskIntelligenceUI()  # production default: unavailable RiskScreen()
     with _launched_app(ui) as url:
         context, page = _page_with_text(browser, url, "Risk Intelligence data is currently unavailable.")
         try:
-            assert "Risk Intelligence data is currently unavailable." in page.inner_text("body")
+            visible_text = page.inner_text("body")
+            assert "Risk Intelligence data is currently unavailable." in visible_text
+            assert "Concentration is not available" in visible_text
+            assert "risk parameters" in visible_text.lower()
+            for param in CURRENT_RISK_PARAMETERS:
+                assert param.value_display in visible_text
         finally:
             context.close()
 
