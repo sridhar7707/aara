@@ -109,3 +109,97 @@ def test_each_section_carries_its_own_unavailable_message():
     )
 
     assert screen.portfolio_snapshot.unavailable_message == "no portfolio source"
+
+
+# --- Decision Activity & Risk State Context sprint --------------------
+
+
+def test_decision_activity_unavailable_by_default():
+    """No decision_activity_summary supplied -> unavailable, matching
+    every other None-vs-string convention on this screen
+    (MorningBriefSection.is_available)."""
+    screen = _make_screen()
+
+    assert screen.decision_activity_is_available is False
+    assert screen.decision_activity_summary is None
+
+
+def test_decision_activity_populated():
+    screen = _make_screen(
+        decision_activity_summary="3 BUY decisions in the last 24h, 1 already resolved.",
+    )
+
+    assert screen.decision_activity_is_available is True
+    assert screen.decision_activity_summary == (
+        "3 BUY decisions in the last 24h, 1 already resolved."
+    )
+
+
+def test_decision_activity_populated_with_a_real_zero_count():
+    """A HEALTHY read with zero recent decisions is a real fact, not
+    unavailable -- same distinction is_available already makes for every
+    other section (an empty tuple/zero count is available, None is not)."""
+    screen = _make_screen(
+        decision_activity_summary="0 BUY decisions in the last 24h, 0 already resolved.",
+    )
+
+    assert screen.decision_activity_is_available is True
+
+
+def test_current_risk_state_unavailable_by_default():
+    screen = _make_screen()
+
+    assert screen.current_risk_state_is_available is False
+    assert screen.current_risk_state_summary is None
+
+
+def test_current_risk_state_populated():
+    screen = _make_screen(
+        current_risk_state_summary="Current risk state: NORMAL (as of 2026-09-01 14:00 CDT).",
+    )
+
+    assert screen.current_risk_state_is_available is True
+    assert screen.current_risk_state_summary == (
+        "Current risk state: NORMAL (as of 2026-09-01 14:00 CDT)."
+    )
+
+
+def test_decision_activity_and_risk_state_are_independent():
+    """One being unavailable must never affect the other's availability --
+    same independence convention drawdown_history/portfolio_history
+    already have relative to their own sibling fields."""
+    only_decision_activity = _make_screen(
+        decision_activity_summary="1 BUY decisions in the last 24h, 0 already resolved.",
+    )
+    only_risk_state = _make_screen(
+        current_risk_state_summary="Current risk state: WARNING (as of 2026-09-01 14:00 CDT).",
+    )
+
+    assert only_decision_activity.decision_activity_is_available is True
+    assert only_decision_activity.current_risk_state_is_available is False
+
+    assert only_risk_state.decision_activity_is_available is False
+    assert only_risk_state.current_risk_state_is_available is True
+
+
+def test_decision_activity_and_risk_state_do_not_affect_is_empty():
+    """These two additive facts are not part of the frozen four-section IA
+    -- screen.is_empty must stay keyed on the four sections only, exactly
+    as portfolio_history already is."""
+    screen = _make_screen(
+        decision_activity_summary="2 BUY decisions in the last 24h, 2 already resolved.",
+        current_risk_state_summary="Current risk state: NORMAL (as of 2026-09-01 14:00 CDT).",
+    )
+
+    assert screen.is_empty is True
+
+
+def test_screen_stays_frozen_for_decision_activity_and_risk_state_fields():
+    import dataclasses
+    import pytest
+
+    screen = _make_screen()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        screen.decision_activity_summary = "should not be settable"
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        screen.current_risk_state_summary = "should not be settable"

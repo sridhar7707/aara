@@ -123,6 +123,23 @@ _PORTFOLIO_HISTORY_SECTION_LABEL_HTML = (
     '<div class="mb-section-label">Portfolio Value Trend</div>'
 )
 
+# Decision Activity & Risk State Context sprint: two small, always-present
+# facts near Portfolio Snapshot -- reusing the SAME DecisionOutcomeQueryService
+# lineage Decision Center/Performance & Learning already exercise, and the
+# SAME LegacyRiskStateSource read Risk Intelligence's own Current State
+# already uses (both invoked a second, independent time by bootstrap.py's
+# _build_morning_brief_screen -- no new adapter). Purely descriptive: never
+# a recommendation, a trading opportunity, an enforcement claim, a causal
+# claim, or advice.
+_DECISION_ACTIVITY_UNAVAILABLE_MESSAGE = (
+    "Decision activity is not available -- the trades snapshot could not "
+    "be read in this environment."
+)
+_RISK_STATE_UNAVAILABLE_MESSAGE = (
+    "Current risk state is not available -- the operational risk state "
+    "could not be read in this environment."
+)
+
 # Local primitive, not a cross-package import (same "duplicate the
 # primitive" convention ui/portfolio_intelligence/gradio_view.py uses for
 # its own order-timestamp display): America/Chicago, DST-aware via
@@ -228,6 +245,22 @@ class MorningBriefUI:
                     gr.HTML(_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML)
                 section_bodies.append(gr.HTML(self._section_body_html(section)))
 
+            # Decision Activity & Risk State Context sprint: two small,
+            # independently-gated facts near Portfolio Snapshot, above the
+            # Portfolio Value Trend chart. Always present (never hidden
+            # outright) -- content switches between the honest unavailable
+            # message and the real summary, matching the Concentration
+            # section's own always-visible-with-switching-content pattern
+            # (ui/risk_intelligence/gradio_view.py).
+            decision_activity_output = gr.HTML(
+                self._decision_activity_state(initial)[0],
+                elem_classes=["mb-decision-activity-output"],
+            )
+            risk_state_output = gr.HTML(
+                self._current_risk_state_state(initial)[0],
+                elem_classes=["mb-risk-state-output"],
+            )
+
             gr.HTML(_PORTFOLIO_HISTORY_SECTION_LABEL_HTML)
             history_message_value, history_message_visible = (
                 self._portfolio_history_message_state(initial)
@@ -253,6 +286,7 @@ class MorningBriefUI:
                 rendered_at_output, snapshot_output, *section_bodies,
                 portfolio_history_message_output, portfolio_history_chart,
                 portfolio_history_caption_output,
+                decision_activity_output, risk_state_output,
             ]
 
             # Same disable -> render -> enable double-submit guard chain as
@@ -319,6 +353,8 @@ class MorningBriefUI:
             gr.update(value=history_message_value, visible=history_message_visible),
             gr.update(value=history_dataframe, visible=history_visible),
             gr.update(value=self._portfolio_history_caption_html(screen)),
+            gr.update(value=self._decision_activity_state(screen)[0]),
+            gr.update(value=self._current_risk_state_state(screen)[0]),
         )
 
     @staticmethod
@@ -426,4 +462,48 @@ class MorningBriefUI:
             '<div class="mb-subtitle">'
             f"{html.escape(_SECTION_AS_OF_PREFIX + most_recent_as_of)}"
             "</div>"
+        )
+
+    # --- Decision Activity & Risk State Context sprint --------------------
+    #
+    # Each independent of the other and of every section above -- one being
+    # unavailable must never hide or alter the other's real content.
+
+    @staticmethod
+    def _decision_activity_state(screen: MorningBriefScreen) -> Tuple[str, bool]:
+        """Always present (visible=True) -- content switches between the
+        honest unavailable message (routed through the shared
+        render_unavailable() so a real adapter failure names its specific
+        reason) and the real, ready-to-render summary bootstrap.py already
+        formatted. Never fabricates a count."""
+        if not screen.decision_activity_is_available:
+            return (
+                render_unavailable(
+                    screen.decision_activity_health,
+                    fallback_message=_DECISION_ACTIVITY_UNAVAILABLE_MESSAGE,
+                ),
+                True,
+            )
+        return (
+            f'<div class="mb-available-summary">'
+            f'{html.escape(screen.decision_activity_summary)}</div>',
+            True,
+        )
+
+    @staticmethod
+    def _current_risk_state_state(screen: MorningBriefScreen) -> Tuple[str, bool]:
+        """Same always-present, switching-content pattern as
+        _decision_activity_state above."""
+        if not screen.current_risk_state_is_available:
+            return (
+                render_unavailable(
+                    screen.current_risk_state_health,
+                    fallback_message=_RISK_STATE_UNAVAILABLE_MESSAGE,
+                ),
+                True,
+            )
+        return (
+            f'<div class="mb-available-summary">'
+            f'{html.escape(screen.current_risk_state_summary)}</div>',
+            True,
         )

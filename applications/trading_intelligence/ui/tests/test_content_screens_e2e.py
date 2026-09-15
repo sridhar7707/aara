@@ -168,9 +168,13 @@ def test_morning_brief_renders_real_portfolio_snapshot_and_honest_unavailable_se
     """A real Portfolio Snapshot summary renders verbatim, while the three
     still-unwired sections keep their own real, honest unavailable
     messages -- proving populated and unavailable states coexist correctly
-    in the real DOM, not just in the Python return value."""
+    in the real DOM, not just in the Python return value. Also proves the
+    Decision Activity & Risk State Context sprint's two additive facts
+    render from real seeded data alongside everything else."""
     base = build_morning_brief_mock_screen()
     seeded_summary = "Total value $125,430.50 ($42,100.00 cash, $83,330.50 invested)."
+    decision_activity_summary = "3 BUY decisions in the last 24h, 1 already resolved."
+    risk_state_summary = "Current risk state: NORMAL (as of 2026-09-01 09:00 CDT)."
     screen = replace(
         base,
         portfolio_snapshot=replace(
@@ -184,6 +188,10 @@ def test_morning_brief_renders_real_portfolio_snapshot_and_honest_unavailable_se
             MorningBriefPortfolioHistoryPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=125430.50),
         ),
         portfolio_history_health=_HEALTHY,
+        decision_activity_summary=decision_activity_summary,
+        decision_activity_health=_HEALTHY,
+        current_risk_state_summary=risk_state_summary,
+        current_risk_state_health=_HEALTHY,
     )
     ui = MorningBriefUI(screen=screen)
     with _launched_app(ui) as url:
@@ -198,6 +206,15 @@ def test_morning_brief_renders_real_portfolio_snapshot_and_honest_unavailable_se
             assert base.market_mood_regime.unavailable_message in visible_text
             assert base.candidate_screening_summary.unavailable_message in visible_text
             assert base.overnight_holdings_news.unavailable_message in visible_text
+            # Decision Activity & Risk State Context: both real facts.
+            assert decision_activity_summary in visible_text
+            assert risk_state_summary in visible_text
+            # truthfulness guard: no recommendation/advice/enforcement
+            # language anywhere on the page for these two purely factual
+            # additions.
+            lowered = visible_text.lower()
+            for forbidden in ("recommend", "opportunity", "enforced", "you should"):
+                assert forbidden not in lowered
         finally:
             context.close()
 
@@ -205,14 +222,20 @@ def test_morning_brief_renders_real_portfolio_snapshot_and_honest_unavailable_se
 def test_morning_brief_portfolio_history_honest_empty_state(browser):
     """A HEALTHY read with zero rows in the recent window renders the
     honest 'no portfolio history' message, never a fabricated/empty chart
-    presented as if it were data."""
+    presented as if it were data. Also proves Decision Activity and
+    Current Risk State each render their own honest unavailable message
+    when unwired -- the default mock screen's state, matching production
+    before either source is available."""
     base = build_morning_brief_mock_screen()
     screen = replace(base, portfolio_history=(), portfolio_history_health=_HEALTHY)
     ui = MorningBriefUI(screen=screen)
     with _launched_app(ui) as url:
         context, page = _page_with_text(browser, url, "No portfolio history is recorded yet.")
         try:
-            assert "No portfolio history is recorded yet." in page.inner_text("body")
+            visible_text = page.inner_text("body")
+            assert "No portfolio history is recorded yet." in visible_text
+            assert "Decision activity is not available" in visible_text
+            assert "Current risk state is not available" in visible_text
         finally:
             context.close()
 

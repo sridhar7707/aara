@@ -5,9 +5,11 @@ from datetime import datetime, timezone
 
 from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.ui.morning_brief.gradio_view import (
+    _DECISION_ACTIVITY_UNAVAILABLE_MESSAGE,
     _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION,
     _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML,
     _RENDERED_AT_PREFIX,
+    _RISK_STATE_UNAVAILABLE_MESSAGE,
     _SECTION_AS_OF_PREFIX,
     _SNAPSHOT_PREFIX,
     _SNAPSHOT_UNAVAILABLE,
@@ -340,8 +342,9 @@ def test_default_render_shows_no_available_summary_markup():
 
 # render-clock line + operational-snapshot line + one body per
 # MorningBriefScreen.sections (4) + Sprint 1 portfolio-history message,
-# chart, and caption (3)
-_OUTPUT_COUNT = 9
+# chart, and caption (3) + Decision Activity & Risk State Context sprint's
+# two independently-gated facts (2)
+_OUTPUT_COUNT = 11
 
 
 def _refresh_button(demo):
@@ -724,3 +727,167 @@ def test_portfolio_history_refresh_updates_the_chart():
     assert first[7]["visible"] is False
     assert second[7]["visible"] is True
     assert second[7]["value"]["portfolio_value"].tolist() == [100500.0]
+
+
+# --- Decision Activity & Risk State Context sprint -------------------------
+
+
+def _decision_activity_block(demo):
+    return [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.HTML) and "mb-decision-activity-output" in (b.elem_classes or [])
+    ]
+
+
+def _risk_state_block(demo):
+    return [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.HTML) and "mb-risk-state-output" in (b.elem_classes or [])
+    ]
+
+
+def test_decision_activity_unavailable_by_default():
+    """Default mock screen: decision_activity_summary is None."""
+    demo = MorningBriefUI().build()
+
+    blocks = _decision_activity_block(demo)
+    assert len(blocks) == 1
+    assert blocks[0].visible is True
+    assert _DECISION_ACTIVITY_UNAVAILABLE_MESSAGE in blocks[0].value
+
+
+def test_decision_activity_populated_renders_the_real_summary():
+    summary = "3 BUY decisions in the last 24h, 1 already resolved."
+    screen = replace(build_mock_screen(), decision_activity_summary=summary)
+    demo = MorningBriefUI(screen=screen).build()
+
+    block = _decision_activity_block(demo)[0]
+    assert block.visible is True
+    assert summary in block.value
+    assert _DECISION_ACTIVITY_UNAVAILABLE_MESSAGE not in block.value
+
+
+def test_decision_activity_never_implies_recommendation_or_opportunity():
+    """Task guardrail: this is a factual activity count, never a
+    recommendation or a trading opportunity."""
+    summary = "5 BUY decisions in the last 24h, 2 already resolved."
+    screen = replace(build_mock_screen(), decision_activity_summary=summary)
+    demo = MorningBriefUI(screen=screen).build()
+
+    lowered = "\n".join(_html_values(demo)).lower()
+    for forbidden in ("recommend", "opportunity", "you should", "consider buying"):
+        assert forbidden not in lowered
+
+
+def test_risk_state_unavailable_by_default():
+    demo = MorningBriefUI().build()
+
+    blocks = _risk_state_block(demo)
+    assert len(blocks) == 1
+    assert blocks[0].visible is True
+    assert _RISK_STATE_UNAVAILABLE_MESSAGE in blocks[0].value
+
+
+def test_risk_state_populated_renders_the_real_summary():
+    summary = "Current risk state: NORMAL (as of 2026-09-01 14:00 CDT)."
+    screen = replace(build_mock_screen(), current_risk_state_summary=summary)
+    demo = MorningBriefUI(screen=screen).build()
+
+    block = _risk_state_block(demo)[0]
+    assert block.visible is True
+    assert summary in block.value
+    assert _RISK_STATE_UNAVAILABLE_MESSAGE not in block.value
+
+
+def test_risk_state_never_implies_enforcement_causality_or_advice():
+    summary = "Current risk state: WARNING (as of 2026-09-01 14:00 CDT)."
+    screen = replace(build_mock_screen(), current_risk_state_summary=summary)
+    demo = MorningBriefUI(screen=screen).build()
+
+    lowered = "\n".join(_html_values(demo)).lower()
+    for forbidden in ("enforced", "caused by", "predict", "you should", "recommend"):
+        assert forbidden not in lowered
+
+
+def test_decision_activity_unavailable_does_not_hide_risk_state():
+    screen = replace(
+        build_mock_screen(),
+        current_risk_state_summary="Current risk state: NORMAL (as of 2026-09-01 14:00 CDT).",
+    )
+    demo = MorningBriefUI(screen=screen).build()
+
+    assert _decision_activity_block(demo)[0].visible is True
+    assert _DECISION_ACTIVITY_UNAVAILABLE_MESSAGE in _decision_activity_block(demo)[0].value
+    assert "NORMAL" in _risk_state_block(demo)[0].value
+
+
+def test_risk_state_unavailable_does_not_hide_decision_activity():
+    screen = replace(
+        build_mock_screen(),
+        decision_activity_summary="2 BUY decisions in the last 24h, 0 already resolved.",
+    )
+    demo = MorningBriefUI(screen=screen).build()
+
+    assert "2 BUY decisions" in _decision_activity_block(demo)[0].value
+    assert _RISK_STATE_UNAVAILABLE_MESSAGE in _risk_state_block(demo)[0].value
+
+
+def test_decision_activity_and_risk_state_both_unavailable():
+    demo = MorningBriefUI().build()
+
+    assert _DECISION_ACTIVITY_UNAVAILABLE_MESSAGE in _decision_activity_block(demo)[0].value
+    assert _RISK_STATE_UNAVAILABLE_MESSAGE in _risk_state_block(demo)[0].value
+
+
+def test_decision_activity_and_risk_state_both_populated():
+    screen = replace(
+        build_mock_screen(),
+        decision_activity_summary="4 BUY decisions in the last 24h, 3 already resolved.",
+        current_risk_state_summary="Current risk state: DEFENSIVE (as of 2026-09-01 14:00 CDT).",
+    )
+    demo = MorningBriefUI(screen=screen).build()
+
+    assert "4 BUY decisions" in _decision_activity_block(demo)[0].value
+    assert "DEFENSIVE" in _risk_state_block(demo)[0].value
+
+
+def test_decision_activity_and_risk_state_do_not_disturb_existing_sections():
+    """Regression guard: adding the two new facts must not disturb the
+    existing four-section rendering or the portfolio history chart."""
+    screen = replace(
+        _real_portfolio_screen(),
+        decision_activity_summary="1 BUY decisions in the last 24h, 0 already resolved.",
+        current_risk_state_summary="Current risk state: NORMAL (as of 2026-09-01 14:00 CDT).",
+    )
+    combined = "\n".join(_html_values(MorningBriefUI(screen=screen).build()))
+
+    assert "Total value $1.00" in combined
+    assert PORTFOLIO_SNAPSHOT_TITLE in combined
+    assert MARKET_MOOD_REGIME_TITLE in combined
+    assert CANDIDATE_SCREENING_SUMMARY_TITLE in combined
+    assert OVERNIGHT_HOLDINGS_NEWS_TITLE in combined
+
+
+def test_decision_activity_and_risk_state_refresh_updates():
+    empty_screen = build_mock_screen()
+    populated_screen = replace(
+        build_mock_screen(),
+        decision_activity_summary="6 BUY decisions in the last 24h, 4 already resolved.",
+        current_risk_state_summary="Current risk state: NORMAL (as of 2026-09-01 14:00 CDT).",
+    )
+    calls = []
+
+    def provider():
+        calls.append(True)
+        return empty_screen if len(calls) <= 2 else populated_screen
+
+    ui = MorningBriefUI(screen_provider=provider)
+    first = ui._render()
+    second = ui._render()
+
+    # New outputs are appended at the end: index 9 is decision activity,
+    # index 10 is current risk state.
+    assert _DECISION_ACTIVITY_UNAVAILABLE_MESSAGE in first[9]["value"]
+    assert "6 BUY decisions" in second[9]["value"]
+    assert _RISK_STATE_UNAVAILABLE_MESSAGE in first[10]["value"]
+    assert "NORMAL" in second[10]["value"]

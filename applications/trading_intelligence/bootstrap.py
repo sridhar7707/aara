@@ -774,6 +774,63 @@ def _recent_morning_brief_portfolio_history(
     return tuple(windowed)
 
 
+# Decision Activity & Risk State Context sprint: two small, additive
+# Morning Brief facts near Portfolio Snapshot. Both reuse existing,
+# already-tested data paths -- no new adapter, no new pairing/derivation.
+
+_MORNING_BRIEF_DECISION_ACTIVITY_WINDOW_HOURS = 24
+
+
+def _recent_decision_activity_counts(
+    lineage,
+    window_hours: int = _MORNING_BRIEF_DECISION_ACTIVITY_WINDOW_HOURS,
+) -> Tuple[int, int]:
+    """(total, resolved) counts of BUY decisions whose entry_timestamp
+    falls within the last `window_hours` of _now_utc(). Pure fold over an
+    already-fetched OutcomeLineage.decisions -- no I/O, no new derivation.
+    "Resolved" means status is CLOSED specifically, matching Decision
+    Center's own "Decision Outcome" section vocabulary exactly (OPEN/
+    PARTIAL/AMBIGUOUS are all "not yet resolved" there too -- see
+    ui/decision_center/gradio_view.py's _OUTCOME_NOT_YET_RESOLVED_MESSAGE).
+    A naive entry_timestamp is treated as UTC (the bot's own convention,
+    same assumption _format_risk_state_as_of / _format_section_as_of /
+    _recent_morning_brief_portfolio_history already make); an unparseable
+    one is dropped rather than guessed into or out of the window, the same
+    discipline _recent_morning_brief_portfolio_history uses for its own
+    points. The window's lower bound is inclusive."""
+    cutoff = _now_utc() - timedelta(hours=window_hours)
+    total = 0
+    resolved = 0
+    for outcome in lineage.decisions:
+        try:
+            parsed = datetime.fromisoformat(outcome.entry_timestamp)
+        except (TypeError, ValueError):
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        if parsed >= cutoff:
+            total += 1
+            if outcome.status is OutcomeStatus.CLOSED:
+                resolved += 1
+    return total, resolved
+
+
+def _format_decision_activity_summary(total: int, resolved: int) -> str:
+    """Pure formatting, no I/O. A real HEALTHY read with zero recent
+    decisions still yields a real, honest "0 BUY decisions..." sentence --
+    never omitted or replaced with an unavailable message (that is
+    reserved for an actual read failure)."""
+    return f"{total} BUY decisions in the last {_MORNING_BRIEF_DECISION_ACTIVITY_WINDOW_HOURS}h, {resolved} already resolved."
+
+
+def _format_current_risk_state_summary(state: str, as_of_raw: str) -> str:
+    """Reuses _format_risk_state_as_of verbatim -- the SAME timestamp
+    formatting Risk Intelligence's own Current State section already
+    uses -- so this fact's terminology and timestamp semantics are
+    identical, never a second convention."""
+    return f"Current risk state: {state} (as of {_format_risk_state_as_of(as_of_raw)})."
+
+
 def _format_candidate_screening_summary(snapshot: CandidateScreeningSnapshot) -> str:
     """Pure formatting, no I/O -- always states the actual persisted
     screened_at date literally (never "today"), so a stale local
@@ -984,6 +1041,34 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
         else None
     )
 
+    # Decision Activity & Risk State Context sprint: two more independent
+    # reads, same independence convention as portfolio_history above.
+    # Decision activity reuses the SAME DecisionOutcomeQueryService lineage
+    # Decision Center's own outcome linkage and Performance & Learning's
+    # Outcome History already exercise -- its own TradesDbOutcomeReader
+    # instance here, not shared, matching every other per-section adapter's
+    # own independence in this product (e.g. Decision Center's own
+    # outcome_source / calibration_source collaborators).
+    lineage_result = DecisionOutcomeQueryService(
+        TradesDbOutcomeReader(**legacy_kwargs)
+    ).get_lineage()
+    decision_activity_summary = None
+    if lineage_result.value is not None:
+        recent_total, recent_resolved = _recent_decision_activity_counts(lineage_result.value)
+        decision_activity_summary = _format_decision_activity_summary(
+            recent_total, recent_resolved
+        )
+
+    # Current risk state reuses the SAME LegacyRiskStateSource read Risk
+    # Intelligence's own Current State section already uses -- its own
+    # instance here, independent.
+    risk_state_result = LegacyRiskStateSource(**legacy_kwargs).get_risk_state()
+    current_risk_state_summary = None
+    if risk_state_result.value is not None:
+        current_risk_state_summary = _format_current_risk_state_summary(
+            risk_state_result.value.state, risk_state_result.value.as_of,
+        )
+
     return replace(
         illustrative_screen,
         portfolio_snapshot=portfolio_snapshot,
@@ -992,6 +1077,10 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
         overnight_holdings_news=overnight_holdings_news,
         portfolio_history=portfolio_history,
         portfolio_history_health=history_result.health,
+        decision_activity_summary=decision_activity_summary,
+        decision_activity_health=lineage_result.health,
+        current_risk_state_summary=current_risk_state_summary,
+        current_risk_state_health=risk_state_result.health,
     )
 
 

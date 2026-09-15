@@ -68,4 +68,14 @@ CSS = """
 .mb-portfolio-history-chart {
   margin: 4px 0;
 }
+
+/* Decision Activity & Risk State Context sprint: wrapper spacing for the
+   two new facts near Portfolio Snapshot. Content styling (available vs.
+   unavailable) is fully reused from .mb-available-summary / the shared
+   integration-health renderer -- these two rules only control the gap
+   between the two facts and the Portfolio Value Trend chart below them. */
+.mb-decision-activity-output,
+.mb-risk-state-output {
+  margin-bottom: 4px;
+}
 """

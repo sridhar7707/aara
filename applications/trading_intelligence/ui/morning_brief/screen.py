@@ -86,6 +86,37 @@ class MorningBriefScreen:
     # None-vs-empty convention.
     portfolio_history: Optional[Tuple[PortfolioHistoryPoint, ...]] = None
     portfolio_history_health: Optional[IntegrationHealth] = None
+    # Decision Activity & Risk State Context sprint: two small, additive
+    # facts, NOT part of the frozen four-section IA (see `sections` below --
+    # neither is included there, matching portfolio_history's own existing
+    # precedent of an additive field outside the fixed section list).
+    # `decision_activity_summary` is a ready-to-render string (e.g. "3 BUY
+    # decisions in the last 24h, 1 already resolved.") populated by the
+    # composition root from the real DecisionOutcomeQueryService lineage
+    # already exercised elsewhere in this product (Decision Center,
+    # Performance & Learning) -- None means unavailable (the read failed);
+    # a real HEALTHY read with zero recent decisions is still available,
+    # rendering a real "0 BUY decisions..." fact, never treated as
+    # unavailable. `current_risk_state_summary` is the same kind of
+    # ready-to-render string (e.g. "Current risk state: NORMAL (as of
+    # ...).") populated from the real LegacyRiskStateSource read Risk
+    # Intelligence's own Current State section already uses -- None means
+    # unavailable, mirroring RiskScreen.is_available's own convention
+    # (current stays None both when the read failed and when the
+    # risk_state table simply has no row). Independent of each other and
+    # of every other section on this screen.
+    decision_activity_summary: Optional[str] = None
+    decision_activity_health: Optional[IntegrationHealth] = None
+    current_risk_state_summary: Optional[str] = None
+    current_risk_state_health: Optional[IntegrationHealth] = None
+
+    @property
+    def decision_activity_is_available(self) -> bool:
+        return self.decision_activity_summary is not None
+
+    @property
+    def current_risk_state_is_available(self) -> bool:
+        return self.current_risk_state_summary is not None
 
     @property
     def portfolio_history_is_available(self) -> bool:
