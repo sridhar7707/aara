@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import gradio as gr
 import pandas as pd
@@ -15,9 +15,12 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
     _CAPITAL_SOURCE_CAPTION,
     _CAPITAL_UNAVAILABLE_MESSAGE,
     _HOLDINGS_UNAVAILABLE_MESSAGE,
+    _DEFAULT_TIMEFRAME,
     _PARTIAL_DATA_BODY,
     _PARTIAL_DATA_HTML,
     _PARTIAL_DATA_TITLE,
+    _PORTFOLIO_HISTORY_EMPTY_MESSAGE,
+    _PORTFOLIO_HISTORY_NO_DATA_FOR_TIMEFRAME_MESSAGE,
     _PORTFOLIO_HISTORY_UNAVAILABLE_MESSAGE,
     _REAL_DATA_HTML,
     _RECONCILIATION_ALPACA_UNAVAILABLE_MESSAGE,
@@ -26,6 +29,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
     _RENDERED_AT_PREFIX,
     _SNAPSHOT_PREFIX,
     _SNAPSHOT_UNAVAILABLE,
+    _TIMEFRAME_CHOICES,
     _UNAVAILABLE_DATA_BODY,
     _UNAVAILABLE_DATA_HTML,
     _UNAVAILABLE_DATA_TITLE,
@@ -364,6 +368,352 @@ def test_portfolio_history_chart_has_no_derived_performance_metrics():
     chart = _history_chart(PortfolioIntelligenceUI(PortfolioScreen(portfolio_history=points)).build())
 
     assert set(chart.value["columns"]) == {"as_of", "portfolio_value"}
+
+
+# --- Visual Dashboard Phase A: timeframe filtering (pure function) -------
+
+
+_NOW = datetime(2026, 9, 15, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _point(days_ago, value):
+    as_of = (_NOW - timedelta(days=days_ago)).isoformat()
+    return PortfolioHistoryPoint(as_of=as_of, portfolio_value=value)
+
+
+def test_filter_by_timeframe_all_returns_every_point_unchanged():
+    points = (_point(400, 1.0), _point(10, 2.0), _point(0, 3.0))
+    result = PortfolioIntelligenceUI._filter_history_by_timeframe(points, "ALL", _NOW)
+    assert result == points
+
+
+def test_filter_by_timeframe_1d_keeps_only_points_within_the_last_day():
+    points = (_point(2, 1.0), _point(1, 2.0), _point(0, 3.0))
+    result = PortfolioIntelligenceUI._filter_history_by_timeframe(points, "1D", _NOW)
+    assert [p.portfolio_value for p in result] == [2.0, 3.0]
+
+
+def test_filter_by_timeframe_1w_keeps_only_points_within_the_last_seven_days():
+    points = (_point(10, 1.0), _point(7, 2.0), _point(1, 3.0))
+    result = PortfolioIntelligenceUI._filter_history_by_timeframe(points, "1W", _NOW)
+    assert [p.portfolio_value for p in result] == [2.0, 3.0]
+
+
+def test_filter_by_timeframe_1m_uses_a_thirty_day_window():
+    points = (_point(31, 1.0), _point(30, 2.0), _point(1, 3.0))
+    result = PortfolioIntelligenceUI._filter_history_by_timeframe(points, "1M", _NOW)
+    assert [p.portfolio_value for p in result] == [2.0, 3.0]
+
+
+def test_filter_by_timeframe_3m_uses_a_ninety_day_window():
+    points = (_point(91, 1.0), _point(90, 2.0))
+    result = PortfolioIntelligenceUI._filter_history_by_timeframe(points, "3M", _NOW)
+    assert [p.portfolio_value for p in result] == [2.0]
+
+
+def test_filter_by_timeframe_6m_uses_a_hundred_eighty_day_window():
+    points = (_point(181, 1.0), _point(180, 2.0))
+    result = PortfolioIntelligenceUI._filter_history_by_timeframe(points, "6M", _NOW)
+    assert [p.portfolio_value for p in result] == [2.0]
+
+
+def test_filter_by_timeframe_1y_uses_a_three_hundred_sixty_five_day_window():
+    points = (_point(366, 1.0), _point(365, 2.0))
+    result = PortfolioIntelligenceUI._filter_history_by_timeframe(points, "1Y", _NOW)
+    assert [p.portfolio_value for p in result] == [2.0]
+
+
+def test_filter_by_timeframe_ytd_uses_january_first_of_the_current_year():
+    dec_31_last_year = PortfolioHistoryPoint(
+        as_of=datetime(2025, 12, 31, tzinfo=timezone.utc).isoformat(), portfolio_value=1.0,
+    )
+    jan_1_this_year = PortfolioHistoryPoint(
+        as_of=datetime(2026, 1, 1, tzinfo=timezone.utc).isoformat(), portfolio_value=2.0,
+    )
+    result = PortfolioIntelligenceUI._filter_history_by_timeframe(
+        (dec_31_last_year, jan_1_this_year), "YTD", _NOW,
+    )
+    assert [p.portfolio_value for p in result] == [2.0]
+
+
+def test_filter_by_timeframe_preserves_ascending_order():
+    points = (_point(5, 1.0), _point(3, 2.0), _point(1, 3.0))
+    result = PortfolioIntelligenceUI._filter_history_by_timeframe(points, "1W", _NOW)
+    assert result == points
+
+
+def test_filter_by_timeframe_drops_unparseable_as_of_rather_than_guessing():
+    bad = PortfolioHistoryPoint(as_of="not-a-timestamp", portfolio_value=99.0)
+    good = _point(0, 1.0)
+    result = PortfolioIntelligenceUI._filter_history_by_timeframe((bad, good), "1D", _NOW)
+    assert result == (good,)
+
+
+def test_filter_by_timeframe_naive_as_of_is_treated_as_utc():
+    naive = PortfolioHistoryPoint(
+        as_of=(_NOW - timedelta(hours=1)).replace(tzinfo=None).isoformat(),
+        portfolio_value=5.0,
+    )
+    result = PortfolioIntelligenceUI._filter_history_by_timeframe((naive,), "1D", _NOW)
+    assert result == (naive,)
+
+
+def test_filter_by_timeframe_empty_input_is_empty_output():
+    assert PortfolioIntelligenceUI._filter_history_by_timeframe((), "1M", _NOW) == ()
+
+
+# --- Visual Dashboard Phase A: summary calculation (pure function) -------
+
+
+def test_compute_summary_none_for_empty_points():
+    assert PortfolioIntelligenceUI._compute_portfolio_summary(()) is None
+
+
+def test_compute_summary_current_is_the_most_recent_point():
+    points = (_point(5, 100.0), _point(1, 150.0), _point(0, 120.0))
+    summary = PortfolioIntelligenceUI._compute_portfolio_summary(points)
+    assert summary["current"] == 120.0
+
+
+def test_compute_summary_starting_is_the_earliest_point_in_the_window_not_all_time():
+    """Starting value is the first point WITHIN the already-filtered window
+    passed in -- this function never looks beyond what it's given."""
+    points = (_point(5, 100.0), _point(1, 150.0))
+    summary = PortfolioIntelligenceUI._compute_portfolio_summary(points)
+    assert summary["starting"] == 100.0
+
+
+def test_compute_summary_absolute_and_percentage_change_are_plain_arithmetic():
+    points = (_point(5, 100.0), _point(0, 125.0))
+    summary = PortfolioIntelligenceUI._compute_portfolio_summary(points)
+    assert summary["absolute_change"] == 25.0
+    assert summary["percentage_change"] == 25.0
+
+
+def test_compute_summary_negative_change_is_a_real_negative_number():
+    points = (_point(5, 200.0), _point(0, 150.0))
+    summary = PortfolioIntelligenceUI._compute_portfolio_summary(points)
+    assert summary["absolute_change"] == -50.0
+    assert summary["percentage_change"] == -25.0
+
+
+def test_compute_summary_single_point_is_zero_change_not_fabricated():
+    points = (_point(0, 500.0),)
+    summary = PortfolioIntelligenceUI._compute_portfolio_summary(points)
+    assert summary["current"] == 500.0
+    assert summary["starting"] == 500.0
+    assert summary["absolute_change"] == 0.0
+    assert summary["percentage_change"] == 0.0
+
+
+def test_compute_summary_percentage_change_is_none_when_starting_value_is_zero():
+    """Never a fabricated +/-inf or NaN -- division by a real zero starting
+    value is left undefined (None), not computed."""
+    points = (_point(5, 0.0), _point(0, 100.0))
+    summary = PortfolioIntelligenceUI._compute_portfolio_summary(points)
+    assert summary["absolute_change"] == 100.0
+    assert summary["percentage_change"] is None
+
+
+# --- Visual Dashboard Phase A: summary HTML rendering ---------------------
+
+
+def test_format_summary_html_is_empty_string_for_none():
+    assert PortfolioIntelligenceUI._format_portfolio_summary_html(None) == ""
+
+
+def test_format_summary_html_includes_all_four_fields_when_percentage_is_defined():
+    summary = {
+        "current": 1250.5, "starting": 1000.0,
+        "absolute_change": 250.5, "percentage_change": 25.05,
+    }
+    out = PortfolioIntelligenceUI._format_portfolio_summary_html(summary)
+    assert "Current Value" in out and "$1,250.50" in out
+    assert "Starting Value" in out and "$1,000.00" in out
+    assert "Change" in out and "+$250.50" in out
+    assert "% Change" in out and "+25.05%" in out
+
+
+def test_format_summary_html_shows_negative_change_with_a_minus_sign():
+    summary = {
+        "current": 750.0, "starting": 1000.0,
+        "absolute_change": -250.0, "percentage_change": -25.0,
+    }
+    out = PortfolioIntelligenceUI._format_portfolio_summary_html(summary)
+    assert "-$250.00" in out
+    assert "-25.00%" in out
+
+
+def test_format_summary_html_omits_percentage_change_when_none():
+    summary = {
+        "current": 100.0, "starting": 0.0,
+        "absolute_change": 100.0, "percentage_change": None,
+    }
+    out = PortfolioIntelligenceUI._format_portfolio_summary_html(summary)
+    assert "Current Value" in out
+    assert "% Change" not in out
+
+
+def test_format_summary_html_reuses_the_existing_metric_markup_no_new_styling():
+    summary = {
+        "current": 100.0, "starting": 90.0,
+        "absolute_change": 10.0, "percentage_change": 11.11,
+    }
+    out = PortfolioIntelligenceUI._format_portfolio_summary_html(summary)
+    assert 'class="pi-capital-summary"' in out
+    assert 'class="pi-metric"' in out
+    assert 'class="pi-metric-label aara-metric-label"' in out
+    assert 'class="pi-metric-value"' in out
+
+
+# --- Visual Dashboard Phase A: rendered chart/message/summary states -----
+
+
+def _summary_html_values(demo):
+    outputs = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.HTML) and isinstance(getattr(b, "value", None), str)
+        and 'class="pi-capital-summary"' in b.value
+    ]
+    return outputs
+
+
+def test_timeframe_selector_offers_the_eight_required_choices():
+    demo = PortfolioIntelligenceUI().build()
+    radios = [b for b in demo.blocks.values() if isinstance(b, gr.Radio)]
+    assert len(radios) == 1
+    assert [label for label, _value in radios[0].choices] == _TIMEFRAME_CHOICES
+    assert radios[0].value == _DEFAULT_TIMEFRAME
+
+
+def test_summary_renders_for_a_populated_history_at_the_default_all_timeframe():
+    points = (_point(400, 90000.0), _point(0, 100029.85))
+    ui = PortfolioIntelligenceUI(PortfolioScreen(portfolio_history=points))
+    demo = ui.build()
+
+    summaries = _summary_html_values(demo)
+    assert len(summaries) == 1
+    assert "$90,000.00" in summaries[0].value  # starting (ALL = full history)
+    assert "$100,029.85" in summaries[0].value  # current
+
+
+def test_summary_is_empty_when_history_unavailable():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(portfolio_history=None))
+    demo = ui.build()
+
+    assert _summary_html_values(demo) == []
+
+
+def test_summary_is_empty_when_history_is_globally_empty():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(portfolio_history=()))
+    demo = ui.build()
+
+    assert _summary_html_values(demo) == []
+
+
+def test_history_render_state_insufficient_for_timeframe_is_honest_and_distinct():
+    """Real, non-empty history exists, but none of it falls inside the
+    selected timeframe's window -- a distinct message from the
+    zero-rows-total empty state, never silently reused from it."""
+    old_point = _point(400, 100.0)  # well outside any window but ALL/1Y
+    message, message_visible, chart_df, chart_visible, summary = (
+        PortfolioIntelligenceUI()._history_render_state((old_point,), None, "1D")
+    )
+    assert message_visible is True
+    assert _PORTFOLIO_HISTORY_NO_DATA_FOR_TIMEFRAME_MESSAGE in message
+    assert _PORTFOLIO_HISTORY_EMPTY_MESSAGE not in message
+    assert chart_visible is False
+    assert summary == ""
+
+
+def test_history_render_state_populated_for_a_timeframe_with_matching_points():
+    points = (_point(400, 1.0), _point(0, 2.0))
+    message, message_visible, chart_df, chart_visible, summary = (
+        PortfolioIntelligenceUI()._history_render_state(points, None, "1D")
+    )
+    assert message_visible is False
+    assert chart_visible is True
+    assert list(chart_df["portfolio_value"]) == [2.0]
+    assert "Current Value" in summary
+
+
+# --- Visual Dashboard Phase A: timeframe change event (no re-fetch) ------
+
+
+def test_on_timeframe_change_filters_the_state_held_history_not_a_new_fetch():
+    ui = PortfolioIntelligenceUI()
+    points = (_point(400, 1.0), _point(0, 2.0))
+
+    message_update, chart_update, summary_update = ui._on_timeframe_change(
+        "1D", (points, None),
+    )
+
+    assert chart_update["visible"] is True
+    assert list(chart_update["value"]["portfolio_value"]) == [2.0]
+    assert message_update["visible"] is False
+    assert "Current Value" in summary_update["value"]
+
+
+def test_on_timeframe_change_honors_unavailable_health():
+    ui = PortfolioIntelligenceUI()
+    health = IntegrationHealth.not_configured("trades_db_portfolio_history")
+
+    message_update, chart_update, summary_update = ui._on_timeframe_change(
+        "ALL", (None, health),
+    )
+
+    assert message_update["visible"] is True
+    assert chart_update["visible"] is False
+    assert summary_update["value"] == ""
+
+
+def test_timeframe_change_event_only_touches_the_three_history_outputs():
+    """Regression guard: the timeframe selector must never be wired to
+    Capital Summary, Holdings, Alpaca, or reconciliation outputs -- only
+    the message/chart/summary trio changing timeframe actually affects."""
+    demo = PortfolioIntelligenceUI().build()
+
+    radio_id = next(
+        bid for bid, block in demo.blocks.items() if isinstance(block, gr.Radio)
+    )
+    change_dep = next(
+        dep for dep in demo.config["dependencies"]
+        if dep["targets"] == [(radio_id, "change")]
+    )
+    assert len(change_dep["outputs"]) == 3
+
+
+def test_render_with_explicit_timeframe_filters_the_chart():
+    points = (_point(400, 1.0), _point(0, 2.0))
+    ui = PortfolioIntelligenceUI(screen_provider=lambda: PortfolioScreen(portfolio_history=points))
+
+    updates = ui._render(timeframe="1D")
+
+    chart_update = updates[8]  # see build()'s outputs ordering
+    assert list(chart_update["value"]["portfolio_value"]) == [2.0]
+
+
+def test_render_default_timeframe_is_all_full_history_unchanged():
+    """No explicit timeframe passed (existing call sites, existing tests)
+    -> ALL -> byte-identical full-history behavior to before this feature
+    existed."""
+    points = (_point(400, 1.0), _point(200, 2.0), _point(0, 3.0))
+    ui = PortfolioIntelligenceUI(screen_provider=lambda: PortfolioScreen(portfolio_history=points))
+
+    updates = ui._render()
+
+    chart_update = updates[8]
+    assert list(chart_update["value"]["portfolio_value"]) == [1.0, 2.0, 3.0]
+
+
+def test_render_history_state_is_refreshed_with_the_latest_fetch():
+    points = (_point(0, 42.0),)
+    ui = PortfolioIntelligenceUI(screen_provider=lambda: PortfolioScreen(portfolio_history=points))
+
+    updates = ui._render()
+
+    history_state_update = updates[-1]
+    assert history_state_update["value"][0] == points
 
 
 # --- ADR-061 A4: per-section IntegrationHealth in the unavailable state ---
@@ -1018,7 +1368,7 @@ def test_default_screen_renders_zero_visible_dataframes():
 # --- Render-time fetch: Refresh button, demo.load, "as of" indicator ----
 
 
-_OUTPUT_COUNT = 18  # see PortfolioIntelligenceUI.build()'s `outputs` list
+_OUTPUT_COUNT = 20  # see PortfolioIntelligenceUI.build()'s `outputs` list
 
 
 def _refresh_button(demo):
@@ -1144,7 +1494,8 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
         holdings_msg, holdings_tbl, portfolio_history_msg, portfolio_history_chart, \
         alpaca_acct, alpaca_pos_msg, alpaca_pos_tbl, \
         orders_trunc, orders_msg, orders_tbl, \
-        reconciliation_summary, reconciliation_msg, reconciliation_tbl = updates
+        reconciliation_summary, reconciliation_msg, reconciliation_tbl, \
+        portfolio_summary, history_state = updates
 
     assert _SNAPSHOT_UNAVAILABLE in snapshot["value"]
     assert disclosure["value"] == _UNAVAILABLE_DATA_HTML
@@ -1162,6 +1513,10 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
     for tbl in (holdings_tbl, alpaca_pos_tbl, orders_tbl, reconciliation_tbl):
         assert tbl["visible"] is False
         assert tbl["value"] == []
+    # Visual Dashboard Phase A: no summary and an honestly-empty history
+    # state when the underlying screen is fully unavailable.
+    assert portfolio_summary["value"] == ""
+    assert history_state["value"] == (None, None)
     # no fabricated markers from mock_data.py
     mock = build_mock_screen()
     rendered = "\n".join(str(u.get("value")) for u in updates)

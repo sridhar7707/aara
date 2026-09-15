@@ -46,7 +46,7 @@ composed app's single stylesheet by `bootstrap.py`.
 """
 import html
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
@@ -254,15 +254,43 @@ _HOLDINGS_UNAVAILABLE_MESSAGE = (
 
 # Portfolio Value Over Time (real portfolio_snapshots equity/value curve).
 # A read-only observation of the bot's own trades.db history, entirely
-# separate from Capital Summary/Holdings' point-in-time figures above --
-# no derived performance metric (return, drawdown, Sharpe, alpha, beta,
-# CAGR, ROI, attribution) is ever computed from it or rendered anywhere
-# near it; the chart is portfolio_value at each recorded instant, nothing
-# else.
+# separate from Capital Summary/Holdings' point-in-time figures above.
+# Visual Dashboard Phase A: the chart itself still plots portfolio_value at
+# each recorded instant, nothing else, and the timeframe selector below is
+# a pure client-side-triggered filter over that SAME already-fetched
+# history (no new read, no interpolation, no fabricated point). The one
+# addition is the summary line -- current/starting value and their plain
+# absolute/percentage difference over the SELECTED window, simple
+# subtraction/division over two already-real points. No compounding,
+# annualizing, risk-adjusted, or benchmark-relative metric (return series,
+# drawdown, Sharpe, alpha, beta, CAGR, ROI, attribution) is ever computed
+# here or rendered anywhere near it -- those remain explicitly out of
+# Phase A's scope.
 _PORTFOLIO_HISTORY_UNAVAILABLE_MESSAGE = (
     "Portfolio value history is not available -- the managed portfolio "
     "snapshot history could not be read in this environment."
 )
+_PORTFOLIO_HISTORY_EMPTY_MESSAGE = "No portfolio history is recorded yet."
+_PORTFOLIO_HISTORY_NO_DATA_FOR_TIMEFRAME_MESSAGE = (
+    "No portfolio history is available for the selected timeframe."
+)
+
+# Ordered left-to-right in the UI; "ALL" (the full, unfiltered history --
+# today's pre-Phase-A behavior) is the default so a page load / Refresh
+# with no explicit timeframe interaction renders identically to before
+# this feature existed.
+_TIMEFRAME_CHOICES = ["1D", "1W", "1M", "3M", "6M", "YTD", "1Y", "ALL"]
+_DEFAULT_TIMEFRAME = "ALL"
+
+# Calendar-day windows for the fixed-length timeframes -- same "cutoff =
+# now - timedelta(days=N)" convention ui/morning_brief/'s own 30-day
+# portfolio-history window already established (bootstrap.py's
+# _recent_morning_brief_portfolio_history). "YTD" and "ALL" are handled
+# separately (see _filter_history_by_timeframe): YTD's cutoff is January 1
+# of `now`'s own year, not a fixed day count; ALL applies no cutoff at all.
+_TIMEFRAME_WINDOW_DAYS = {
+    "1D": 1, "1W": 7, "1M": 30, "3M": 90, "6M": 180, "1Y": 365,
+}
 
 # Used only when both Capital Summary/Allocation AND Holdings were
 # supplied from real sources (screen.capital_is_available and
@@ -466,13 +494,29 @@ class PortfolioIntelligenceUI:
             )
 
             gr.HTML('<div class="pi-section-label">Portfolio Value Over Time</div>')
-            history_message_value, history_message_visible = (
-                self._portfolio_history_message_state(initial)
+            # Holds the CURRENT render's already-fetched (history, health)
+            # pair so the timeframe selector below can re-filter it without
+            # a second fetch -- refreshed by _render() on every demo.load()/
+            # Refresh, read (never written) by _on_timeframe_change().
+            history_state = gr.State(
+                value=(initial.portfolio_history, initial.portfolio_history_health)
             )
+            timeframe_selector = gr.Radio(
+                choices=_TIMEFRAME_CHOICES,
+                value=_DEFAULT_TIMEFRAME,
+                label="Timeframe",
+                elem_classes=["pi-timeframe-selector"],
+            )
+            (
+                history_message_value, history_message_visible,
+                history_dataframe, history_visible, summary_value,
+            ) = self._history_render_state(
+                initial.portfolio_history, initial.portfolio_history_health, _DEFAULT_TIMEFRAME,
+            )
+            portfolio_summary_output = gr.HTML(summary_value)
             portfolio_history_message_output = gr.HTML(
                 history_message_value, visible=history_message_visible,
             )
-            history_dataframe, history_visible = self._portfolio_history_chart_state(initial)
             portfolio_history_chart = gr.LinePlot(
                 value=history_dataframe,
                 x="as_of",
@@ -592,22 +636,46 @@ class PortfolioIntelligenceUI:
                 # unpack it positionally) stays stable.
                 reconciliation_summary_output, reconciliation_message_output,
                 reconciliation_table,
+                # Visual Dashboard Phase A: same append-only discipline --
+                # the summary line and the (history, health) State both go
+                # at the very end.
+                portfolio_summary_output, history_state,
             ]
 
             # Same disable -> render -> enable double-submit guard chain as
             # ui/decision_center/gradio_view.py's Refresh: a second click
             # while a render is in flight cannot dispatch a second
             # concurrent fetch. _render is wired identically to demo.load()
-            # (same fn, same inputs=None, same outputs) -- only wrapped in
-            # the .then() chain here.
+            # (same fn, same outputs) -- only wrapped in the .then() chain
+            # here. `timeframe_selector` is now an INPUT (not an output) of
+            # _render(), so a Refresh re-renders the CURRENTLY selected
+            # timeframe rather than silently resetting it back to ALL; the
+            # selector's own value is left untouched by every output list
+            # above, so Gradio preserves whatever the user last picked
+            # across the click.
             refresh_button.click(
                 fn=self._disable_refresh_button, inputs=None, outputs=[refresh_button],
             ).then(
-                fn=self._render, inputs=None, outputs=outputs,
+                fn=self._render, inputs=[timeframe_selector], outputs=outputs,
             ).then(
                 fn=self._enable_refresh_button, inputs=None, outputs=[refresh_button],
             )
-            demo.load(fn=self._render, inputs=None, outputs=outputs)
+            demo.load(fn=self._render, inputs=[timeframe_selector], outputs=outputs)
+
+            # Timeframe change: pure re-filter of the (history, health) pair
+            # history_state already holds from the last render/Refresh --
+            # no new fetch, no screen_provider call. Only the three
+            # timeframe-dependent outputs are touched; every other section
+            # (Capital Summary, Holdings, Alpaca, reconciliation, ...) is
+            # untouched by this event.
+            timeframe_selector.change(
+                fn=self._on_timeframe_change,
+                inputs=[timeframe_selector, history_state],
+                outputs=[
+                    portfolio_history_message_output, portfolio_history_chart,
+                    portfolio_summary_output,
+                ],
+            )
 
         return demo
 
@@ -629,15 +697,25 @@ class PortfolioIntelligenceUI:
         success or not."""
         return gr.update(interactive=True)
 
-    def _render(self) -> Tuple[Dict[str, Any], ...]:
+    def _render(self, timeframe: str = _DEFAULT_TIMEFRAME) -> Tuple[Dict[str, Any], ...]:
         """Re-fetch through the provider and return one Gradio update per
         dynamic output, in build()'s `outputs` order. Called by
-        demo.load() on page load and by the Refresh chain. An unchanged
-        provider result yields an unchanged screen; a provider that now
-        returns an all-unavailable PortfolioScreen collapses every section
-        back to its own explicit unavailable state -- there is no mock
-        fallback anywhere in this path."""
+        demo.load() on page load and by the Refresh chain -- `timeframe`
+        is the Timeframe selector's own current value (an INPUT now, not
+        an output of this function), defaulting to ALL only for direct
+        callers that don't pass one (e.g. existing tests, which therefore
+        see byte-identical full-history behavior to before this feature
+        existed). An unchanged provider result yields an unchanged screen;
+        a provider that now returns an all-unavailable PortfolioScreen
+        collapses every section back to its own explicit unavailable
+        state -- there is no mock fallback anywhere in this path."""
         screen = self._screen_provider()
+        (
+            history_message_value, history_message_visible,
+            history_dataframe, history_visible, summary_value,
+        ) = self._history_render_state(
+            screen.portfolio_history, screen.portfolio_history_health, timeframe,
+        )
         return (
             gr.update(value=_format_rendered_at_html(self._now())),
             gr.update(
@@ -648,8 +726,8 @@ class PortfolioIntelligenceUI:
             gr.update(value=self._allocation_state(screen)[0]),
             _html_update(self._holdings_message_state(screen)),
             _table_update(self._holdings_table_state(screen)),
-            _html_update(self._portfolio_history_message_state(screen)),
-            _chart_update(self._portfolio_history_chart_state(screen)),
+            gr.update(value=history_message_value, visible=history_message_visible),
+            gr.update(value=history_dataframe, visible=history_visible),
             gr.update(value=self._alpaca_account_state(screen)[0]),
             _html_update(self._alpaca_positions_message_state(screen)),
             _table_update(self._alpaca_positions_table_state(screen)),
@@ -659,6 +737,31 @@ class PortfolioIntelligenceUI:
             _html_update(self._reconciliation_summary_state(screen)),
             _html_update(self._reconciliation_message_state(screen)),
             _table_update(self._reconciliation_table_state(screen)),
+            gr.update(value=summary_value),
+            gr.update(value=(screen.portfolio_history, screen.portfolio_history_health)),
+        )
+
+    def _on_timeframe_change(
+        self,
+        timeframe: str,
+        history_and_health: Tuple[
+            Optional[Tuple[PortfolioHistoryPoint, ...]], Optional[Any],
+        ],
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+        """Pure re-filter of the (history, health) pair history_state
+        already holds from the last render/Refresh -- no screen_provider
+        call, no new read. Returns updates for exactly the three
+        timeframe-dependent outputs, in the order build() wires them:
+        message, chart, summary."""
+        history, health = history_and_health
+        (
+            message_value, message_visible,
+            chart_dataframe, chart_visible, summary_value,
+        ) = self._history_render_state(history, health, timeframe)
+        return (
+            gr.update(value=message_value, visible=message_visible),
+            gr.update(value=chart_dataframe, visible=chart_visible),
+            gr.update(value=summary_value),
         )
 
     # --- per-section state (value, visible), shared by build() and _render() ---
@@ -701,29 +804,178 @@ class PortfolioIntelligenceUI:
             return (self._format_holdings_rows(screen.holdings), True)
         return ([], False)
 
-    def _portfolio_history_message_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
-        if not screen.portfolio_history_is_available:
-            return (
-                render_unavailable(
-                    screen.portfolio_history_health,
-                    fallback_message=_PORTFOLIO_HISTORY_UNAVAILABLE_MESSAGE,
-                ),
-                True,
-            )
-        if screen.portfolio_history_is_empty:
-            return (
-                f'<div class="pi-empty-message aara-empty">'
-                f'{html.escape(screen.portfolio_history_empty_state_message)}</div>',
-                True,
-            )
-        return ("", False)
+    def _portfolio_history_message_state(
+        self, screen: PortfolioScreen, timeframe: str = _DEFAULT_TIMEFRAME,
+    ) -> Tuple[str, bool]:
+        message_value, message_visible, _, _, _ = self._history_render_state(
+            screen.portfolio_history, screen.portfolio_history_health, timeframe,
+        )
+        return (message_value, message_visible)
 
     def _portfolio_history_chart_state(
-        self, screen: PortfolioScreen,
+        self, screen: PortfolioScreen, timeframe: str = _DEFAULT_TIMEFRAME,
     ) -> Tuple[pd.DataFrame, bool]:
-        if screen.portfolio_history_is_available and not screen.portfolio_history_is_empty:
-            return (self._format_portfolio_history_dataframe(screen.portfolio_history), True)
-        return (self._format_portfolio_history_dataframe(()), False)
+        _, _, chart_dataframe, chart_visible, _ = self._history_render_state(
+            screen.portfolio_history, screen.portfolio_history_health, timeframe,
+        )
+        return (chart_dataframe, chart_visible)
+
+    def _portfolio_summary_state(
+        self, screen: PortfolioScreen, timeframe: str = _DEFAULT_TIMEFRAME,
+    ) -> str:
+        _, _, _, _, summary_value = self._history_render_state(
+            screen.portfolio_history, screen.portfolio_history_health, timeframe,
+        )
+        return summary_value
+
+    def _history_render_state(
+        self,
+        history: Optional[Tuple[PortfolioHistoryPoint, ...]],
+        health: Optional[Any],
+        timeframe: str,
+    ) -> Tuple[str, bool, pd.DataFrame, bool, str]:
+        """Single source of truth for Portfolio Value Over Time's three
+        timeframe-dependent outputs (message, chart, summary) -- returns
+        (message_value, message_visible, chart_dataframe, chart_visible,
+        summary_html). Shared by the screen-driven render path
+        (build()/_render(), via the three thin wrappers above) and the
+        State-driven, no-refetch timeframe-only path (_on_timeframe_change()),
+        so the empty/unavailable/insufficient-for-timeframe/populated
+        decision is made in exactly one place.
+
+        Four states: `history is None` -> unavailable (the managed
+        snapshot history itself could not be read); an empty tuple -> the
+        screen's own honest "no history recorded" message (real source,
+        zero rows, ever); a real, non-empty history that has NO points
+        within the selected timeframe's window -> a distinct, equally
+        honest "no data for this timeframe" message (never silently
+        reused from the zero-rows-total case, which would misstate why
+        nothing is shown); otherwise the real filtered points populate
+        both the chart and the summary."""
+        empty_chart = self._format_portfolio_history_dataframe(())
+        if history is None:
+            return (
+                render_unavailable(
+                    health, fallback_message=_PORTFOLIO_HISTORY_UNAVAILABLE_MESSAGE,
+                ),
+                True, empty_chart, False, "",
+            )
+        if len(history) == 0:
+            return (
+                f'<div class="pi-empty-message aara-empty">'
+                f'{html.escape(_PORTFOLIO_HISTORY_EMPTY_MESSAGE)}</div>',
+                True, empty_chart, False, "",
+            )
+        filtered = self._filter_history_by_timeframe(history, timeframe, self._now())
+        if not filtered:
+            return (
+                f'<div class="pi-empty-message aara-empty">'
+                f'{html.escape(_PORTFOLIO_HISTORY_NO_DATA_FOR_TIMEFRAME_MESSAGE)}</div>',
+                True, empty_chart, False, "",
+            )
+        return (
+            "", False,
+            self._format_portfolio_history_dataframe(filtered), True,
+            self._format_portfolio_summary_html(self._compute_portfolio_summary(filtered)),
+        )
+
+    @staticmethod
+    def _filter_history_by_timeframe(
+        points: Tuple[PortfolioHistoryPoint, ...], timeframe: str, now: datetime,
+    ) -> Tuple[PortfolioHistoryPoint, ...]:
+        """Pure filter over already-fetched real portfolio_history points
+        -- no new read, no interpolation, no fabricated point. "ALL" (and
+        any unrecognized value, defensively) returns every point
+        unchanged. Points already arrive in ascending as_of order (the
+        adapter's own `ORDER BY timestamp ASC`); that order is preserved.
+        A point whose as_of cannot be parsed is dropped rather than
+        guessed into or out of the window -- same "unparseable -> drop,
+        never invent" discipline Morning Brief's own windowing uses."""
+        if timeframe == "ALL":
+            return points
+        if timeframe == "YTD":
+            cutoff = datetime(now.year, 1, 1, tzinfo=timezone.utc)
+        else:
+            window_days = _TIMEFRAME_WINDOW_DAYS.get(timeframe)
+            if window_days is None:
+                return points
+            cutoff = now - timedelta(days=window_days)
+        filtered = []
+        for point in points:
+            try:
+                parsed = datetime.fromisoformat(point.as_of)
+            except (TypeError, ValueError):
+                continue
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            if parsed >= cutoff:
+                filtered.append(point)
+        return tuple(filtered)
+
+    @staticmethod
+    def _compute_portfolio_summary(
+        points: Tuple[PortfolioHistoryPoint, ...],
+    ) -> Optional[Dict[str, Optional[float]]]:
+        """Only ever computed from real, already-filtered points -- plain
+        subtraction/division, never a compounding, annualizing, risk-
+        adjusted, or benchmark-relative metric. `current` is the most
+        recent point's own portfolio_value; `starting` is the EARLIEST
+        point within the selected window (not the all-time starting
+        value, which is a different, un-requested figure). `percentage_
+        change` is None (never a fabricated +/-inf) when the starting
+        value is exactly zero."""
+        if not points:
+            return None
+        current = points[-1].portfolio_value
+        starting = points[0].portfolio_value
+        absolute_change = current - starting
+        percentage_change = (
+            (absolute_change / starting) * 100.0 if starting != 0 else None
+        )
+        return {
+            "current": current,
+            "starting": starting,
+            "absolute_change": absolute_change,
+            "percentage_change": percentage_change,
+        }
+
+    @staticmethod
+    def _format_signed_money(value: float) -> str:
+        sign = "-" if value < 0 else "+"
+        return f"{sign}${abs(value):,.2f}"
+
+    @staticmethod
+    def _format_signed_pct(value: float) -> str:
+        sign = "-" if value < 0 else "+"
+        return f"{sign}{abs(value):.2f}%"
+
+    @staticmethod
+    def _format_portfolio_summary_html(summary: Optional[Dict[str, Optional[float]]]) -> str:
+        """Reuses the exact .pi-capital-summary/.pi-metric/.pi-metric-label/
+        .pi-metric-value markup Capital Summary and the Alpaca Paper
+        Account block already use -- no new metric styling introduced.
+        `""` (hidden) when there is nothing to summarize yet. Percentage
+        Change is omitted entirely (never shown as 0% or blank) when the
+        starting value was zero and no rate is mathematically defined."""
+        if not summary:
+            return ""
+        fields = [
+            ("Current Value", f"${summary['current']:,.2f}"),
+            ("Starting Value", f"${summary['starting']:,.2f}"),
+            ("Change", PortfolioIntelligenceUI._format_signed_money(summary["absolute_change"])),
+        ]
+        if summary["percentage_change"] is not None:
+            fields.append(
+                ("% Change", PortfolioIntelligenceUI._format_signed_pct(summary["percentage_change"]))
+            )
+        metrics_html = "".join(
+            '<div class="pi-metric">'
+            f'<span class="pi-metric-label aara-metric-label">{html.escape(label)}</span>'
+            f'<span class="pi-metric-value">{html.escape(value)}</span>'
+            "</div>"
+            for label, value in fields
+        )
+        return f'<div class="pi-capital-summary">{metrics_html}</div>'
 
     def _alpaca_account_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
         if screen.alpaca_is_available:

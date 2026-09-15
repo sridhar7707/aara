@@ -218,6 +218,17 @@ CSS = """
   padding: 8px 0;
 }
 
+/* Visual Dashboard Phase A: the timeframe selector above the Portfolio
+   Value Over Time chart. Gradio's own gr.Radio renders its choice pills;
+   this only tightens spacing/type to sit calmly under the section label
+   rather than styling the pills themselves. */
+.pi-timeframe-selector {
+  margin: 2px 0 10px 0;
+}
+.pi-timeframe-selector label {
+  font-size: 12px;
+}
+
 /* Alpaca Paper sections (broker-side observation, separate from the
    bot's own capital/holdings). The badge must stay unmistakable as
    paper/sandbox data; unavailable state must stay visually distinct

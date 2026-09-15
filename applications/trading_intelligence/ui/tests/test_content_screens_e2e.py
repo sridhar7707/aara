@@ -45,6 +45,7 @@ from __future__ import annotations
 import os
 from contextlib import contextmanager
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -77,6 +78,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (  # noqa: E402
     AlpacaAccountSnapshot,
     CapitalSummary,
+    PortfolioHistoryPoint,
     PortfolioHolding,
     PortfolioScreen,
     ReconciliationRow,
@@ -347,6 +349,94 @@ def test_portfolio_intelligence_reconciliation_honest_unavailable_state(browser)
             visible_text = page.inner_text("body")
             assert "Reconciliation is not available" in visible_text
             assert "Internal Portfolio" in visible_text
+        finally:
+            context.close()
+
+
+def test_portfolio_intelligence_renders_the_value_chart_summary_and_timeframe_selection(
+    browser,
+):
+    """Visual Dashboard Phase A: a real, multi-year seeded history renders
+    the chart, the eight timeframe choices, and a real ALL-timeframe
+    summary; selecting "1M" then re-filters to a real, different starting
+    value for that shorter window -- proving the selection actually
+    changes what's shown, purely client-triggered (no new fetch).
+    Metric LABELS ("Current Value", "Starting Value", ...) render visually
+    all-caps via CSS text-transform (see design_system.py's shared
+    .aara-metric-label, the same rule Capital Summary already uses) --
+    asserted case-insensitively, same fix already applied elsewhere in
+    this file for the identical pattern. Dollar VALUES carry no such
+    transform and are asserted with their real case."""
+    now = datetime.now(timezone.utc)
+    points = (
+        PortfolioHistoryPoint(
+            as_of=(now - timedelta(days=730)).isoformat(), portfolio_value=50_000.0,
+        ),
+        PortfolioHistoryPoint(
+            as_of=(now - timedelta(days=180)).isoformat(), portfolio_value=80_000.0,
+        ),
+        PortfolioHistoryPoint(
+            as_of=(now - timedelta(days=20)).isoformat(), portfolio_value=95_000.0,
+        ),
+        PortfolioHistoryPoint(as_of=now.isoformat(), portfolio_value=100_000.0),
+    )
+    screen = PortfolioScreen(
+        capital=CapitalSummary(
+            allocated_amount=100_000.0, available_cash=0.0, invested_amount=100_000.0,
+            reserve=0.0, realized_profit=0.0,
+        ),
+        capital_health=_HEALTHY,
+        portfolio_history=points,
+        portfolio_history_health=_HEALTHY,
+    )
+    ui = PortfolioIntelligenceUI(screen=screen)
+    with _launched_app(ui) as url:
+        context, page = _page_with_text(browser, url, "$100,000.00")
+        try:
+            visible_text = page.inner_text("body")
+            assert "portfolio value over time" in visible_text.lower()
+            assert "current value" in visible_text.lower()
+            assert "starting value" in visible_text.lower()
+            for choice in ("1D", "1W", "1M", "3M", "6M", "YTD", "1Y", "ALL"):
+                assert choice in visible_text
+            # Default timeframe is ALL: starting = the earliest real point.
+            assert "$100,000.00" in visible_text  # current
+            assert "$50,000.00" in visible_text  # starting (ALL)
+
+            page.get_by_text("1M", exact=True).click()
+            page.wait_for_function(
+                """() => document.body.innerText.includes("$95,000.00")""",
+                timeout=_TIMEOUT_MS,
+            )
+            visible_text_after = page.inner_text("body")
+            # 1M's own window starts at the 20-days-ago point, not the
+            # all-time earliest one -- a real, different, honest figure.
+            assert "$95,000.00" in visible_text_after
+            assert "$100,000.00" in visible_text_after  # current unchanged
+        finally:
+            context.close()
+
+
+def test_portfolio_intelligence_history_honest_unavailable_state_no_summary(browser):
+    """Portfolio history unavailable -> its own honest unavailable message,
+    and no summary block is fabricated alongside it."""
+    screen = PortfolioScreen(
+        capital=CapitalSummary(
+            allocated_amount=50_000.0, available_cash=50_000.0,
+            invested_amount=0.0, reserve=0.0, realized_profit=0.0,
+        ),
+        capital_health=_HEALTHY,
+        portfolio_history=None,
+    )
+    ui = PortfolioIntelligenceUI(screen=screen)
+    with _launched_app(ui) as url:
+        context, page = _page_with_text(
+            browser, url, "Portfolio value history is not available"
+        )
+        try:
+            visible_text = page.inner_text("body")
+            assert "Portfolio value history is not available" in visible_text
+            assert "Current Value" not in visible_text
         finally:
             context.close()
 
