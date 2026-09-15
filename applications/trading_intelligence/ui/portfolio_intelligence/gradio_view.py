@@ -62,6 +62,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     AlpacaOrder,
     AlpacaPosition,
     CapitalSummary,
+    PortfolioDrawdownPoint,
     PortfolioHistoryPoint,
     PortfolioHolding,
     PortfolioScreen,
@@ -292,6 +293,29 @@ _TIMEFRAME_WINDOW_DAYS = {
     "1D": 1, "1W": 7, "1M": 30, "3M": 90, "6M": 180, "1Y": 365,
 }
 
+# Visual Dashboard Phase B: drawdown chart, visually complementing the
+# Portfolio Value Over Time chart above -- reuses the SAME already-fetched
+# portfolio_history and the SAME timeframe_selector (no second control, no
+# second fetch). See _compute_portfolio_drawdown_history for the running-
+# peak algorithm (mirrors bootstrap.py's own _compute_drawdown_history --
+# Risk Intelligence's drawdown chart -- as a pattern, not a cross-package
+# import; this package stays self-contained). Never implies prediction,
+# causality, or future risk -- a backward-looking observation only.
+_DRAWDOWN_UNAVAILABLE_MESSAGE = (
+    "Portfolio drawdown is not available -- the managed portfolio "
+    "snapshot history could not be read in this environment."
+)
+_DRAWDOWN_EMPTY_MESSAGE = "No portfolio history is recorded yet."
+_DRAWDOWN_NO_DATA_FOR_TIMEFRAME_MESSAGE = (
+    "No portfolio history is available for the selected timeframe."
+)
+_DRAWDOWN_DISCLAIMER = (
+    "Historical drawdown, measured from the running peak of the portfolio "
+    "value shown above, over the same timeframe selected above. A "
+    "backward-looking observation only -- it does not predict, imply, or "
+    "measure future risk."
+)
+
 # Used only when both Capital Summary/Allocation AND Holdings were
 # supplied from real sources (screen.capital_is_available and
 # screen.holdings_is_available both True). Holdings' current price/market
@@ -493,6 +517,9 @@ class PortfolioIntelligenceUI:
                 **{_DATAFRAME_HEIGHT_KWARG: 320},
             )
 
+            gr.HTML('<div class="pi-section-label">Allocation by Holding</div>')
+            holding_allocation_output = gr.HTML(self._holding_allocation_state(initial)[0])
+
             gr.HTML('<div class="pi-section-label">Portfolio Value Over Time</div>')
             # Holds the CURRENT render's already-fetched (history, health)
             # pair so the timeframe selector below can re-filter it without
@@ -525,6 +552,30 @@ class PortfolioIntelligenceUI:
                 y_title="Portfolio Value ($)",
                 visible=history_visible,
                 elem_classes=["pi-portfolio-history-chart"],
+            )
+
+            # Drawdown: visually complements the value chart directly above
+            # it, sharing the SAME timeframe_selector -- no second control.
+            gr.HTML('<div class="pi-section-label">Drawdown</div>')
+            gr.HTML(f'<div class="pi-source-caption">{html.escape(_DRAWDOWN_DISCLAIMER)}</div>')
+            (
+                drawdown_message_value, drawdown_message_visible,
+                drawdown_dataframe, drawdown_visible, drawdown_summary_value,
+            ) = self._drawdown_render_state(
+                initial.portfolio_history, initial.portfolio_history_health, _DEFAULT_TIMEFRAME,
+            )
+            drawdown_summary_output = gr.HTML(drawdown_summary_value)
+            drawdown_message_output = gr.HTML(
+                drawdown_message_value, visible=drawdown_message_visible,
+            )
+            drawdown_chart = gr.LinePlot(
+                value=drawdown_dataframe,
+                x="as_of",
+                y="drawdown_pct",
+                x_title="Date",
+                y_title="Drawdown (%)",
+                visible=drawdown_visible,
+                elem_classes=["pi-portfolio-drawdown-chart"],
             )
 
             gr.HTML(
@@ -640,6 +691,11 @@ class PortfolioIntelligenceUI:
                 # the summary line and the (history, health) State both go
                 # at the very end.
                 portfolio_summary_output, history_state,
+                # Visual Dashboard Phase B: same append-only discipline --
+                # allocation-by-holding (screen-driven, no timeframe
+                # involvement) and the drawdown chart's own three outputs.
+                holding_allocation_output,
+                drawdown_summary_output, drawdown_message_output, drawdown_chart,
             ]
 
             # Same disable -> render -> enable double-submit guard chain as
@@ -664,16 +720,20 @@ class PortfolioIntelligenceUI:
 
             # Timeframe change: pure re-filter of the (history, health) pair
             # history_state already holds from the last render/Refresh --
-            # no new fetch, no screen_provider call. Only the three
-            # timeframe-dependent outputs are touched; every other section
-            # (Capital Summary, Holdings, Alpaca, reconciliation, ...) is
-            # untouched by this event.
+            # no new fetch, no screen_provider call. Only the six
+            # timeframe-dependent outputs (value chart's three, drawdown
+            # chart's three) are touched; every other section (Capital
+            # Summary, Holdings, allocation-by-holding, Alpaca,
+            # reconciliation, ...) is untouched by this event. Both charts
+            # share this ONE selector -- there is no second timeframe
+            # control for drawdown.
             timeframe_selector.change(
                 fn=self._on_timeframe_change,
                 inputs=[timeframe_selector, history_state],
                 outputs=[
                     portfolio_history_message_output, portfolio_history_chart,
                     portfolio_summary_output,
+                    drawdown_message_output, drawdown_chart, drawdown_summary_output,
                 ],
             )
 
@@ -716,6 +776,12 @@ class PortfolioIntelligenceUI:
         ) = self._history_render_state(
             screen.portfolio_history, screen.portfolio_history_health, timeframe,
         )
+        (
+            drawdown_message_value, drawdown_message_visible,
+            drawdown_dataframe, drawdown_visible, drawdown_summary_value,
+        ) = self._drawdown_render_state(
+            screen.portfolio_history, screen.portfolio_history_health, timeframe,
+        )
         return (
             gr.update(value=_format_rendered_at_html(self._now())),
             gr.update(
@@ -739,6 +805,10 @@ class PortfolioIntelligenceUI:
             _table_update(self._reconciliation_table_state(screen)),
             gr.update(value=summary_value),
             gr.update(value=(screen.portfolio_history, screen.portfolio_history_health)),
+            gr.update(value=self._holding_allocation_state(screen)[0]),
+            gr.update(value=drawdown_summary_value),
+            gr.update(value=drawdown_message_value, visible=drawdown_message_visible),
+            gr.update(value=drawdown_dataframe, visible=drawdown_visible),
         )
 
     def _on_timeframe_change(
@@ -747,21 +817,34 @@ class PortfolioIntelligenceUI:
         history_and_health: Tuple[
             Optional[Tuple[PortfolioHistoryPoint, ...]], Optional[Any],
         ],
-    ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    ) -> Tuple[
+        Dict[str, Any], Dict[str, Any], Dict[str, Any],
+        Dict[str, Any], Dict[str, Any], Dict[str, Any],
+    ]:
         """Pure re-filter of the (history, health) pair history_state
         already holds from the last render/Refresh -- no screen_provider
-        call, no new read. Returns updates for exactly the three
+        call, no new read. Returns updates for exactly the six
         timeframe-dependent outputs, in the order build() wires them:
-        message, chart, summary."""
+        value-chart message, chart, summary, then drawdown message, chart,
+        summary. Both charts share this ONE timeframe -- there is no
+        second selector, and both are re-filtered from the SAME
+        history_state pair."""
         history, health = history_and_health
         (
             message_value, message_visible,
             chart_dataframe, chart_visible, summary_value,
         ) = self._history_render_state(history, health, timeframe)
+        (
+            drawdown_message_value, drawdown_message_visible,
+            drawdown_dataframe, drawdown_visible, drawdown_summary_value,
+        ) = self._drawdown_render_state(history, health, timeframe)
         return (
             gr.update(value=message_value, visible=message_visible),
             gr.update(value=chart_dataframe, visible=chart_visible),
             gr.update(value=summary_value),
+            gr.update(value=drawdown_message_value, visible=drawdown_message_visible),
+            gr.update(value=drawdown_dataframe, visible=drawdown_visible),
+            gr.update(value=drawdown_summary_value),
         )
 
     # --- per-section state (value, visible), shared by build() and _render() ---
@@ -803,6 +886,26 @@ class PortfolioIntelligenceUI:
         if screen.holdings_is_available and not screen.is_empty:
             return (self._format_holdings_rows(screen.holdings), True)
         return ([], False)
+
+    def _holding_allocation_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
+        """Visual Dashboard Phase B: same availability/empty gating as
+        Holdings itself (screen.holdings_is_available / screen.is_empty) --
+        this is a visual companion to that same table, sourced from the
+        SAME already-fetched holdings, never a second read. Always
+        visible=True (the content itself switches between unavailable/
+        empty/populated), matching Capital Allocation's own simpler
+        single-output shape above rather than Holdings' message+table
+        pair, since this renders as one HTML block, not a hideable table."""
+        if not screen.holdings_is_available:
+            return (
+                render_unavailable(
+                    screen.holdings_health, fallback_message=_HOLDINGS_UNAVAILABLE_MESSAGE,
+                ),
+                True,
+            )
+        if screen.is_empty:
+            return (self._format_empty_message_html(screen), True)
+        return (self._format_holding_allocation_html(screen.holdings), True)
 
     def _portfolio_history_message_state(
         self, screen: PortfolioScreen, timeframe: str = _DEFAULT_TIMEFRAME,
@@ -976,6 +1079,136 @@ class PortfolioIntelligenceUI:
             for label, value in fields
         )
         return f'<div class="pi-capital-summary">{metrics_html}</div>'
+
+    # --- Visual Dashboard Phase B: drawdown ------------------------------
+
+    def _drawdown_render_state(
+        self,
+        history: Optional[Tuple[PortfolioHistoryPoint, ...]],
+        health: Optional[Any],
+        timeframe: str,
+    ) -> Tuple[str, bool, pd.DataFrame, bool, str]:
+        """Single source of truth for the drawdown chart's three
+        timeframe-dependent outputs (message, chart, summary) -- mirrors
+        _history_render_state's own four-state shape exactly (unavailable
+        / empty / no-data-for-timeframe / populated), reusing the SAME
+        already-fetched `history` the value chart uses (no second read).
+        The running peak is always computed over the FULL history BEFORE
+        any timeframe filtering (see _compute_portfolio_drawdown_history),
+        so a shorter window (e.g. "1M") shows real drawdown from the TRUE
+        all-time peak, never a peak invented from the window's own first
+        point."""
+        empty_chart = self._format_portfolio_drawdown_dataframe(())
+        if history is None:
+            return (
+                render_unavailable(health, fallback_message=_DRAWDOWN_UNAVAILABLE_MESSAGE),
+                True, empty_chart, False, "",
+            )
+        if len(history) == 0:
+            return (
+                f'<div class="pi-empty-message aara-empty">'
+                f'{html.escape(_DRAWDOWN_EMPTY_MESSAGE)}</div>',
+                True, empty_chart, False, "",
+            )
+        full_drawdown = self._compute_portfolio_drawdown_history(history)
+        # _filter_history_by_timeframe only ever reads `.as_of` off each
+        # point -- reused here as-is (duck-typed) over PortfolioDrawdownPoint
+        # rather than duplicated, exactly like Phase A's own value chart.
+        filtered = self._filter_history_by_timeframe(full_drawdown, timeframe, self._now())
+        if not filtered:
+            return (
+                f'<div class="pi-empty-message aara-empty">'
+                f'{html.escape(_DRAWDOWN_NO_DATA_FOR_TIMEFRAME_MESSAGE)}</div>',
+                True, empty_chart, False, "",
+            )
+        return (
+            "", False,
+            self._format_portfolio_drawdown_dataframe(filtered), True,
+            self._format_drawdown_summary_html(self._compute_drawdown_summary(filtered)),
+        )
+
+    @staticmethod
+    def _compute_portfolio_drawdown_history(
+        points: Tuple[PortfolioHistoryPoint, ...],
+    ) -> Tuple[PortfolioDrawdownPoint, ...]:
+        """Same running-peak algorithm as bootstrap.py's own
+        _compute_drawdown_history() (Risk Intelligence's drawdown chart) --
+        reused here as a pattern, not by cross-package import (this
+        package stays self-contained), with the sign convention this
+        feature's own spec calls for: drawdown_pct = (value - peak) / peak
+        * 100 -- 0.0 at a new peak, negative while underwater, never
+        positive. A non-positive running peak (should not occur for a real
+        portfolio_snapshots row, but handled defensively) yields
+        drawdown_pct=0.0 rather than a division error or a fabricated
+        value. Always computed over the FULL, unfiltered `points` passed
+        in -- the running peak is the TRUE all-time peak up to each point,
+        never reset by a display window (see _drawdown_render_state, which
+        filters the ALREADY-computed points by timeframe afterward)."""
+        history = []
+        peak: Optional[float] = None
+        for point in points:
+            value = point.portfolio_value
+            if peak is None or value > peak:
+                peak = value
+            drawdown_pct = 0.0 if not peak or peak <= 0 else (value - peak) / peak * 100.0
+            history.append(
+                PortfolioDrawdownPoint(
+                    as_of=point.as_of, portfolio_value=value, drawdown_pct=drawdown_pct,
+                )
+            )
+        return tuple(history)
+
+    @staticmethod
+    def _compute_drawdown_summary(
+        points: Tuple[PortfolioDrawdownPoint, ...],
+    ) -> Optional[Dict[str, float]]:
+        """Only ever computed from real, already-filtered drawdown points.
+        `current_drawdown_pct` is the most recent point's own drawdown;
+        `max_drawdown_pct` is the single most negative value within the
+        selected window (the deepest real observed drawdown in that
+        range) -- plain min(), never an estimate or a claim about the
+        future."""
+        if not points:
+            return None
+        return {
+            "current_drawdown_pct": points[-1].drawdown_pct,
+            "max_drawdown_pct": min(p.drawdown_pct for p in points),
+        }
+
+    @staticmethod
+    def _format_drawdown_summary_html(summary: Optional[Dict[str, float]]) -> str:
+        """Reuses the exact .pi-capital-summary/.pi-metric markup every
+        other summary card on this screen already uses -- no new metric
+        styling introduced. `""` (hidden) when there is nothing to
+        summarize yet."""
+        if not summary:
+            return ""
+        fields = [
+            ("Current Drawdown", f"{summary['current_drawdown_pct']:.2f}%"),
+            ("Max Drawdown", f"{summary['max_drawdown_pct']:.2f}%"),
+        ]
+        metrics_html = "".join(
+            '<div class="pi-metric">'
+            f'<span class="pi-metric-label aara-metric-label">{html.escape(label)}</span>'
+            f'<span class="pi-metric-value">{html.escape(value)}</span>'
+            "</div>"
+            for label, value in fields
+        )
+        return f'<div class="pi-capital-summary">{metrics_html}</div>'
+
+    @staticmethod
+    def _format_portfolio_drawdown_dataframe(
+        points: Tuple[PortfolioDrawdownPoint, ...],
+    ) -> pd.DataFrame:
+        """Two real columns only -- each point's own as_of instant and its
+        own drawdown_pct (already computed above from real portfolio_
+        history rows -- never recomputed or altered here)."""
+        return pd.DataFrame(
+            {
+                "as_of": [pd.Timestamp(point.as_of) for point in points],
+                "drawdown_pct": [point.drawdown_pct for point in points],
+            }
+        )
 
     def _alpaca_account_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
         if screen.alpaca_is_available:
@@ -1178,6 +1411,32 @@ class PortfolioIntelligenceUI:
             ]
             for holding in holdings
         ]
+
+    @staticmethod
+    def _format_holding_allocation_html(holdings: Tuple[PortfolioHolding, ...]) -> str:
+        """Visual Dashboard Phase B: one bar per holding -- symbol +
+        allocation percentage. weight_pct is already the authoritative,
+        live-priced figure PortfolioHolding carries (see bootstrap.py's
+        _build_portfolio_holdings, which computes it as this holding's
+        share of total holdings market value) -- reused verbatim here,
+        never recomputed, never a new valuation. Deterministic order:
+        weight_pct descending (the most useful reading order for "what am
+        I most exposed to"), ties broken alphabetically by symbol so the
+        same inputs always render the same order. One decimal place only
+        -- matches the Holdings table's own Weight % column -- avoids
+        implying false precision."""
+        ordered = sorted(holdings, key=lambda h: (-h.weight_pct, h.symbol))
+        rows = "".join(
+            '<div class="pi-holding-allocation-row">'
+            f'<span class="pi-holding-allocation-symbol">{html.escape(holding.symbol)}</span>'
+            '<div class="pi-holding-allocation-bar">'
+            f'<div class="fill" style="width:{max(0.0, min(100.0, holding.weight_pct)):.1f}%"></div>'
+            "</div>"
+            f'<span class="pi-holding-allocation-pct">{holding.weight_pct:.1f}%</span>'
+            "</div>"
+            for holding in ordered
+        )
+        return f'<div class="pi-holding-allocation-list">{rows}</div>'
 
     @staticmethod
     def _format_empty_message_html(screen: PortfolioScreen) -> str:

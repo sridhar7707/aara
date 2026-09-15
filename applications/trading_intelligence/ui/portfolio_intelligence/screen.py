@@ -123,6 +123,28 @@ class PortfolioHistoryPoint:
     portfolio_value: float
 
 
+@dataclass(frozen=True)
+class PortfolioDrawdownPoint:
+    """Visual Dashboard Phase B: one real portfolio_history point plus its
+    own drawdown from the running peak observed up to and including that
+    point -- computed (see gradio_view.py's
+    _compute_portfolio_drawdown_history) over the FULL, unfiltered
+    portfolio_history, never a peak reset by a display window.
+    drawdown_pct is 0.0 at a new all-time-high point and a NEGATIVE
+    percentage the further portfolio_value sits below the running peak
+    (the standard "underwater equity curve" convention: 0% at the peak,
+    negative while below it, never positive) -- this is a derived figure,
+    plain arithmetic over already-real points, never a prediction or a
+    causal claim. Duplicated from ui/risk_intelligence/screen.py's own
+    DrawdownPoint shape rather than imported -- this package stays
+    self-contained (see gradio_view.py's own module docstring), and Risk
+    Intelligence's DrawdownPoint uses the opposite (always non-negative)
+    sign convention for its own, differently-scoped chart."""
+    as_of: str
+    portfolio_value: float
+    drawdown_pct: float
+
+
 class ReconciliationStatus(Enum):
     """The four factual outcomes of comparing one symbol's Internal
     Portfolio quantity against its Alpaca PAPER quantity -- descriptive

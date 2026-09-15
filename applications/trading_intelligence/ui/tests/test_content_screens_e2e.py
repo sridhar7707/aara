@@ -356,17 +356,22 @@ def test_portfolio_intelligence_reconciliation_honest_unavailable_state(browser)
 def test_portfolio_intelligence_renders_the_value_chart_summary_and_timeframe_selection(
     browser,
 ):
-    """Visual Dashboard Phase A: a real, multi-year seeded history renders
-    the chart, the eight timeframe choices, and a real ALL-timeframe
-    summary; selecting "1M" then re-filters to a real, different starting
-    value for that shorter window -- proving the selection actually
-    changes what's shown, purely client-triggered (no new fetch).
-    Metric LABELS ("Current Value", "Starting Value", ...) render visually
-    all-caps via CSS text-transform (see design_system.py's shared
-    .aara-metric-label, the same rule Capital Summary already uses) --
-    asserted case-insensitively, same fix already applied elsewhere in
-    this file for the identical pattern. Dollar VALUES carry no such
-    transform and are asserted with their real case."""
+    """Visual Dashboard Phase A + B: a real, multi-year seeded history
+    (with a real intermediate dip, at 100 days ago, for the drawdown
+    chart to show something other than a flat 0%) renders the value
+    chart, the drawdown chart, the eight timeframe choices, and real
+    ALL-timeframe summaries for both; selecting "1M" then re-filters BOTH
+    charts consistently to real, different figures for that shorter
+    window (Starting Value for the value chart; Max Drawdown for the
+    drawdown chart, since the 100-days-ago dip falls outside a 30-day
+    window) -- proving the single shared selector actually changes what's
+    shown on both, purely client-triggered (no new fetch).
+    Metric LABELS ("Current Value", "Starting Value", "Max Drawdown", ...)
+    render visually all-caps via CSS text-transform (see design_system.py's
+    shared .aara-metric-label, the same rule Capital Summary already
+    uses) -- asserted case-insensitively, same fix already applied
+    elsewhere in this file for the identical pattern. Dollar/percentage
+    VALUES carry no such transform and are asserted with their real case."""
     now = datetime.now(timezone.utc)
     points = (
         PortfolioHistoryPoint(
@@ -374,6 +379,11 @@ def test_portfolio_intelligence_renders_the_value_chart_summary_and_timeframe_se
         ),
         PortfolioHistoryPoint(
             as_of=(now - timedelta(days=180)).isoformat(), portfolio_value=80_000.0,
+        ),
+        # A real dip below the 80,000 peak-so-far, OUTSIDE the "1M" (30-day)
+        # window -- (60,000 - 80,000) / 80,000 * 100 = -25.00%.
+        PortfolioHistoryPoint(
+            as_of=(now - timedelta(days=100)).isoformat(), portfolio_value=60_000.0,
         ),
         PortfolioHistoryPoint(
             as_of=(now - timedelta(days=20)).isoformat(), portfolio_value=95_000.0,
@@ -397,11 +407,16 @@ def test_portfolio_intelligence_renders_the_value_chart_summary_and_timeframe_se
             assert "portfolio value over time" in visible_text.lower()
             assert "current value" in visible_text.lower()
             assert "starting value" in visible_text.lower()
+            assert "drawdown" in visible_text.lower()
+            assert "current drawdown" in visible_text.lower()
+            assert "max drawdown" in visible_text.lower()
             for choice in ("1D", "1W", "1M", "3M", "6M", "YTD", "1Y", "ALL"):
                 assert choice in visible_text
-            # Default timeframe is ALL: starting = the earliest real point.
-            assert "$100,000.00" in visible_text  # current
-            assert "$50,000.00" in visible_text  # starting (ALL)
+            # Default timeframe is ALL: starting = the earliest real point;
+            # max drawdown = the real -25.00% dip at 100 days ago.
+            assert "$100,000.00" in visible_text  # current value
+            assert "$50,000.00" in visible_text  # starting value (ALL)
+            assert "-25.00%" in visible_text  # max drawdown (ALL)
 
             page.get_by_text("1M", exact=True).click()
             page.wait_for_function(
@@ -413,6 +428,11 @@ def test_portfolio_intelligence_renders_the_value_chart_summary_and_timeframe_se
             # all-time earliest one -- a real, different, honest figure.
             assert "$95,000.00" in visible_text_after
             assert "$100,000.00" in visible_text_after  # current unchanged
+            # The -25% dip (100 days ago) falls OUTSIDE the 1M window, so
+            # the drawdown summary consistently updates too -- both charts
+            # driven by the SAME one selector, the same state-held history.
+            assert "-25.00%" not in visible_text_after
+            assert "0.00%" in visible_text_after  # max/current drawdown within 1M
         finally:
             context.close()
 
@@ -437,6 +457,66 @@ def test_portfolio_intelligence_history_honest_unavailable_state_no_summary(brow
             visible_text = page.inner_text("body")
             assert "Portfolio value history is not available" in visible_text
             assert "Current Value" not in visible_text
+        finally:
+            context.close()
+
+
+def test_portfolio_intelligence_renders_allocation_by_holding(browser):
+    """Visual Dashboard Phase B: real seeded holdings render as a symbol +
+    allocation-percentage visualization, in a real browser, deterministically
+    ordered by weight descending. ".pi-section-label" is rendered visually
+    all-caps via CSS text-transform (see theme.py) -- asserted case-
+    insensitively; the symbol/percentage values carry no such transform."""
+    screen = PortfolioScreen(
+        capital=CapitalSummary(
+            allocated_amount=100_000.0, available_cash=40_000.0, invested_amount=60_000.0,
+            reserve=0.0, realized_profit=0.0,
+        ),
+        capital_health=_HEALTHY,
+        holdings=(
+            PortfolioHolding(
+                symbol="AAPL", quantity=10.0, price=190.25,
+                market_value=1_902.50, weight_pct=63.2,
+            ),
+            PortfolioHolding(
+                symbol="MSFT", quantity=2.0, price=555.0,
+                market_value=1_110.0, weight_pct=36.8,
+            ),
+        ),
+        holdings_health=_HEALTHY,
+    )
+    ui = PortfolioIntelligenceUI(screen=screen)
+    with _launched_app(ui) as url:
+        context, page = _page_with_text(browser, url, "63.2%")
+        try:
+            visible_text = page.inner_text("body")
+            assert "allocation by holding" in visible_text.lower()
+            assert "AAPL" in visible_text and "63.2%" in visible_text
+            assert "MSFT" in visible_text and "36.8%" in visible_text
+            # deterministic ordering: higher weight (AAPL) before lower (MSFT).
+            assert visible_text.index("AAPL") < visible_text.index("MSFT")
+        finally:
+            context.close()
+
+
+def test_portfolio_intelligence_allocation_by_holding_honest_empty_state(browser):
+    """Real holdings source connected but zero open positions -> the same
+    honest empty message Holdings itself already shows, never a fabricated
+    allocation bar."""
+    screen = PortfolioScreen(
+        capital=CapitalSummary(
+            allocated_amount=50_000.0, available_cash=50_000.0,
+            invested_amount=0.0, reserve=0.0, realized_profit=0.0,
+        ),
+        capital_health=_HEALTHY,
+        holdings=(),
+        holdings_health=_HEALTHY,
+    )
+    ui = PortfolioIntelligenceUI(screen=screen)
+    with _launched_app(ui) as url:
+        context, page = _page_with_text(browser, url, "No holdings recorded yet.")
+        try:
+            assert "No holdings recorded yet." in page.inner_text("body")
         finally:
             context.close()
 

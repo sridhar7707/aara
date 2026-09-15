@@ -16,6 +16,10 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
     _CAPITAL_UNAVAILABLE_MESSAGE,
     _HOLDINGS_UNAVAILABLE_MESSAGE,
     _DEFAULT_TIMEFRAME,
+    _DRAWDOWN_DISCLAIMER,
+    _DRAWDOWN_EMPTY_MESSAGE,
+    _DRAWDOWN_NO_DATA_FOR_TIMEFRAME_MESSAGE,
+    _DRAWDOWN_UNAVAILABLE_MESSAGE,
     _PARTIAL_DATA_BODY,
     _PARTIAL_DATA_HTML,
     _PARTIAL_DATA_TITLE,
@@ -41,6 +45,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     AlpacaOrdersSnapshot,
     AlpacaPosition,
     CapitalSummary,
+    PortfolioDrawdownPoint,
     PortfolioHistoryPoint,
     PortfolioHolding,
     PortfolioScreen,
@@ -313,7 +318,24 @@ def test_holdings_unavailable_renders_the_message_and_no_table():
 
 
 def _history_chart(demo):
-    charts = [b for b in demo.blocks.values() if isinstance(b, gr.LinePlot)]
+    """The Portfolio Value chart specifically -- scoped by elem_classes
+    since Visual Dashboard Phase B added a second gr.LinePlot (the
+    drawdown chart, see _drawdown_chart below)."""
+    charts = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.LinePlot)
+        and "pi-portfolio-history-chart" in (b.elem_classes or [])
+    ]
+    assert len(charts) == 1
+    return charts[0]
+
+
+def _drawdown_chart(demo):
+    charts = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.LinePlot)
+        and "pi-portfolio-drawdown-chart" in (b.elem_classes or [])
+    ]
     assert len(charts) == 1
     return charts[0]
 
@@ -566,16 +588,341 @@ def test_format_summary_html_reuses_the_existing_metric_markup_no_new_styling():
     assert 'class="pi-metric-value"' in out
 
 
+# --- Visual Dashboard Phase B: drawdown calculation (pure function) ------
+
+
+def test_drawdown_history_first_point_is_always_zero():
+    points = (_point(5, 100.0),)
+    result = PortfolioIntelligenceUI._compute_portfolio_drawdown_history(points)
+    assert result == (
+        PortfolioDrawdownPoint(as_of=points[0].as_of, portfolio_value=100.0, drawdown_pct=0.0),
+    )
+
+
+def test_drawdown_history_rising_series_stays_at_zero():
+    points = (_point(3, 100.0), _point(2, 110.0), _point(1, 120.0), _point(0, 130.0))
+    result = PortfolioIntelligenceUI._compute_portfolio_drawdown_history(points)
+    assert [round(p.drawdown_pct, 4) for p in result] == [0.0, 0.0, 0.0, 0.0]
+
+
+def test_drawdown_history_falling_series_is_negative_from_the_peak():
+    points = (
+        _point(3, 100.0),   # peak so far: 100 -> 0%
+        _point(2, 90.0),    # 10% below peak -> -10%
+        _point(1, 80.0),    # 20% below peak -> -20%
+    )
+    result = PortfolioIntelligenceUI._compute_portfolio_drawdown_history(points)
+    assert [round(p.drawdown_pct, 4) for p in result] == [0.0, -10.0, -20.0]
+
+
+def test_drawdown_history_new_peak_resets_to_zero():
+    points = (
+        _point(4, 100.0),  # peak: 100 -> 0%
+        _point(3, 80.0),   # -20%
+        _point(2, 120.0),  # new peak: 120 -> 0%
+        _point(1, 90.0),   # -25% from the NEW peak (120), not the old one
+    )
+    result = PortfolioIntelligenceUI._compute_portfolio_drawdown_history(points)
+    assert [round(p.drawdown_pct, 4) for p in result] == [0.0, -20.0, 0.0, -25.0]
+
+
+def test_drawdown_history_recovery_back_to_the_original_peak():
+    points = (
+        _point(4, 100.0),  # peak: 100 -> 0%
+        _point(3, 50.0),   # -50%
+        _point(2, 100.0),  # back to the SAME peak, not a new one -> 0%
+    )
+    result = PortfolioIntelligenceUI._compute_portfolio_drawdown_history(points)
+    assert [round(p.drawdown_pct, 4) for p in result] == [0.0, -50.0, 0.0]
+
+
+def test_drawdown_history_zero_peak_is_handled_defensively_not_a_division_error():
+    """A non-positive running peak should not occur for a real
+    portfolio_snapshots row, but is handled defensively -- 0.0, never a
+    ZeroDivisionError or a fabricated value."""
+    points = (_point(1, 0.0), _point(0, 0.0))
+    result = PortfolioIntelligenceUI._compute_portfolio_drawdown_history(points)
+    assert [p.drawdown_pct for p in result] == [0.0, 0.0]
+
+
+def test_drawdown_history_of_empty_points_is_empty():
+    assert PortfolioIntelligenceUI._compute_portfolio_drawdown_history(()) == ()
+
+
+def test_drawdown_history_preserves_portfolio_value_and_as_of_verbatim():
+    points = (_point(0, 12345.67),)
+    result = PortfolioIntelligenceUI._compute_portfolio_drawdown_history(points)
+    assert result[0].as_of == points[0].as_of
+    assert result[0].portfolio_value == 12345.67
+
+
+def test_drawdown_summary_none_for_empty_points():
+    assert PortfolioIntelligenceUI._compute_drawdown_summary(()) is None
+
+
+def test_drawdown_summary_current_is_the_most_recent_points_own_drawdown():
+    points = PortfolioIntelligenceUI._compute_portfolio_drawdown_history(
+        (_point(2, 100.0), _point(1, 80.0), _point(0, 90.0)),
+    )
+    summary = PortfolioIntelligenceUI._compute_drawdown_summary(points)
+    assert round(summary["current_drawdown_pct"], 4) == -10.0
+
+
+def test_drawdown_summary_max_is_the_deepest_drawdown_in_the_window():
+    points = PortfolioIntelligenceUI._compute_portfolio_drawdown_history(
+        (_point(2, 100.0), _point(1, 60.0), _point(0, 90.0)),
+    )
+    summary = PortfolioIntelligenceUI._compute_drawdown_summary(points)
+    assert round(summary["max_drawdown_pct"], 4) == -40.0
+    assert round(summary["current_drawdown_pct"], 4) == -10.0
+
+
+def test_format_drawdown_summary_html_is_empty_string_for_none():
+    assert PortfolioIntelligenceUI._format_drawdown_summary_html(None) == ""
+
+
+def test_format_drawdown_summary_html_shows_both_fields():
+    summary = {"current_drawdown_pct": -5.5, "max_drawdown_pct": -12.25}
+    out = PortfolioIntelligenceUI._format_drawdown_summary_html(summary)
+    assert "Current Drawdown" in out and "-5.50%" in out
+    assert "Max Drawdown" in out and "-12.25%" in out
+    assert 'class="pi-capital-summary"' in out
+
+
+# --- Visual Dashboard Phase B: drawdown timeframe behavior ----------------
+# Reuses the SAME _filter_history_by_timeframe function Phase A's value
+# chart uses (duck-typed on `.as_of`) -- these tests prove the drawdown
+# chart follows the identical selected timeframe, computed from the TRUE
+# all-time peak before any filtering, never a peak reset by the window.
+
+
+def test_drawdown_render_state_follows_the_selected_timeframe():
+    points = (_point(400, 100.0), _point(200, 50.0), _point(0, 100.0))
+    message, message_visible, chart_df, chart_visible, summary = (
+        PortfolioIntelligenceUI()._drawdown_render_state(points, None, "1D")
+    )
+    assert message_visible is False
+    assert chart_visible is True
+    # Only the most recent point (0 days ago) falls inside "1D" -- its
+    # drawdown is 0% (a new all-time peak), NOT recomputed relative to a
+    # window-local peak.
+    assert list(chart_df["drawdown_pct"]) == [0.0]
+
+
+def test_drawdown_render_state_uses_the_true_all_time_peak_not_a_window_local_one():
+    """The classic case this design exists to get right: a deep historical
+    drawdown from an all-time peak, still correctly shown when the
+    selected window only covers the recovery, not the original peak."""
+    points = (
+        _point(400, 200.0),  # true all-time peak
+        _point(200, 100.0),  # -50% from the true peak
+        _point(5, 150.0),    # still recovering: -25% from the TRUE peak
+        _point(0, 160.0),    # -20% from the TRUE peak
+    )
+    message, message_visible, chart_df, chart_visible, summary = (
+        PortfolioIntelligenceUI()._drawdown_render_state(points, None, "1W")
+    )
+    assert chart_visible is True
+    # "1W" keeps only the last two points -- their drawdown is still
+    # relative to the 200.0 all-time peak, never a peak reset to 150.0.
+    assert [round(v, 4) for v in chart_df["drawdown_pct"]] == [-25.0, -20.0]
+
+
+def test_drawdown_render_state_unavailable_when_history_is_none():
+    message, message_visible, chart_df, chart_visible, summary = (
+        PortfolioIntelligenceUI()._drawdown_render_state(None, None, "ALL")
+    )
+    assert message_visible is True
+    assert _DRAWDOWN_UNAVAILABLE_MESSAGE in message
+    assert chart_visible is False
+    assert summary == ""
+
+
+def test_drawdown_render_state_empty_when_history_has_zero_rows():
+    message, message_visible, chart_df, chart_visible, summary = (
+        PortfolioIntelligenceUI()._drawdown_render_state((), None, "ALL")
+    )
+    assert message_visible is True
+    assert _DRAWDOWN_EMPTY_MESSAGE in message
+    assert chart_visible is False
+
+
+def test_drawdown_render_state_insufficient_for_timeframe_is_honest_and_distinct():
+    old_point = _point(400, 100.0)
+    message, message_visible, chart_df, chart_visible, summary = (
+        PortfolioIntelligenceUI()._drawdown_render_state((old_point,), None, "1D")
+    )
+    assert message_visible is True
+    assert _DRAWDOWN_NO_DATA_FOR_TIMEFRAME_MESSAGE in message
+    assert _DRAWDOWN_EMPTY_MESSAGE not in message
+    assert chart_visible is False
+
+
+def test_drawdown_render_state_single_point_history_is_a_valid_new_peak():
+    message, message_visible, chart_df, chart_visible, summary = (
+        PortfolioIntelligenceUI()._drawdown_render_state((_point(0, 500.0),), None, "ALL")
+    )
+    assert chart_visible is True
+    assert list(chart_df["drawdown_pct"]) == [0.0]
+    assert "Current Drawdown" in summary
+
+
+# --- Visual Dashboard Phase B: drawdown chart rendering -------------------
+
+
+def test_drawdown_section_renders_the_chart_message_and_disclaimer():
+    points = (_point(3, 100.0), _point(2, 90.0), _point(1, 80.0), _point(0, 100.0))
+    ui = PortfolioIntelligenceUI(PortfolioScreen(portfolio_history=points))
+    demo = ui.build()
+
+    chart = _drawdown_chart(demo)
+    assert chart.visible is True
+    assert set(chart.value["columns"]) == {"as_of", "drawdown_pct"}
+    combined = "\n".join(_html_values(demo))
+    assert _DRAWDOWN_DISCLAIMER in combined
+    assert "Drawdown" in combined
+
+
+def test_drawdown_section_unavailable_message_and_hidden_chart():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(portfolio_history=None))
+    demo = ui.build()
+
+    assert any(_DRAWDOWN_UNAVAILABLE_MESSAGE in v for v in _html_values(demo))
+    assert _drawdown_chart(demo).visible is False
+
+
+def test_drawdown_section_empty_message_and_hidden_chart():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(portfolio_history=()))
+    demo = ui.build()
+
+    assert any(_DRAWDOWN_EMPTY_MESSAGE in v for v in _html_values(demo))
+    assert _drawdown_chart(demo).visible is False
+
+
+def test_drawdown_summary_renders_alongside_the_value_summary():
+    points = (_point(2, 100.0), _point(1, 60.0), _point(0, 90.0))
+    ui = PortfolioIntelligenceUI(PortfolioScreen(portfolio_history=points))
+    demo = ui.build()
+
+    value_summaries = _summary_html_values(demo)
+    drawdown_summaries = _drawdown_summary_html_values(demo)
+    assert len(value_summaries) == 1
+    assert len(drawdown_summaries) == 1
+    assert "-40.00%" in drawdown_summaries[0].value  # max drawdown
+    assert "-10.00%" in drawdown_summaries[0].value  # current drawdown
+
+
+def test_drawdown_never_uses_predictive_or_causal_language():
+    """Task guardrail: the drawdown SUMMARY/chart values -- as opposed to
+    _DRAWDOWN_DISCLAIMER's own explanatory sentence, which legitimately
+    names and negates these exact words ("...does not predict, imply, or
+    measure future risk") -- must never imply prediction, causality, or
+    future risk."""
+    points = (_point(2, 100.0), _point(1, 60.0), _point(0, 90.0))
+    summary_html = PortfolioIntelligenceUI._format_drawdown_summary_html(
+        PortfolioIntelligenceUI._compute_drawdown_summary(
+            PortfolioIntelligenceUI._compute_portfolio_drawdown_history(points)
+        )
+    )
+    lowered = summary_html.lower()
+    for forbidden in (
+        "predict", "will ", "forecast", "expected to", "likely to", "risk of future",
+    ):
+        assert forbidden not in lowered
+
+
+# --- Visual Dashboard Phase B: allocation by holding ----------------------
+
+
+def _holding_allocation_html_values(demo):
+    return [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.HTML) and isinstance(getattr(b, "value", None), str)
+        and 'class="pi-holding-allocation-list"' in b.value
+    ]
+
+
+def test_holding_allocation_renders_symbol_and_percentage():
+    holdings = (
+        _make_holding(symbol="AAPL", quantity=10.0, weight_pct=60.0),
+        _make_holding(symbol="MSFT", quantity=5.0, weight_pct=40.0),
+    )
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=_make_capital(), holdings=holdings))
+    demo = ui.build()
+
+    blocks = _holding_allocation_html_values(demo)
+    assert len(blocks) == 1
+    assert "AAPL" in blocks[0].value and "60.0%" in blocks[0].value
+    assert "MSFT" in blocks[0].value and "40.0%" in blocks[0].value
+
+
+def test_holding_allocation_is_ordered_by_weight_descending_deterministically():
+    holdings = (
+        _make_holding(symbol="ZZZZ", weight_pct=10.0),
+        _make_holding(symbol="AAAA", weight_pct=50.0),
+        _make_holding(symbol="MMMM", weight_pct=10.0),  # tie with ZZZZ -> alpha order
+    )
+    out = PortfolioIntelligenceUI._format_holding_allocation_html(holdings)
+    assert out.index("AAAA") < out.index("MMMM") < out.index("ZZZZ")
+
+
+def test_holding_allocation_uses_the_existing_authoritative_weight_pct_verbatim():
+    """No new valuation/recomputation -- the exact same weight_pct value
+    Holdings' own table column already renders."""
+    holdings = (_make_holding(symbol="AAPL", weight_pct=33.333),)
+    out = PortfolioIntelligenceUI._format_holding_allocation_html(holdings)
+    assert "33.3%" in out  # one decimal place, matches the Holdings table
+
+
+def test_holding_allocation_empty_is_honest():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=_make_capital(), holdings=()))
+    demo = ui.build()
+
+    assert _holding_allocation_html_values(demo) == []
+    assert any("No holdings recorded yet." in v for v in _html_values(demo))
+
+
+def test_holding_allocation_unavailable_is_honest():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=_make_capital(), holdings=None))
+    demo = ui.build()
+
+    assert _holding_allocation_html_values(demo) == []
+    assert any(_HOLDINGS_UNAVAILABLE_MESSAGE in v for v in _html_values(demo))
+
+
+def test_holding_allocation_bar_width_is_clamped_to_a_valid_percentage():
+    """Defensive clamp on the visual bar width only -- never on the
+    displayed text, which always states the real weight_pct verbatim."""
+    holdings = (_make_holding(symbol="AAPL", weight_pct=100.0),)
+    out = PortfolioIntelligenceUI._format_holding_allocation_html(holdings)
+    assert "width:100.0%" in out
+    assert "100.0%" in out
+
+
 # --- Visual Dashboard Phase A: rendered chart/message/summary states -----
 
 
 def _summary_html_values(demo):
-    outputs = [
+    """The Portfolio Value chart's own summary card specifically -- scoped
+    by its "Current Value" label, since Visual Dashboard Phase B added a
+    second .pi-capital-summary-classed card (the drawdown summary, "Current
+    Drawdown"/"Max Drawdown" -- see _drawdown_summary_html_values below),
+    and Capital Summary / Alpaca Account already share this same class too."""
+    return [
         b for b in demo.blocks.values()
         if isinstance(b, gr.HTML) and isinstance(getattr(b, "value", None), str)
         and 'class="pi-capital-summary"' in b.value
+        and "Current Value" in b.value
     ]
-    return outputs
+
+
+def _drawdown_summary_html_values(demo):
+    return [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.HTML) and isinstance(getattr(b, "value", None), str)
+        and 'class="pi-capital-summary"' in b.value
+        and "Current Drawdown" in b.value
+    ]
 
 
 def test_timeframe_selector_offers_the_eight_required_choices():
@@ -644,33 +991,44 @@ def test_on_timeframe_change_filters_the_state_held_history_not_a_new_fetch():
     ui = PortfolioIntelligenceUI()
     points = (_point(400, 1.0), _point(0, 2.0))
 
-    message_update, chart_update, summary_update = ui._on_timeframe_change(
-        "1D", (points, None),
-    )
+    (
+        message_update, chart_update, summary_update,
+        drawdown_message_update, drawdown_chart_update, drawdown_summary_update,
+    ) = ui._on_timeframe_change("1D", (points, None))
 
     assert chart_update["visible"] is True
     assert list(chart_update["value"]["portfolio_value"]) == [2.0]
     assert message_update["visible"] is False
     assert "Current Value" in summary_update["value"]
+    # drawdown is re-filtered from the SAME state-held history, no re-fetch.
+    assert drawdown_chart_update["visible"] is True
+    assert list(drawdown_chart_update["value"]["drawdown_pct"]) == [0.0]
+    assert drawdown_message_update["visible"] is False
+    assert "Current Drawdown" in drawdown_summary_update["value"]
 
 
 def test_on_timeframe_change_honors_unavailable_health():
     ui = PortfolioIntelligenceUI()
     health = IntegrationHealth.not_configured("trades_db_portfolio_history")
 
-    message_update, chart_update, summary_update = ui._on_timeframe_change(
-        "ALL", (None, health),
-    )
+    (
+        message_update, chart_update, summary_update,
+        drawdown_message_update, drawdown_chart_update, drawdown_summary_update,
+    ) = ui._on_timeframe_change("ALL", (None, health))
 
     assert message_update["visible"] is True
     assert chart_update["visible"] is False
     assert summary_update["value"] == ""
+    assert drawdown_message_update["visible"] is True
+    assert drawdown_chart_update["visible"] is False
+    assert drawdown_summary_update["value"] == ""
 
 
-def test_timeframe_change_event_only_touches_the_three_history_outputs():
+def test_timeframe_change_event_only_touches_the_six_history_outputs():
     """Regression guard: the timeframe selector must never be wired to
-    Capital Summary, Holdings, Alpaca, or reconciliation outputs -- only
-    the message/chart/summary trio changing timeframe actually affects."""
+    Capital Summary, Holdings, allocation-by-holding, Alpaca, or
+    reconciliation outputs -- only the value-chart and drawdown-chart
+    message/chart/summary sextet changing timeframe actually affects."""
     demo = PortfolioIntelligenceUI().build()
 
     radio_id = next(
@@ -680,7 +1038,7 @@ def test_timeframe_change_event_only_touches_the_three_history_outputs():
         dep for dep in demo.config["dependencies"]
         if dep["targets"] == [(radio_id, "change")]
     )
-    assert len(change_dep["outputs"]) == 3
+    assert len(change_dep["outputs"]) == 6
 
 
 def test_render_with_explicit_timeframe_filters_the_chart():
@@ -712,7 +1070,7 @@ def test_render_history_state_is_refreshed_with_the_latest_fetch():
 
     updates = ui._render()
 
-    history_state_update = updates[-1]
+    history_state_update = updates[19]  # see build()'s outputs ordering
     assert history_state_update["value"][0] == points
 
 
@@ -1368,7 +1726,7 @@ def test_default_screen_renders_zero_visible_dataframes():
 # --- Render-time fetch: Refresh button, demo.load, "as of" indicator ----
 
 
-_OUTPUT_COUNT = 20  # see PortfolioIntelligenceUI.build()'s `outputs` list
+_OUTPUT_COUNT = 24  # see PortfolioIntelligenceUI.build()'s `outputs` list
 
 
 def _refresh_button(demo):
@@ -1495,7 +1853,8 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
         alpaca_acct, alpaca_pos_msg, alpaca_pos_tbl, \
         orders_trunc, orders_msg, orders_tbl, \
         reconciliation_summary, reconciliation_msg, reconciliation_tbl, \
-        portfolio_summary, history_state = updates
+        portfolio_summary, history_state, \
+        holding_allocation, drawdown_summary, drawdown_msg, drawdown_chart = updates
 
     assert _SNAPSHOT_UNAVAILABLE in snapshot["value"]
     assert disclosure["value"] == _UNAVAILABLE_DATA_HTML
@@ -1517,6 +1876,13 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
     # state when the underlying screen is fully unavailable.
     assert portfolio_summary["value"] == ""
     assert history_state["value"] == (None, None)
+    # Visual Dashboard Phase B: allocation-by-holding follows Holdings'
+    # own unavailable state; drawdown follows the value chart's own.
+    assert _HOLDINGS_UNAVAILABLE_MESSAGE in holding_allocation["value"]
+    assert _DRAWDOWN_UNAVAILABLE_MESSAGE in drawdown_msg["value"]
+    assert drawdown_chart["visible"] is False
+    assert len(drawdown_chart["value"]) == 0
+    assert drawdown_summary["value"] == ""
     # no fabricated markers from mock_data.py
     mock = build_mock_screen()
     rendered = "\n".join(str(u.get("value")) for u in updates)

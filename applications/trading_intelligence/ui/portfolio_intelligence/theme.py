@@ -266,4 +266,46 @@ CSS = """
 .pi-portfolio-history-chart {
   margin: 4px 0;
 }
+
+/* Visual Dashboard Phase B: drawdown chart, directly below the value
+   chart -- same minimal spacing rule, no new visual language. */
+.pi-portfolio-drawdown-chart {
+  margin: 4px 0;
+}
+
+/* Visual Dashboard Phase B: allocation-by-holding bars -- same visual
+   language as .pi-allocation-bar above (navy fill on a bordered track),
+   one row per holding instead of two fixed segments. */
+.pi-holding-allocation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pi-holding-allocation-row {
+  display: grid;
+  grid-template-columns: 64px 1fr 52px;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.pi-holding-allocation-symbol {
+  font-weight: 600;
+  color: var(--pi-color-navy);
+}
+.pi-holding-allocation-bar {
+  height: 10px;
+  border-radius: 5px;
+  overflow: hidden;
+  border: 1px solid var(--pi-color-border);
+}
+.pi-holding-allocation-bar .fill {
+  background: var(--pi-color-navy);
+  height: 100%;
+}
+.pi-holding-allocation-pct {
+  font-family: Monaco, "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--pi-color-text);
+}
 """
