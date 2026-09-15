@@ -45,6 +45,7 @@ they use are Decision Center's theme.py rules, already merged into the
 composed app's single stylesheet by `bootstrap.py`.
 """
 import html
+from collections import Counter
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -64,6 +65,8 @@ from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     PortfolioHistoryPoint,
     PortfolioHolding,
     PortfolioScreen,
+    ReconciliationRow,
+    ReconciliationStatus,
 )
 from applications.trading_intelligence.ui.portfolio_intelligence.theme import CSS
 from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
@@ -164,6 +167,41 @@ def _format_order_timestamp(moment: Optional[datetime]) -> str:
     aware = moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
     return aware.astimezone(_ORDERS_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
 
+
+# Internal vs Alpaca PAPER reconciliation: a factual, descriptive
+# comparison of the SAME two already-loaded sources this screen already
+# shows separately above (Holdings / Alpaca Paper Positions) -- no new
+# read, no new adapter. Never labels a difference a risk, error, unhealthy
+# state, trading opportunity, or execution failure; QUANTITY_DIFFERENCE
+# only ever reports the recorded numeric difference.
+_RECONCILIATION_HEADERS = [
+    "Symbol", "Status", "Internal Qty", "Alpaca PAPER Qty", "Qty Difference",
+    "Internal Market Value", "Alpaca PAPER Market Value",
+]
+
+_RECONCILIATION_STATUS_LABELS = {
+    ReconciliationStatus.MATCHED: "MATCHED",
+    ReconciliationStatus.INTERNAL_ONLY: "INTERNAL ONLY",
+    ReconciliationStatus.BROKER_ONLY: "BROKER ONLY",
+    ReconciliationStatus.QUANTITY_DIFFERENCE: "QUANTITY DIFFERENCE",
+}
+
+_RECONCILIATION_SCOPE_CAPTION = (
+    "Compares the Internal Portfolio (managed capital-pool bookkeeping, "
+    "above) against the Alpaca PAPER account (also above) by symbol and "
+    "quantity. A factual comparison only -- it does not judge either "
+    "source, and a difference is not evidence of an error, a risk, or a "
+    "trading opportunity."
+)
+
+_RECONCILIATION_INTERNAL_UNAVAILABLE_MESSAGE = (
+    "Reconciliation is not available -- the Internal Portfolio (Holdings) "
+    "could not be read in this environment."
+)
+_RECONCILIATION_ALPACA_UNAVAILABLE_MESSAGE = (
+    "Reconciliation is not available -- the Alpaca PAPER account/positions "
+    "could not be read in this environment."
+)
 
 # Shown when the managed capital pool could not be read in this
 # environment (LegacyCapitalSource returned None). The production UI never
@@ -470,6 +508,42 @@ class PortfolioIntelligenceUI:
             )
 
             gr.HTML(
+                '<div class="pi-section-label">Internal Portfolio vs '
+                f'<span class="pi-alpaca-badge">{html.escape(_ALPACA_PAPER_BADGE_TEXT)}</span> '
+                "Reconciliation</div>"
+            )
+            gr.HTML(
+                f'<div class="pi-source-caption">'
+                f'{html.escape(_RECONCILIATION_SCOPE_CAPTION)}</div>'
+            )
+            reconciliation_summary_value, reconciliation_summary_visible = (
+                self._reconciliation_summary_state(initial)
+            )
+            reconciliation_summary_output = gr.HTML(
+                reconciliation_summary_value, visible=reconciliation_summary_visible,
+            )
+            reconciliation_message_value, reconciliation_message_visible = (
+                self._reconciliation_message_state(initial)
+            )
+            reconciliation_message_output = gr.HTML(
+                reconciliation_message_value, visible=reconciliation_message_visible,
+            )
+            reconciliation_rows, reconciliation_visible = (
+                self._reconciliation_table_state(initial)
+            )
+            reconciliation_table = gr.Dataframe(
+                headers=_RECONCILIATION_HEADERS,
+                value=reconciliation_rows,
+                datatype=["str"] * len(_RECONCILIATION_HEADERS),
+                interactive=False,
+                label="Internal vs Alpaca PAPER Reconciliation",
+                show_label=False,
+                elem_classes=["pi-reconciliation-table"],
+                visible=reconciliation_visible,
+                **{_DATAFRAME_HEIGHT_KWARG: 320},
+            )
+
+            gr.HTML(
                 f'<div class="pi-section-label">Alpaca Paper &mdash; Recent Orders '
                 f'<span class="pi-alpaca-badge">{html.escape(_ALPACA_PAPER_BADGE_TEXT)}</span></div>'
             )
@@ -512,6 +586,12 @@ class PortfolioIntelligenceUI:
                 alpaca_account_output, alpaca_positions_message_output, alpaca_positions_table,
                 alpaca_orders_truncation_output, alpaca_orders_message_output,
                 alpaca_orders_table,
+                # Internal vs Alpaca PAPER reconciliation -- appended at the
+                # end, never inserted/reordered, so every existing index
+                # above (used by _render()'s own tuple and by tests that
+                # unpack it positionally) stays stable.
+                reconciliation_summary_output, reconciliation_message_output,
+                reconciliation_table,
             ]
 
             # Same disable -> render -> enable double-submit guard chain as
@@ -576,6 +656,9 @@ class PortfolioIntelligenceUI:
             _html_update(self._alpaca_orders_truncation_state(screen)),
             _html_update(self._alpaca_orders_message_state(screen)),
             _table_update(self._alpaca_orders_table_state(screen)),
+            _html_update(self._reconciliation_summary_state(screen)),
+            _html_update(self._reconciliation_message_state(screen)),
+            _table_update(self._reconciliation_table_state(screen)),
         )
 
     # --- per-section state (value, visible), shared by build() and _render() ---
@@ -704,6 +787,89 @@ class PortfolioIntelligenceUI:
         if screen.alpaca_orders_available and not screen.alpaca_orders.is_empty:
             return (self._format_alpaca_orders_rows(screen.alpaca_orders.orders), True)
         return ([], False)
+
+    # --- Internal vs Alpaca PAPER reconciliation --------------------------
+    #
+    # Independent of Capital Summary / Portfolio History availability --
+    # gated only on the two sources it actually compares: Holdings
+    # (screen.holdings_is_available) and the Alpaca Paper account/positions
+    # read (screen.alpaca_is_available). Never infers a match when either
+    # is unavailable.
+
+    def _reconciliation_message_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
+        if not screen.holdings_is_available:
+            return (
+                render_unavailable(
+                    screen.holdings_health,
+                    fallback_message=_RECONCILIATION_INTERNAL_UNAVAILABLE_MESSAGE,
+                ),
+                True,
+            )
+        if not screen.alpaca_is_available:
+            return (
+                render_unavailable(
+                    screen.alpaca_health,
+                    fallback_message=_RECONCILIATION_ALPACA_UNAVAILABLE_MESSAGE,
+                ),
+                True,
+            )
+        if screen.reconciliation_is_empty:
+            return (
+                f'<div class="pi-empty-message aara-empty">'
+                f'{html.escape(screen.reconciliation_empty_state_message)}</div>',
+                True,
+            )
+        return ("", False)
+
+    def _reconciliation_table_state(
+        self, screen: PortfolioScreen,
+    ) -> Tuple[List[List[str]], bool]:
+        if screen.reconciliation_is_available and not screen.reconciliation_is_empty:
+            return (self._format_reconciliation_rows(screen.reconciliation), True)
+        return ([], False)
+
+    def _reconciliation_summary_state(self, screen: PortfolioScreen) -> Tuple[str, bool]:
+        if screen.reconciliation_is_available and not screen.reconciliation_is_empty:
+            return (self._format_reconciliation_summary_html(screen.reconciliation), True)
+        return ("", False)
+
+    @staticmethod
+    def _format_reconciliation_rows(rows: Tuple[ReconciliationRow, ...]) -> List[List[str]]:
+        def _qty(value: Optional[float]) -> str:
+            return f"{value:g}" if value is not None else ""
+
+        def _money(value: Optional[float]) -> str:
+            return f"${value:,.2f}" if value is not None else ""
+
+        return [
+            [
+                row.symbol,
+                _RECONCILIATION_STATUS_LABELS.get(row.status, row.status.name),
+                _qty(row.internal_quantity),
+                _qty(row.alpaca_quantity),
+                _qty(row.quantity_difference),
+                _money(row.internal_market_value),
+                _money(row.alpaca_market_value),
+            ]
+            for row in rows
+        ]
+
+    @staticmethod
+    def _format_reconciliation_summary_html(rows: Tuple[ReconciliationRow, ...]) -> str:
+        """Concise counts only -- no percentage, ratio, or judgment. Every
+        row belongs to exactly one status, so the four counts always sum
+        to len(rows)."""
+        counts = Counter(row.status for row in rows)
+        parts = [
+            f"{counts.get(ReconciliationStatus.MATCHED, 0)} matched",
+            f"{counts.get(ReconciliationStatus.QUANTITY_DIFFERENCE, 0)} quantity difference",
+            f"{counts.get(ReconciliationStatus.INTERNAL_ONLY, 0)} internal only",
+            f"{counts.get(ReconciliationStatus.BROKER_ONLY, 0)} broker only",
+        ]
+        return (
+            '<div class="pi-reconciliation-summary">'
+            f'{html.escape(" · ".join(parts))}</div>'
+        )
 
     @staticmethod
     def _format_disclosure_html(screen: PortfolioScreen) -> str:

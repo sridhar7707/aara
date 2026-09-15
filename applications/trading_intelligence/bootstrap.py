@@ -216,8 +216,11 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
     PortfolioIntelligenceUI,
 )
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
+    AlpacaPosition,
     PortfolioHolding,
     PortfolioScreen,
+    ReconciliationRow,
+    ReconciliationStatus,
 )
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import RiskIntelligenceUI
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
@@ -1089,6 +1092,75 @@ def _with_alpaca_orders_data(screen: PortfolioScreen) -> PortfolioScreen:
     )
 
 
+def _compute_portfolio_reconciliation(
+    holdings: Tuple[PortfolioHolding, ...],
+    alpaca_positions: Tuple[AlpacaPosition, ...],
+) -> Tuple[ReconciliationRow, ...]:
+    """Internal Portfolio vs Alpaca PAPER reconciliation -- a pure
+    computation over the SAME already-fetched `holdings` / `alpaca_positions`
+    tuples _build_portfolio_intelligence_screen() already produced (no new
+    read, no new adapter). Each symbol present in either side is compared
+    on its own already-real `.quantity` (and, where directly available,
+    `.market_value`) -- nothing here derives a new valuation, tolerance, or
+    health judgment; QUANTITY_DIFFERENCE only ever reports the recorded
+    difference, never a risk/error/opportunity label. Deterministic order:
+    alphabetical by symbol, so the same two inputs always render the same
+    rows in the same order."""
+    internal_by_symbol = {holding.symbol: holding for holding in holdings}
+    alpaca_by_symbol = {position.symbol: position for position in alpaca_positions}
+    rows = []
+    for symbol in sorted(set(internal_by_symbol) | set(alpaca_by_symbol)):
+        internal = internal_by_symbol.get(symbol)
+        alpaca = alpaca_by_symbol.get(symbol)
+        if internal is not None and alpaca is None:
+            status = ReconciliationStatus.INTERNAL_ONLY
+            quantity_difference = None
+        elif internal is None and alpaca is not None:
+            status = ReconciliationStatus.BROKER_ONLY
+            quantity_difference = None
+        elif internal.quantity == alpaca.quantity:
+            status = ReconciliationStatus.MATCHED
+            quantity_difference = 0.0
+        else:
+            status = ReconciliationStatus.QUANTITY_DIFFERENCE
+            quantity_difference = internal.quantity - alpaca.quantity
+        rows.append(
+            ReconciliationRow(
+                symbol=symbol,
+                status=status,
+                internal_quantity=internal.quantity if internal is not None else None,
+                alpaca_quantity=alpaca.quantity if alpaca is not None else None,
+                quantity_difference=quantity_difference,
+                internal_market_value=(
+                    internal.market_value if internal is not None else None
+                ),
+                alpaca_market_value=alpaca.market_value if alpaca is not None else None,
+            )
+        )
+    return tuple(rows)
+
+
+def _with_portfolio_reconciliation_data(screen: PortfolioScreen) -> PortfolioScreen:
+    """Attaches the Internal vs Alpaca PAPER reconciliation to `screen`,
+    leaving it unchanged (reconciliation stays None -- unavailable)
+    whenever either source it needs is itself unavailable: Holdings
+    (screen.holdings is None) or the Alpaca Paper account/positions read
+    (screen.alpaca_is_available is False). Never infers a match when one
+    side could not be read. Deliberately independent of Capital Summary /
+    Portfolio History availability -- same "attach only when the two
+    specific sources it needs are both real" rule _with_alpaca_paper_data
+    and _with_alpaca_orders_data already follow. Must run after
+    _with_alpaca_paper_data() has already attached alpaca_positions."""
+    if screen.holdings is None or not screen.alpaca_is_available:
+        return screen
+    return replace(
+        screen,
+        reconciliation=_compute_portfolio_reconciliation(
+            screen.holdings, screen.alpaca_positions
+        ),
+    )
+
+
 def _build_portfolio_intelligence_screen(db_path: Optional[str] = None) -> PortfolioScreen:
     """Assemble one real-or-unavailable PortfolioScreen from the legacy
     trades.db adapters plus the three read-only Alpaca paper adapters.
@@ -1180,7 +1252,9 @@ def _build_portfolio_intelligence_screen(db_path: Optional[str] = None) -> Portf
         portfolio_history=history_result.value,
         portfolio_history_health=history_result.health,
     )
-    return _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
+    return _with_portfolio_reconciliation_data(
+        _with_alpaca_orders_data(_with_alpaca_paper_data(screen))
+    )
 
 
 def _build_portfolio_intelligence_ui(db_path: Optional[str] = None) -> PortfolioIntelligenceUI:

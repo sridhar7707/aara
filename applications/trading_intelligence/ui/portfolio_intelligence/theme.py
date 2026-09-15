@@ -133,13 +133,15 @@ CSS = """
 
 .pi-holdings-table table tbody td:first-child,
 .pi-alpaca-positions-table table tbody td:first-child,
-.pi-alpaca-orders-table table tbody td:first-child {
+.pi-alpaca-orders-table table tbody td:first-child,
+.pi-reconciliation-table table tbody td:first-child {
   font-weight: 600;
   color: var(--pi-color-navy);
 }
 .pi-holdings-table table tbody td,
 .pi-alpaca-positions-table table tbody td,
-.pi-alpaca-orders-table table tbody td {
+.pi-alpaca-orders-table table tbody td,
+.pi-reconciliation-table table tbody td {
   font-family: Monaco, "Courier New", monospace;
   font-variant-numeric: tabular-nums;
 }
@@ -182,6 +184,31 @@ CSS = """
 .pi-alpaca-orders-table table tbody td:nth-child(6),
 .pi-alpaca-orders-table table tbody td:nth-child(7) {
   text-align: right;
+}
+/* Reconciliation: Symbol | Status | Internal Qty | Alpaca PAPER Qty |
+   Qty Difference | Internal Market Value | Alpaca PAPER Market Value --
+   only the numeric columns (3-7) are right-aligned; Status (2) stays
+   left, same categorical-column convention as Side/Status above. */
+.pi-reconciliation-table table thead th:nth-child(3),
+.pi-reconciliation-table table thead th:nth-child(4),
+.pi-reconciliation-table table thead th:nth-child(5),
+.pi-reconciliation-table table thead th:nth-child(6),
+.pi-reconciliation-table table thead th:nth-child(7),
+.pi-reconciliation-table table tbody td:nth-child(3),
+.pi-reconciliation-table table tbody td:nth-child(4),
+.pi-reconciliation-table table tbody td:nth-child(5),
+.pi-reconciliation-table table tbody td:nth-child(6),
+.pi-reconciliation-table table tbody td:nth-child(7) {
+  text-align: right;
+}
+
+/* Concise matched/different/internal-only/broker-only counts -- same
+   factual-summary treatment as Performance & Learning's own .pl-summary,
+   no new color/weight vocabulary. */
+.pi-reconciliation-summary {
+  font-size: 13px;
+  color: var(--pi-color-text);
+  margin: 2px 0 10px 0;
 }
 
 .pi-empty-message {

@@ -20,6 +20,9 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
     _PARTIAL_DATA_TITLE,
     _PORTFOLIO_HISTORY_UNAVAILABLE_MESSAGE,
     _REAL_DATA_HTML,
+    _RECONCILIATION_ALPACA_UNAVAILABLE_MESSAGE,
+    _RECONCILIATION_INTERNAL_UNAVAILABLE_MESSAGE,
+    _RECONCILIATION_SCOPE_CAPTION,
     _RENDERED_AT_PREFIX,
     _SNAPSHOT_PREFIX,
     _SNAPSHOT_UNAVAILABLE,
@@ -37,6 +40,8 @@ from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     PortfolioHistoryPoint,
     PortfolioHolding,
     PortfolioScreen,
+    ReconciliationRow,
+    ReconciliationStatus,
 )
 from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
 
@@ -768,6 +773,239 @@ def test_orders_section_is_independent_of_account_and_disclosure_state():
     assert not any(_ALPACA_ORDERS_UNAVAILABLE_MESSAGE in v for v in html_values)
 
 
+# --- Internal vs Alpaca PAPER reconciliation ---------------------------
+
+
+def _reconciliation_dataframe(demo):
+    return [
+        block
+        for block in demo.blocks.values()
+        if isinstance(block, gr.Dataframe)
+        and "pi-reconciliation-table" in (block.elem_classes or [])
+        and getattr(block, "visible", True)
+    ]
+
+
+def _make_alpaca_position(**overrides):
+    defaults = dict(
+        symbol="ZZZZ", quantity=1.0, avg_entry_price=1.0, current_price=1.0,
+        market_value=1.0, unrealized_pl=0.0, unrealized_plpc=0.0, side="long",
+    )
+    defaults.update(overrides)
+    return AlpacaPosition(**defaults)
+
+
+def _make_reconciliation_row(**overrides):
+    defaults = dict(symbol="ZZZZ", status=ReconciliationStatus.MATCHED)
+    defaults.update(overrides)
+    return ReconciliationRow(**defaults)
+
+
+def _reconciliation_screen(reconciliation, *, holdings=(), alpaca_positions=()):
+    """`reconciliation` is the already-computed tuple this screen carries
+    (see bootstrap.py's _compute_portfolio_reconciliation) -- gradio_view.py
+    only renders it, it never derives it from holdings/alpaca_positions
+    itself, so these tests set it directly, matching how every other
+    already-derived screen field (e.g. RiskScreen.drawdown_history) is
+    tested at this layer."""
+    return PortfolioScreen(
+        capital=_make_capital(),
+        holdings=holdings,
+        alpaca_account=_make_alpaca_account(),
+        alpaca_positions=alpaca_positions,
+        reconciliation=reconciliation,
+    )
+
+
+def test_reconciliation_matched_when_quantities_agree_exactly():
+    row = _make_reconciliation_row(
+        symbol="AAPL", status=ReconciliationStatus.MATCHED,
+        internal_quantity=10.0, alpaca_quantity=10.0, quantity_difference=0.0,
+        internal_market_value=1.0, alpaca_market_value=1.0,
+    )
+    screen = _reconciliation_screen((row,))
+    demo = PortfolioIntelligenceUI(screen=screen).build()
+
+    tables = _reconciliation_dataframe(demo)
+    assert len(tables) == 1
+    assert tables[0].value["data"] == [
+        ["AAPL", "MATCHED", "10", "10", "0", "$1.00", "$1.00"],
+    ]
+    combined = "\n".join(_html_values(demo))
+    assert "1 matched" in combined
+    assert "0 quantity difference" in combined
+
+
+def test_reconciliation_quantity_difference_when_quantities_disagree():
+    row = _make_reconciliation_row(
+        symbol="AAPL", status=ReconciliationStatus.QUANTITY_DIFFERENCE,
+        internal_quantity=10.0, alpaca_quantity=6.0, quantity_difference=4.0,
+        internal_market_value=1.0, alpaca_market_value=1.0,
+    )
+    screen = _reconciliation_screen((row,))
+    demo = PortfolioIntelligenceUI(screen=screen).build()
+
+    tables = _reconciliation_dataframe(demo)
+    assert tables[0].value["data"] == [
+        ["AAPL", "QUANTITY DIFFERENCE", "10", "6", "4", "$1.00", "$1.00"],
+    ]
+    combined = "\n".join(_html_values(demo))
+    assert "1 quantity difference" in combined
+
+
+def test_reconciliation_internal_only_when_absent_from_alpaca():
+    row = _make_reconciliation_row(
+        symbol="BAC", status=ReconciliationStatus.INTERNAL_ONLY,
+        internal_quantity=5.0, internal_market_value=1.0,
+    )
+    screen = _reconciliation_screen((row,))
+    demo = PortfolioIntelligenceUI(screen=screen).build()
+
+    tables = _reconciliation_dataframe(demo)
+    assert tables[0].value["data"] == [
+        ["BAC", "INTERNAL ONLY", "5", "", "", "$1.00", ""],
+    ]
+    combined = "\n".join(_html_values(demo))
+    assert "1 internal only" in combined
+
+
+def test_reconciliation_broker_only_when_absent_internally():
+    row = _make_reconciliation_row(
+        symbol="TSLA", status=ReconciliationStatus.BROKER_ONLY,
+        alpaca_quantity=3.0, alpaca_market_value=1.0,
+    )
+    screen = _reconciliation_screen((row,))
+    demo = PortfolioIntelligenceUI(screen=screen).build()
+
+    tables = _reconciliation_dataframe(demo)
+    assert tables[0].value["data"] == [
+        ["TSLA", "BROKER ONLY", "", "3", "", "", "$1.00"],
+    ]
+    combined = "\n".join(_html_values(demo))
+    assert "1 broker only" in combined
+
+
+def test_reconciliation_multiple_symbols_are_ordered_alphabetically():
+    """Rendering preserves whatever order the screen's own reconciliation
+    tuple already carries -- bootstrap.py's _compute_portfolio_
+    reconciliation is what establishes the alphabetical order (see the
+    bootstrap-level test), this only proves the view does not reshuffle it."""
+    rows = (
+        _make_reconciliation_row(symbol="AAPL", status=ReconciliationStatus.MATCHED),
+        _make_reconciliation_row(symbol="MSFT", status=ReconciliationStatus.BROKER_ONLY),
+        _make_reconciliation_row(symbol="TSLA", status=ReconciliationStatus.INTERNAL_ONLY),
+    )
+    screen = _reconciliation_screen(rows)
+    demo = PortfolioIntelligenceUI(screen=screen).build()
+
+    tables = _reconciliation_dataframe(demo)
+    symbols = [row[0] for row in tables[0].value["data"]]
+    assert symbols == ["AAPL", "MSFT", "TSLA"]
+    combined = "\n".join(_html_values(demo))
+    assert "1 matched" in combined
+    assert "1 internal only" in combined
+    assert "1 broker only" in combined
+
+
+def test_reconciliation_empty_when_both_sides_have_no_positions():
+    screen = _reconciliation_screen(())
+    demo = PortfolioIntelligenceUI(screen=screen).build()
+
+    assert _reconciliation_dataframe(demo) == []
+    html_values = _html_values(demo)
+    assert any(
+        "No internal or Alpaca Paper positions to reconcile." in v for v in html_values
+    )
+
+
+def test_reconciliation_unavailable_when_internal_holdings_unavailable():
+    """Holdings unavailable -> reconciliation must not infer a match --
+    honest unavailable state, never a fabricated comparison."""
+    screen = PortfolioScreen(
+        capital=_make_capital(), holdings=None,
+        alpaca_account=_make_alpaca_account(),
+        alpaca_positions=(_make_alpaca_position(symbol="AAPL"),),
+        reconciliation=None,
+    )
+    demo = PortfolioIntelligenceUI(screen=screen).build()
+
+    assert _reconciliation_dataframe(demo) == []
+    html_values = _html_values(demo)
+    assert any(_RECONCILIATION_INTERNAL_UNAVAILABLE_MESSAGE in v for v in html_values)
+
+
+def test_reconciliation_unavailable_when_alpaca_unavailable():
+    """Alpaca account/positions unavailable -> reconciliation must not
+    infer a match -- honest unavailable state, never a fabricated
+    comparison."""
+    screen = PortfolioScreen(
+        capital=_make_capital(), holdings=(_make_holding(symbol="AAPL"),),
+        alpaca_account=None,
+        reconciliation=None,
+    )
+    demo = PortfolioIntelligenceUI(screen=screen).build()
+
+    assert _reconciliation_dataframe(demo) == []
+    html_values = _html_values(demo)
+    assert any(_RECONCILIATION_ALPACA_UNAVAILABLE_MESSAGE in v for v in html_values)
+
+
+def test_reconciliation_section_names_both_views_and_is_scoped_descriptively():
+    row = _make_reconciliation_row(
+        symbol="AAPL", status=ReconciliationStatus.MATCHED,
+        internal_quantity=1.0, alpaca_quantity=1.0, quantity_difference=0.0,
+    )
+    screen = _reconciliation_screen((row,))
+    demo = PortfolioIntelligenceUI(screen=screen).build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "Internal Portfolio" in combined
+    assert _ALPACA_PAPER_BADGE_TEXT in combined
+    assert _RECONCILIATION_SCOPE_CAPTION in combined
+
+
+def test_reconciliation_never_uses_risk_error_health_or_opportunity_language():
+    """Task guardrail: the reconciliation SUMMARY and TABLE ROWS -- the
+    actual per-position facts, as opposed to _RECONCILIATION_SCOPE_
+    CAPTION's own explanatory disclaimer, which legitimately names and
+    negates these exact words ("...is not evidence of an error, a risk, or
+    a trading opportunity") -- must never label a mismatch a risk, error,
+    unhealthy state, trading opportunity, or execution failure."""
+    row = _make_reconciliation_row(
+        symbol="AAPL", status=ReconciliationStatus.QUANTITY_DIFFERENCE,
+        internal_quantity=10.0, alpaca_quantity=6.0, quantity_difference=4.0,
+    )
+    row_only = "\n".join([
+        PortfolioIntelligenceUI._format_reconciliation_summary_html((row,)),
+        "\n".join(cell for cell in PortfolioIntelligenceUI._format_reconciliation_rows((row,))[0]),
+    ]).lower()
+
+    for forbidden in (
+        "risk", "error", "unhealthy", "trading opportunity",
+        "execution failure", "tolerance", "health score",
+    ):
+        assert forbidden not in row_only
+
+
+def test_reconciliation_row_helper_never_fabricates_a_one_sided_quantity_difference():
+    """INTERNAL_ONLY / BROKER_ONLY rows must carry quantity_difference=None
+    -- never a fabricated numeric difference against a side that has no
+    position at all."""
+    from applications.trading_intelligence.bootstrap import (
+        _compute_portfolio_reconciliation,
+    )
+
+    rows = _compute_portfolio_reconciliation(
+        holdings=(_make_holding(symbol="BAC", quantity=5.0),),
+        alpaca_positions=(_make_alpaca_position(symbol="TSLA", quantity=3.0),),
+    )
+    by_symbol = {row.symbol: row for row in rows}
+    assert by_symbol["BAC"].status is ReconciliationStatus.INTERNAL_ONLY
+    assert by_symbol["BAC"].quantity_difference is None
+    assert by_symbol["TSLA"].status is ReconciliationStatus.BROKER_ONLY
+    assert by_symbol["TSLA"].quantity_difference is None
+
+
 def test_default_screen_renders_zero_visible_dataframes():
     """The default (no screen) is fully unavailable: the Holdings, Alpaca
     positions, and Alpaca orders tables are all present in the layout (so
@@ -780,7 +1018,7 @@ def test_default_screen_renders_zero_visible_dataframes():
 # --- Render-time fetch: Refresh button, demo.load, "as of" indicator ----
 
 
-_OUTPUT_COUNT = 15  # see PortfolioIntelligenceUI.build()'s `outputs` list
+_OUTPUT_COUNT = 18  # see PortfolioIntelligenceUI.build()'s `outputs` list
 
 
 def _refresh_button(demo):
@@ -905,7 +1143,8 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
     rendered_at, snapshot, disclosure, capital_summary, allocation, \
         holdings_msg, holdings_tbl, portfolio_history_msg, portfolio_history_chart, \
         alpaca_acct, alpaca_pos_msg, alpaca_pos_tbl, \
-        orders_trunc, orders_msg, orders_tbl = updates
+        orders_trunc, orders_msg, orders_tbl, \
+        reconciliation_summary, reconciliation_msg, reconciliation_tbl = updates
 
     assert _SNAPSHOT_UNAVAILABLE in snapshot["value"]
     assert disclosure["value"] == _UNAVAILABLE_DATA_HTML
@@ -917,8 +1156,10 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
     assert len(portfolio_history_chart["value"]) == 0
     assert _ALPACA_UNAVAILABLE_MESSAGE in alpaca_acct["value"]
     assert _ALPACA_ORDERS_UNAVAILABLE_MESSAGE in orders_msg["value"]
+    assert _RECONCILIATION_INTERNAL_UNAVAILABLE_MESSAGE in reconciliation_msg["value"]
+    assert reconciliation_summary["visible"] is False
     # every table hidden and empty
-    for tbl in (holdings_tbl, alpaca_pos_tbl, orders_tbl):
+    for tbl in (holdings_tbl, alpaca_pos_tbl, orders_tbl, reconciliation_tbl):
         assert tbl["visible"] is False
         assert tbl["value"] == []
     # no fabricated markers from mock_data.py

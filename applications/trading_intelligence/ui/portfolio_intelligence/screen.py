@@ -23,6 +23,7 @@ into or silently reconciled with Holdings.
 """
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Optional, Tuple
 
 from applications.platform.integrations import IntegrationHealth
@@ -122,6 +123,41 @@ class PortfolioHistoryPoint:
     portfolio_value: float
 
 
+class ReconciliationStatus(Enum):
+    """The four factual outcomes of comparing one symbol's Internal
+    Portfolio quantity against its Alpaca PAPER quantity -- descriptive
+    only, never a risk/error/health/trading judgment. See ReconciliationRow
+    below."""
+    MATCHED = "MATCHED"
+    INTERNAL_ONLY = "INTERNAL_ONLY"
+    BROKER_ONLY = "BROKER_ONLY"
+    QUANTITY_DIFFERENCE = "QUANTITY_DIFFERENCE"
+
+
+@dataclass(frozen=True)
+class ReconciliationRow:
+    """One symbol's Internal Portfolio vs Alpaca PAPER comparison -- a
+    pure, descriptive fact computed (see bootstrap.py's
+    _compute_portfolio_reconciliation) from the SAME already-fetched
+    PortfolioHolding / AlpacaPosition tuples this screen already carries.
+    No new read, no new adapter, no invented tolerance/valuation/health
+    score. `internal_quantity`/`alpaca_quantity`/market values are None
+    only when that side has no position in this symbol at all (INTERNAL_
+    ONLY / BROKER_ONLY); `quantity_difference` is populated only when both
+    sides have a position (0.0 for MATCHED, the real signed difference for
+    QUANTITY_DIFFERENCE) and is None otherwise -- never a fabricated
+    number for a one-sided row. Market values are each side's own already-
+    real PortfolioHolding.market_value / AlpacaPosition.market_value,
+    carried through verbatim; no new valuation is computed here."""
+    symbol: str
+    status: ReconciliationStatus
+    internal_quantity: Optional[float] = None
+    alpaca_quantity: Optional[float] = None
+    quantity_difference: Optional[float] = None
+    internal_market_value: Optional[float] = None
+    alpaca_market_value: Optional[float] = None
+
+
 @dataclass(frozen=True)
 class AlpacaOrdersSnapshot:
     """A successful, real read of Alpaca Paper recent orders. An empty
@@ -145,6 +181,15 @@ class PortfolioScreen:
     alpaca_positions: Tuple[AlpacaPosition, ...] = field(default=())
     alpaca_orders: Optional[AlpacaOrdersSnapshot] = None
     portfolio_history: Optional[Tuple[PortfolioHistoryPoint, ...]] = None
+    # Internal vs Alpaca PAPER reconciliation: populated by the composition
+    # root (bootstrap.py's _with_portfolio_reconciliation_data) from the
+    # SAME already-fetched holdings / alpaca_positions above -- no new
+    # read. None (unavailable) whenever either source is unavailable
+    # (holdings is None, or alpaca_is_available is False) -- never
+    # inferring a match when one side could not be read. An empty tuple is
+    # a real "both sides read, nothing to reconcile" result, distinct from
+    # None, matching every other None-vs-empty convention on this screen.
+    reconciliation: Optional[Tuple[ReconciliationRow, ...]] = None
     # ADR-061 Category A (A4): per-section integration health, populated by
     # the composition root (bootstrap.py) from each adapter's ReadResult.
     # Carries the reason a section is unavailable; consumed by rendering in
@@ -224,3 +269,20 @@ class PortfolioScreen:
     @property
     def portfolio_history_empty_state_message(self) -> str:
         return "No portfolio history is recorded yet."
+
+    @property
+    def reconciliation_is_available(self) -> bool:
+        """True only once a real reconciliation tuple has been supplied --
+        which itself requires BOTH holdings_is_available and
+        alpaca_is_available to be True (see bootstrap.py). False means one
+        or both sides could not be read; the UI must never present a match
+        or a difference it cannot actually support."""
+        return self.reconciliation is not None
+
+    @property
+    def reconciliation_is_empty(self) -> bool:
+        return self.reconciliation is not None and len(self.reconciliation) == 0
+
+    @property
+    def reconciliation_empty_state_message(self) -> str:
+        return "No internal or Alpaca Paper positions to reconcile."

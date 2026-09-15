@@ -75,9 +75,12 @@ from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view imp
     _ALPACA_UNAVAILABLE_MESSAGE,
 )
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (  # noqa: E402
+    AlpacaAccountSnapshot,
     CapitalSummary,
     PortfolioHolding,
     PortfolioScreen,
+    ReconciliationRow,
+    ReconciliationStatus,
 )
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import (  # noqa: E402
     RiskIntelligenceUI,
@@ -264,6 +267,86 @@ def test_portfolio_intelligence_holdings_honest_empty_state(browser):
         context, page = _page_with_text(browser, url, "No holdings recorded yet.")
         try:
             assert "No holdings recorded yet." in page.inner_text("body")
+        finally:
+            context.close()
+
+
+def test_portfolio_intelligence_renders_the_reconciliation_section_with_real_seeded_rows(
+    browser,
+):
+    """Internal vs Alpaca PAPER reconciliation: a MATCHED and a QUANTITY
+    DIFFERENCE row, plus the summary counts, render in a real browser from
+    seeded data. `.pi-section-label` is rendered visually all-caps via CSS
+    text-transform (see theme.py) -- the section title is asserted
+    case-insensitively, same as test_decision_center_evidence_e2e.py's own
+    fix for the identical CSS pattern; row/summary values carry no such
+    transform and are asserted with their real case."""
+    screen = PortfolioScreen(
+        capital=CapitalSummary(
+            allocated_amount=100_000.0, available_cash=42_000.0,
+            invested_amount=58_000.0, reserve=5_000.0, realized_profit=1_200.0,
+        ),
+        holdings=(
+            PortfolioHolding(
+                symbol="AAPL", quantity=10.0, price=190.25,
+                market_value=1_902.50, weight_pct=100.0,
+            ),
+        ),
+        capital_health=_HEALTHY,
+        holdings_health=_HEALTHY,
+        alpaca_account=AlpacaAccountSnapshot(
+            equity=100_000.0, cash=50_000.0, buying_power=100_000.0,
+            portfolio_value=100_000.0,
+        ),
+        alpaca_positions=(),
+        alpaca_health=_HEALTHY,
+        reconciliation=(
+            ReconciliationRow(
+                symbol="AAPL", status=ReconciliationStatus.MATCHED,
+                internal_quantity=10.0, alpaca_quantity=10.0, quantity_difference=0.0,
+            ),
+            ReconciliationRow(
+                symbol="MSFT", status=ReconciliationStatus.QUANTITY_DIFFERENCE,
+                internal_quantity=4.0, alpaca_quantity=6.0, quantity_difference=-2.0,
+            ),
+        ),
+    )
+    ui = PortfolioIntelligenceUI(screen=screen)
+    with _launched_app(ui) as url:
+        context, page = _page_with_text(browser, url, "QUANTITY DIFFERENCE")
+        try:
+            visible_text = page.inner_text("body")
+            assert "internal portfolio" in visible_text.lower()
+            assert "reconciliation" in visible_text.lower()
+            assert "MATCHED" in visible_text
+            assert "QUANTITY DIFFERENCE" in visible_text
+            assert "1 matched" in visible_text
+            assert "1 quantity difference" in visible_text
+        finally:
+            context.close()
+
+
+def test_portfolio_intelligence_reconciliation_honest_unavailable_state(browser):
+    """Holdings unavailable -> the reconciliation section shows its own
+    honest unavailable message -- never inferring a match when one source
+    could not be read -- while the rest of the page keeps rendering."""
+    screen = PortfolioScreen(
+        capital=CapitalSummary(
+            allocated_amount=50_000.0, available_cash=50_000.0,
+            invested_amount=0.0, reserve=0.0, realized_profit=0.0,
+        ),
+        holdings=None,
+        capital_health=_HEALTHY,
+    )
+    ui = PortfolioIntelligenceUI(screen=screen)
+    with _launched_app(ui) as url:
+        context, page = _page_with_text(
+            browser, url, "Reconciliation is not available"
+        )
+        try:
+            visible_text = page.inner_text("body")
+            assert "Reconciliation is not available" in visible_text
+            assert "Internal Portfolio" in visible_text
         finally:
             context.close()
 
