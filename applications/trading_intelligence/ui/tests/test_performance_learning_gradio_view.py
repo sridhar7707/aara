@@ -17,6 +17,7 @@ from applications.trading_intelligence.ui.performance_learning.screen import (
     ATTRIBUTION_BREAKDOWN_TITLE,
     CALIBRATION_CONTENT_HEADING,
     CALIBRATION_MIN_OUTCOMES,
+    EVIDENCE_MATURITY_DISCLAIMER,
     LOSS_REVIEW_DISCLAIMER,
     MODEL_CONFIDENCE_CALIBRATION_TITLE,
     OUTCOME_HISTORY_TITLE,
@@ -427,3 +428,130 @@ def test_regime_outcomes_does_not_disturb_calibration_rendering():
     visible = _visible_html(demo)
     assert CALIBRATION_CONTENT_HEADING in visible
     assert REGIME_OUTCOMES_TITLE in visible
+
+
+# --- Prominent Sample-Size Banner -----------------------------------------
+
+
+def _evidence_maturity_block(demo):
+    blocks = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.HTML) and "pl-evidence-maturity" in (b.elem_classes or [])
+    ]
+    assert len(blocks) == 1
+    return blocks[0]
+
+
+def test_evidence_maturity_unavailable_by_default():
+    """Default mock screen: calibration_health is None (no provider)."""
+    demo = PerformanceLearningUI().build()
+
+    block = _evidence_maturity_block(demo)
+    assert "not available" in block.value.lower()
+
+
+def test_evidence_maturity_unavailable_on_non_healthy_read():
+    screen = _calibration_screen(
+        [_band("0.50-0.55", 5, 5)],
+        health=IntegrationHealth.unavailable(_CAL_PROVIDER, detail="x"),
+    )
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    block = _evidence_maturity_block(demo)
+    assert "unavailable" in block.value.lower() or "not available" in block.value.lower()
+
+
+def test_evidence_maturity_empty_real_zero_renders_honestly():
+    screen = _calibration_screen([
+        _band("0.50-0.55", 0, 0), _band("0.55-0.60", 0, 0),
+        _band("0.60-0.65", 0, 0), _band("0.65-1.00", 0, 0),
+    ])
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    block = _evidence_maturity_block(demo)
+    assert f"0 of {CALIBRATION_MIN_OUTCOMES}" in block.value
+    assert "Below the established floor" in block.value
+
+
+def test_evidence_maturity_below_floor_renders_the_real_count_and_floor():
+    screen = _calibration_screen([
+        _band("0.50-0.55", 2, 2), _band("0.55-0.60", 3, 3),
+        _band("0.60-0.65", 2, 3), _band("0.65-1.00", 0, 0),
+    ])
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    block = _evidence_maturity_block(demo)
+    assert f"15 of {CALIBRATION_MIN_OUTCOMES}" in block.value
+    assert "Below the established floor" in block.value
+    assert EVIDENCE_MATURITY_DISCLAIMER in block.value
+
+
+def test_evidence_maturity_exactly_at_floor_renders_reached():
+    screen = _calibration_screen([
+        _band("0.50-0.55", 4, 4), _band("0.55-0.60", 4, 4),
+        _band("0.60-0.65", 4, 4), _band("0.65-1.00", 3, 3),
+    ])
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    block = _evidence_maturity_block(demo)
+    assert f"{CALIBRATION_MIN_OUTCOMES} of {CALIBRATION_MIN_OUTCOMES}" in block.value
+    assert "reached" in block.value.lower()
+    assert "Below the established floor" not in block.value
+
+
+def test_evidence_maturity_above_floor_renders_reached():
+    screen = _calibration_screen([
+        _band("0.50-0.55", 10, 10), _band("0.55-0.60", 10, 10),
+        _band("0.60-0.65", 5, 5), _band("0.65-1.00", 0, 0),
+    ])
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    block = _evidence_maturity_block(demo)
+    assert f"50 of {CALIBRATION_MIN_OUTCOMES}" in block.value
+    assert "reached" in block.value.lower()
+
+
+def test_evidence_maturity_never_implies_significance_predictive_validity_or_readiness():
+    """Task guardrail. EVIDENCE_MATURITY_DISCLAIMER itself legitimately
+    NAMES "statistical significance"/"predictive validity"/"trading
+    readiness" while denying them ("does not by itself imply..."); these
+    phrase-level checks target an AFFIRMATIVE claim, not that honest
+    negation -- same guard-scoping pattern this codebase already uses for
+    a constant's own disclaimer text elsewhere (e.g. Risk Intelligence's
+    Concentration disclaimer)."""
+    below = _calibration_screen([_band("0.50-0.55", 5, 5)])
+    above = _calibration_screen([
+        _band("0.50-0.55", 10, 10), _band("0.55-0.60", 10, 10), _band("0.60-0.65", 5, 5),
+    ])
+    for screen in (below, above):
+        block = _evidence_maturity_block(PerformanceLearningUI(screen=screen).build())
+        lowered = block.value.lower()
+        assert "does not by itself imply" in lowered  # the honest disclaimer is present
+        for forbidden in (
+            "is statistically significant", "is predictive", "is trading ready",
+            "is reliable", "is accurate", "is calibrated",
+        ):
+            assert forbidden not in lowered
+
+
+def test_evidence_maturity_does_not_disturb_calibration_or_outcome_rendering():
+    """Regression guard: the new banner reuses calibration data but must
+    not change the existing calibration/outcome-history rendering."""
+    screen = build_calibration_preview_screen()
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    visible = _visible_html(demo)
+    assert CALIBRATION_CONTENT_HEADING in visible
+    assert OUTCOME_HISTORY_TITLE in visible
+    _evidence_maturity_block(demo)  # still present, no crash, no duplicate
+
+
+def test_no_refresh_button_or_load_event_added_by_the_banner():
+    """This screen has no Refresh/demo.load() wiring (single-shot render)
+    -- the new banner must not change that."""
+    screen = _calibration_screen([_band("0.50-0.55", 5, 5)])
+    demo = PerformanceLearningUI(screen=screen).build()
+
+    buttons = [b for b in demo.blocks.values() if isinstance(b, gr.Button)]
+    assert buttons == []
+    assert demo.config.get("dependencies", []) == []

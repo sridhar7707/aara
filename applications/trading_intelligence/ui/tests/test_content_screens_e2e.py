@@ -69,7 +69,11 @@ from applications.trading_intelligence.ui.performance_learning.mock_data import 
 )
 from applications.trading_intelligence.ui.performance_learning.screen import (  # noqa: E402
     ATTRIBUTION_BREAKDOWN_TITLE,
+    CALIBRATION_MIN_OUTCOMES,
     OutcomeHistoryRow,
+)
+from applications.trading_intelligence.projections.calibration_band import (  # noqa: E402
+    CalibrationBand,
 )
 from applications.trading_intelligence.ui.portfolio_intelligence.gradio_view import (  # noqa: E402
     PortfolioIntelligenceUI,
@@ -729,6 +733,47 @@ def test_performance_learning_honest_empty_outcome_history(browser):
                 "No BUY decisions are present in the current trades snapshot."
                 in page.inner_text("body")
             )
+        finally:
+            context.close()
+
+
+def test_performance_learning_evidence_maturity_banner_below_floor(browser):
+    """Prominent Sample-Size Banner: real seeded calibration data below
+    the established floor (n=15, matching this product's real verified
+    current sample) renders the real count/floor and never claims
+    significance/predictive validity/readiness -- proven in the real
+    browser, not just the Python return value."""
+    base = build_performance_learning_mock_screen()
+    bands = (
+        CalibrationBand(label="0.50-0.55", wins=1, losses=1),
+        CalibrationBand(label="0.55-0.60", wins=3, losses=3),
+        CalibrationBand(label="0.60-0.65", wins=2, losses=4),
+        CalibrationBand(label="0.65-1.00", wins=1, losses=0),
+    )
+    screen = replace(base, calibration_health=_HEALTHY, calibration_bands=bands)
+    ui = PerformanceLearningUI(screen=screen)
+    with _launched_app(ui) as url:
+        context, page = _page_with_text(browser, url, "Evidence maturity")
+        try:
+            visible_text = page.inner_text("body")
+            assert f"15 of {CALIBRATION_MIN_OUTCOMES}" in visible_text
+            assert "Below the established floor" in visible_text
+            assert "does not by itself imply" in visible_text
+            lowered = visible_text.lower()
+            for forbidden in ("is statistically significant", "is predictive", "is reliable"):
+                assert forbidden not in lowered
+        finally:
+            context.close()
+
+
+def test_performance_learning_evidence_maturity_banner_unavailable_by_default(browser):
+    """No calibration provider wired (the default mock screen) -> the
+    banner's own honest unavailable message, never a fabricated count."""
+    ui = PerformanceLearningUI(screen=build_performance_learning_mock_screen())
+    with _launched_app(ui) as url:
+        context, page = _page_with_text(browser, url, "Evidence maturity is not available")
+        try:
+            assert "Evidence maturity is not available" in page.inner_text("body")
         finally:
             context.close()
 

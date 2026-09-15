@@ -66,6 +66,7 @@ from applications.trading_intelligence.ui.performance_learning.screen import (
     CALIBRATION_CONTENT_HEADING,
     CALIBRATION_DISCLAIMER,
     DECISION_LEDGER_INSPECTION_TITLE,
+    EVIDENCE_MATURITY_DISCLAIMER,
     LOSS_REVIEW_DISCLAIMER,
     REGIME_OUTCOMES_DISCLAIMER,
     REGIME_OUTCOMES_TITLE,
@@ -104,6 +105,19 @@ _PAGE_HEADER_HTML = (
     "<h2>Performance & Learning</h2>"
     '<div class="pl-subtitle">Outcome history, attribution, and model confidence calibration</div>'
     "</div>"
+)
+
+# Prominent Sample-Size Banner: reuses the SAME calibration_health /
+# calibration_total_outcomes / CALIBRATION_MIN_OUTCOMES / calibration_has_
+# enough_data the Model Confidence Calibration section below already
+# gates on -- no new read, no new count. `calibration_health is None`
+# (standalone / no-provider build) renders this fixed fallback verbatim,
+# matching _format_calibration_unavailable_html's own two-branch rule; a
+# real non-HEALTHY IntegrationHealth is routed through the shared
+# render_unavailable() so the specific reason is named.
+_EVIDENCE_MATURITY_UNAVAILABLE_MESSAGE = (
+    "Evidence maturity is not available -- the outcome data source could not "
+    "be read in this environment."
 )
 
 
@@ -403,6 +417,16 @@ class PerformanceLearningUI:
 
             gr.HTML(_PAGE_HEADER_HTML)
 
+            # --- Prominent Sample-Size Banner ---
+            # Near the top, before any individual section -- so a reader
+            # sees the product's current evidence maturity once, up front,
+            # rather than only inside the Model Confidence Calibration
+            # section further down.
+            gr.HTML(
+                self._format_evidence_maturity_html(screen),
+                elem_classes=["pl-evidence-maturity"],
+            )
+
             # --- Outcome History (Wave 2B: real, or an honest state) ---
             gr.HTML(self._format_section_label_html(screen.outcome_history))
 
@@ -569,6 +593,36 @@ class PerformanceLearningUI:
         if not summary:
             return ""
         return f'<div class="pl-summary">{html.escape(summary)}</div>'
+
+    # --- Prominent Sample-Size Banner --------------------------------------
+
+    @staticmethod
+    def _format_evidence_maturity_html(screen: PerformanceLearningScreen) -> str:
+        """`calibration_health is None` (standalone / no provider) -> a
+        fixed fallback message; a real non-HEALTHY health -> the shared
+        ADR-061 "Data unavailable -- <reason>" phrase -- same two-branch
+        rule _format_calibration_unavailable_html already uses. Otherwise
+        renders screen.evidence_maturity_heading (the SAME calibration_
+        total_outcomes / CALIBRATION_MIN_OUTCOMES this screen's own
+        Model Confidence Calibration section already gates on) alongside
+        the fixed EVIDENCE_MATURITY_DISCLAIMER -- never a significance,
+        predictive-validity, or readiness claim."""
+        if screen.calibration_health is None:
+            return (
+                f'<div class="pl-unavailable-message">'
+                f'{html.escape(_EVIDENCE_MATURITY_UNAVAILABLE_MESSAGE)}</div>'
+            )
+        heading = screen.evidence_maturity_heading
+        if heading is None:
+            return render_unavailable(
+                screen.calibration_health,
+                fallback_message=_EVIDENCE_MATURITY_UNAVAILABLE_MESSAGE,
+            )
+        return (
+            f'<div class="pl-evidence-maturity-heading">{html.escape(heading)}</div>'
+            f'<div class="pl-evidence-maturity-disclaimer">'
+            f'{html.escape(EVIDENCE_MATURITY_DISCLAIMER)}</div>'
+        )
 
     # --- Sprint 1 Phase 3: Loss/failure-analysis callout ------------------
 

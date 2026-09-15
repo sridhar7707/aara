@@ -8,6 +8,7 @@ from applications.trading_intelligence.ui.performance_learning.screen import (
     ATTRIBUTION_BREAKDOWN_TITLE,
     CALIBRATION_CONTENT_HEADING,
     CALIBRATION_MIN_OUTCOMES,
+    EVIDENCE_MATURITY_DISCLAIMER,
     MODEL_CONFIDENCE_CALIBRATION_TITLE,
     OUTCOME_HISTORY_TITLE,
     REGIME_OUTCOMES_TITLE,
@@ -370,3 +371,137 @@ def test_outcome_history_row_carries_the_real_decision_id_as_its_reference():
     existing `decision` field's own "SYMBOL ACTION · decision_id" shape."""
     row = _row(decision_reference="trade-38")
     assert row.decision_reference == "trade-38"
+
+
+# --- Prominent Sample-Size Banner (evidence_maturity_heading) -------------
+#
+# Reuses the SAME already-computed calibration_total_outcomes /
+# CALIBRATION_MIN_OUTCOMES / calibration_has_enough_data / calibration_
+# available this screen's own Model Confidence Calibration section already
+# gates on -- no new count, no new floor, no new read.
+
+
+def test_evidence_maturity_heading_none_when_no_provider():
+    """calibration_health is None (standalone / no-provider build) ->
+    unavailable, matching calibration_available's own convention."""
+    screen = _make_screen()
+
+    assert screen.calibration_health is None
+    assert screen.evidence_maturity_heading is None
+
+
+def test_evidence_maturity_heading_none_when_read_is_non_healthy():
+    screen = _make_screen(
+        calibration_health=IntegrationHealth.unavailable(_PROVIDER, detail="x"),
+        calibration_bands=_bands(third=(5, 5)),
+    )
+
+    assert screen.calibration_available is False
+    assert screen.evidence_maturity_heading is None
+
+
+def test_evidence_maturity_heading_real_zero_is_a_real_available_fact():
+    """A HEALTHY read with zero qualifying outcomes is a real "0 of 30"
+    fact, not unavailable -- same distinction calibration_is_empty already
+    makes."""
+    screen = _make_screen(calibration_health=_HEALTHY, calibration_bands=_bands())
+
+    assert screen.calibration_total_outcomes == 0
+    heading = screen.evidence_maturity_heading
+    assert heading is not None
+    assert f"0 of {CALIBRATION_MIN_OUTCOMES}" in heading
+    assert "Below the established floor" in heading
+
+
+def test_evidence_maturity_heading_below_floor():
+    screen = _make_screen(
+        calibration_health=_HEALTHY,
+        calibration_bands=_bands(first=(2, 2), second=(3, 3), third=(2, 3)),
+    )
+
+    assert screen.calibration_total_outcomes == 15
+    assert screen.calibration_has_enough_data is False
+    heading = screen.evidence_maturity_heading
+    assert f"15 of {CALIBRATION_MIN_OUTCOMES}" in heading
+    assert "Below the established floor" in heading
+    assert "reached" not in heading.lower()
+
+
+def test_evidence_maturity_heading_exactly_at_floor():
+    screen = _make_screen(
+        calibration_health=_HEALTHY,
+        calibration_bands=_bands(
+            first=(4, 4), second=(4, 4), third=(4, 4), fourth=(3, 3),
+        ),
+    )
+
+    assert screen.calibration_total_outcomes == CALIBRATION_MIN_OUTCOMES
+    assert screen.calibration_has_enough_data is True
+    heading = screen.evidence_maturity_heading
+    assert f"{CALIBRATION_MIN_OUTCOMES} of {CALIBRATION_MIN_OUTCOMES}" in heading
+    assert "reached" in heading.lower()
+    assert "Below the established floor" not in heading
+
+
+def test_evidence_maturity_heading_above_floor():
+    screen = _make_screen(
+        calibration_health=_HEALTHY,
+        calibration_bands=_bands(
+            first=(10, 10), second=(10, 10), third=(5, 5), fourth=(0, 0),
+        ),
+    )
+
+    assert screen.calibration_total_outcomes == 50
+    assert screen.calibration_has_enough_data is True
+    heading = screen.evidence_maturity_heading
+    assert f"50 of {CALIBRATION_MIN_OUTCOMES}" in heading
+    assert "reached" in heading.lower()
+
+
+def test_evidence_maturity_heading_derives_the_floor_not_a_literal():
+    """Regression guard against a hardcoded "30" -- proves the heading
+    tracks CALIBRATION_MIN_OUTCOMES itself, not a copy of its current
+    value."""
+    screen = _make_screen(calibration_health=_HEALTHY, calibration_bands=_bands())
+
+    assert str(CALIBRATION_MIN_OUTCOMES) in screen.evidence_maturity_heading
+
+
+def test_evidence_maturity_heading_never_claims_significance_or_readiness():
+    """Task guardrail: reaching the floor must never itself be described as
+    statistically significant, predictive, or trading-ready."""
+    below = _make_screen(calibration_health=_HEALTHY, calibration_bands=_bands())
+    above = _make_screen(
+        calibration_health=_HEALTHY,
+        calibration_bands=_bands(first=(10, 10), second=(10, 10), third=(5, 5)),
+    )
+
+    for screen in (below, above):
+        lowered = screen.evidence_maturity_heading.lower()
+        for forbidden in (
+            "significant", "predictive", "ready", "reliable", "accurate", "calibrated",
+        ):
+            assert forbidden not in lowered
+
+
+def test_evidence_maturity_disclaimer_is_a_fixed_honest_caveat():
+    lowered = EVIDENCE_MATURITY_DISCLAIMER.lower()
+    assert "statistical significance" in lowered
+    assert "predictive validity" in lowered
+
+
+def test_evidence_maturity_state_does_not_change_calibration_or_outcome_flags():
+    """Regression guard: the new banner must not disturb the existing
+    calibration/outcome-history gating it reuses."""
+    screen = _make_screen(
+        outcome_health=_HEALTHY,
+        outcome_rows=(_row(),),
+        calibration_health=_HEALTHY,
+        calibration_bands=_bands(third=(5, 5)),
+    )
+
+    assert screen.outcome_history_available is True
+    assert screen.calibration_available is True
+    assert screen.calibration_total_outcomes == 10
+    assert screen.calibration_has_enough_data is False
+    assert screen.evidence_maturity_heading is not None

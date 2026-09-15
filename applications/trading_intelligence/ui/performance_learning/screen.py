@@ -93,6 +93,21 @@ _OUTCOME_HISTORY_EMPTY_MESSAGE = (
     "No BUY decisions are present in the current trades snapshot."
 )
 
+# Prominent Sample-Size Banner: a screen-wide restatement of the SAME
+# evidence-floor fact the Model Confidence Calibration section already
+# gates on (calibration_total_outcomes / CALIBRATION_MIN_OUTCOMES /
+# calibration_has_enough_data below) -- no new count, no new floor, no new
+# read. Placed near the top of the screen so a reader sees the product's
+# current evidence maturity before drilling into any one section. The
+# fixed disclaimer half is deliberately separate from the dynamic heading
+# (PerformanceLearningScreen.evidence_maturity_heading below) so the
+# caveat wording never has to be re-derived per count.
+EVIDENCE_MATURITY_DISCLAIMER = (
+    "A count of closed outcomes only. Reaching the floor does not by "
+    "itself imply statistical significance, predictive validity, or "
+    "trading readiness."
+)
+
 # Sprint 1 Phase 3: a concise, purely descriptive callout listing what the
 # SAME Wave 2A lineage (already fetched for Outcome History / win_rate_
 # summary above) recorded for closed BUY decisions that realized a loss.
@@ -301,6 +316,34 @@ class PerformanceLearningScreen:
         """True once the conservative display floor is met -- see
         :data:`CALIBRATION_MIN_OUTCOMES`."""
         return self.calibration_total_outcomes >= CALIBRATION_MIN_OUTCOMES
+
+    # --- Prominent Sample-Size Banner ---------------------------------
+
+    @property
+    def evidence_maturity_heading(self) -> Optional[str]:
+        """Prominent, screen-wide restatement of calibration_total_
+        outcomes / CALIBRATION_MIN_OUTCOMES / calibration_has_enough_data
+        -- the SAME already-computed count and floor the Model Confidence
+        Calibration section below already gates on, never a second count
+        or a hardcoded number. None only when the underlying outcome read
+        itself is unavailable (mirrors calibration_available); a HEALTHY
+        read with zero qualifying outcomes still yields a real "0 of
+        {floor}" fact, never treated as unavailable. States only the
+        count, the floor, and whether it has been reached -- never a
+        significance, predictive-validity, or readiness claim (see
+        EVIDENCE_MATURITY_DISCLAIMER, rendered alongside this)."""
+        if not self.calibration_available:
+            return None
+        n = self.calibration_total_outcomes
+        if self.calibration_has_enough_data:
+            return (
+                f"Evidence maturity: {n} of {CALIBRATION_MIN_OUTCOMES} closed "
+                "outcomes needed have been reached."
+            )
+        return (
+            f"Evidence maturity: {n} of {CALIBRATION_MIN_OUTCOMES} closed "
+            "outcomes needed. Below the established floor."
+        )
 
     @property
     def calibration_empty_message(self) -> str:

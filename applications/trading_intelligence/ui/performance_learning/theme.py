@@ -54,6 +54,32 @@ CSS = """
   margin-bottom: 4px;
 }
 
+/* Prominent Sample-Size Banner: a bordered callout near the top of the
+   screen, distinct from the muted section labels below it so a reader
+   sees the product's current evidence maturity before any one section.
+   Heading/disclaimer reuse the SAME font-size/weight/colour treatment as
+   .pl-cal-heading / .pl-cal-disclaimer further down (Sprint 4 #1) -- no
+   new typography, only a wrapper to give it visual prominence. */
+.pl-evidence-maturity {
+  background: var(--pl-color-surface);
+  border: 1px solid var(--pl-color-border);
+  border-left: 3px solid var(--pl-color-gold);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 4px 0 16px 0;
+}
+.pl-evidence-maturity-heading {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--pl-color-text);
+}
+.pl-evidence-maturity-disclaimer {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--pl-color-text-secondary);
+  margin-top: 2px;
+}
+
 /* Wave 2B: Outcome History factual count line + table. Mirrors
    ui/risk_intelligence/theme.py's .ri-history-table conventions
    (monospace, tabular-nums); colours come from the shared --aara-*
