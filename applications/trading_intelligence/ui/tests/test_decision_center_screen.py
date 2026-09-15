@@ -10,7 +10,12 @@ from applications.trading_intelligence.projections.audit_entry import AuditEntry
 from applications.trading_intelligence.projections.decision_view import DecisionState, DecisionView
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.projections.governance_entry import GovernanceEntry
+from applications.trading_intelligence.projections.calibration_band import CalibrationBand
+from applications.trading_intelligence.projections.calibration_band_context import (
+    CalibrationBandContext,
+)
 from applications.trading_intelligence.ui.decision_center.screen import (
+    CALIBRATION_MIN_OUTCOMES,
     CONFIDENCE_QUALIFIER,
     DecisionCenterScreen,
     DecisionDetailArea,
@@ -20,6 +25,7 @@ from applications.trading_intelligence.ui.decision_center.screen import (
     ReadStatus,
     SENTINEL_NON_CONCURRENCE_STATEMENT,
     SENTINEL_RECOMMENDATION_LABEL,
+    entry_ensemble_score_from_evidence,
     evidence_polarity_label,
     format_display_timestamp,
     is_sentinel_recommendation,
@@ -709,3 +715,112 @@ def test_batch2_presentation_helpers_are_pure_and_import_no_execution_deps():
                    "import sentinel_engine", "from sentinel_engine",
                    "dashboard", "ledger"):
         assert banned not in joined
+
+
+# --- Decision Quality Cross-Linking: entry_ensemble_score_from_evidence ----
+
+
+def test_entry_ensemble_score_from_evidence_reads_the_model_ensemble_value():
+    evidence = (
+        _make_entry(evidence_type="MODEL_ENSEMBLE", data={"ensemble": 0.6123, "threshold": 0.52}),
+    )
+
+    assert entry_ensemble_score_from_evidence(evidence) == 0.6123
+
+
+def test_entry_ensemble_score_from_evidence_none_when_no_model_ensemble_entry():
+    evidence = (_make_entry(evidence_type="NEWS_SENTIMENT"),)
+
+    assert entry_ensemble_score_from_evidence(evidence) is None
+
+
+def test_entry_ensemble_score_from_evidence_none_for_empty_evidence():
+    assert entry_ensemble_score_from_evidence(()) is None
+
+
+def test_entry_ensemble_score_from_evidence_none_when_ensemble_key_absent():
+    """A MODEL_ENSEMBLE entry with no "ensemble" key (e.g. the derivation's
+    own omit-when-None convention) -- never a fabricated 0.0."""
+    evidence = (_make_entry(evidence_type="MODEL_ENSEMBLE", data={"threshold": 0.52}),)
+
+    assert entry_ensemble_score_from_evidence(evidence) is None
+
+
+def test_entry_ensemble_score_from_evidence_none_when_ensemble_value_is_not_numeric():
+    evidence = (
+        _make_entry(evidence_type="MODEL_ENSEMBLE", data={"ensemble": "not-a-number"}),
+    )
+
+    assert entry_ensemble_score_from_evidence(evidence) is None
+
+
+def test_entry_ensemble_score_from_evidence_rejects_booleans():
+    """bool is a subclass of int in Python -- must not be treated as a
+    real numeric score."""
+    evidence = (_make_entry(evidence_type="MODEL_ENSEMBLE", data={"ensemble": True}),)
+
+    assert entry_ensemble_score_from_evidence(evidence) is None
+
+
+def test_entry_ensemble_score_from_evidence_finds_it_among_other_entries():
+    evidence = (
+        _make_entry(evidence_id="ev-1", evidence_type="NEWS_SENTIMENT"),
+        _make_entry(evidence_id="ev-2", evidence_type="MODEL_ENSEMBLE", data={"ensemble": 0.71}),
+        _make_entry(evidence_id="ev-3", evidence_type="FEATURE_DRIVERS"),
+    )
+
+    assert entry_ensemble_score_from_evidence(evidence) == 0.71
+
+
+# --- Decision Quality Cross-Linking: DecisionDetailArea calibration state -
+
+
+def _make_calibration_context(**overrides):
+    band_defaults = dict(label="0.60-0.65", wins=6, losses=4)
+    band_overrides = {k: v for k, v in overrides.items() if k in band_defaults}
+    band = CalibrationBand(**{**band_defaults, **band_overrides})
+    total_outcomes = overrides.get("total_outcomes", 10)
+    return CalibrationBandContext(band=band, total_outcomes=total_outcomes)
+
+
+def test_calibration_min_outcomes_matches_performance_learnings_own_floor():
+    """Duplicated value, not a new methodology -- must stay in lockstep
+    with ui.performance_learning.screen.CALIBRATION_MIN_OUTCOMES (30)."""
+    assert CALIBRATION_MIN_OUTCOMES == 30
+
+
+def test_decision_detail_area_defaults_to_no_calibration_context():
+    area = DecisionDetailArea(decision=_make_view())
+
+    assert area.calibration_context is None
+    assert area.calibration_status is ReadStatus.OK
+    assert area.calibration_has_enough_data is None
+    assert area.calibration_band_label is None
+
+
+def test_decision_detail_area_carries_calibration_context():
+    context = _make_calibration_context()
+    area = DecisionDetailArea(decision=_make_view(), calibration_context=context)
+
+    assert area.calibration_context is context
+    assert area.calibration_band_label == "0.60-0.65"
+
+
+def test_calibration_has_enough_data_true_at_or_above_the_floor():
+    context = _make_calibration_context(total_outcomes=CALIBRATION_MIN_OUTCOMES)
+    area = DecisionDetailArea(decision=_make_view(), calibration_context=context)
+
+    assert area.calibration_has_enough_data is True
+
+
+def test_calibration_has_enough_data_false_below_the_floor():
+    context = _make_calibration_context(total_outcomes=CALIBRATION_MIN_OUTCOMES - 1)
+    area = DecisionDetailArea(decision=_make_view(), calibration_context=context)
+
+    assert area.calibration_has_enough_data is False
+
+
+def test_decision_detail_area_is_immutable_including_calibration_context():
+    area = DecisionDetailArea(decision=_make_view())
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        area.calibration_context = _make_calibration_context()

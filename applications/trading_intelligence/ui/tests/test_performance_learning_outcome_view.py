@@ -42,6 +42,7 @@ def _closed_row(**overrides):
         exit_date="2026-09-02 09:33 CDT", holding_days="47",
         realized_pnl_usd="-27.77", realized_pnl_pct="-0.23%", exit_basis="Bot fill",
         pairing_method="WINDOW_SINGLE_BOT_EXIT", pairing_confidence="HIGH", direction="LOSS",
+        decision_reference="trade-38",
     )
     base.update(overrides)
     return OutcomeHistoryRow(**base)
@@ -52,6 +53,7 @@ def _open_row(**overrides):
         decision="SLB BUY · trade-45", entry_date="2026-09-02 09:39 CDT", status="OPEN",
         exit_date="", holding_days="", realized_pnl_usd="", realized_pnl_pct="",
         exit_basis="", pairing_method="NONE_OPEN", pairing_confidence="NONE", direction="",
+        decision_reference="trade-45",
     )
     base.update(overrides)
     return OutcomeHistoryRow(**base)
@@ -202,13 +204,26 @@ def test_pairing_method_and_confidence_render():
     assert data[0][9] == "HIGH"
 
 
-def test_headers_are_the_eleven_factual_columns():
+def test_headers_are_the_twelve_factual_columns():
+    """Decision Quality Cross-Linking: a twelfth "Decision ID" column,
+    appended at the end -- the existing eleven factual columns are
+    unchanged, in the same order."""
     frame = _dataframe(PerformanceLearningUI(screen=_populated_screen([_closed_row()])).build())
     assert frame.headers == [
         "Decision", "Entry date", "Status", "Exit date", "Holding days",
         "Realized P&L $", "Realized P&L %", "Exit basis", "Pairing method",
-        "Pairing confidence", "Direction",
+        "Pairing confidence", "Direction", "Decision ID",
     ]
+
+
+def test_decision_id_column_carries_the_real_decision_reference():
+    """The new column's value is a clean, standalone decision_id -- the
+    SAME identity Decision Center's own list table shows -- not a second
+    composite string and not derived from the existing `decision` field."""
+    row = _closed_row(decision="AMZN BUY · trade-38", decision_reference="trade-38")
+    frame = _dataframe(PerformanceLearningUI(screen=_populated_screen([row])).build())
+    data = frame.value["data"] if isinstance(frame.value, dict) else frame.value
+    assert data[0][11] == "trade-38"
 
 
 # --- unavailable / empty -----------------------------------------------

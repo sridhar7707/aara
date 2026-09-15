@@ -73,6 +73,19 @@ by adapters/trades_db_decision_outcome_source.py wrapping the frozen Wave
 already exercises. Nothing here recomputes, re-pairs, or re-derives an
 outcome; the value returned is passed through to DecisionDetailArea
 unmodified.
+
+Decision Quality Cross-Linking: calibration_source is a ninth, optional
+collaborator (default None), following the identical duck-typed,
+independently-isolated pattern as the four above -- a failure here never
+affects any other concern, and vice versa. Unlike outcome_source, its
+`get_band_context(score)` takes a plain ensemble score, not a decision_id --
+the score is read from the evidence this same call already loaded (via
+entry_ensemble_score_from_evidence(), screen.py), never re-fetched. Backed
+by adapters/trades_db_decision_calibration_source.py wrapping the frozen
+DecisionCalibrationQueryService -- the same service Performance & Learning's
+Model Confidence Calibration area already exercises. Nothing here computes a
+band boundary or a win/loss tally; the CalibrationBandContext returned is
+passed through to DecisionDetailArea unmodified.
 """
 from typing import List, Optional
 
@@ -90,6 +103,7 @@ from applications.trading_intelligence.ui.decision_center.screen import (
     DecisionDetailArea,
     DecisionListArea,
     ReadStatus,
+    entry_ensemble_score_from_evidence,
 )
 
 
@@ -104,6 +118,7 @@ class DecisionCenterController:
         recommendation_diff_source=None,
         earnings_source=None,
         outcome_source=None,
+        calibration_source=None,
     ):
         self._query_service = query_service
         self._evidence_query_service = evidence_query_service
@@ -113,6 +128,7 @@ class DecisionCenterController:
         self._recommendation_diff_source = recommendation_diff_source
         self._earnings_source = earnings_source
         self._outcome_source = outcome_source
+        self._calibration_source = calibration_source
 
     def load_decisions(self, decision_ids: List[str]) -> DecisionListArea:
         views = self._query_service.list_decision_views(decision_ids)
@@ -204,6 +220,18 @@ class DecisionCenterController:
             outcome = None
             outcome_status = ReadStatus.OK
 
+        if self._calibration_source is not None:
+            try:
+                score = entry_ensemble_score_from_evidence(evidence)
+                calibration_context = self._calibration_source.get_band_context(score)
+                calibration_status = ReadStatus.OK
+            except TradingIntelligenceReadError:
+                calibration_context = None
+                calibration_status = ReadStatus.ERROR
+        else:
+            calibration_context = None
+            calibration_status = ReadStatus.OK
+
         return DecisionDetailArea(
             decision=view,
             evidence_reference=evidence_reference, risk_reference=risk_reference,
@@ -216,6 +244,7 @@ class DecisionCenterController:
             recommendation_diff_status=recommendation_diff_status,
             earnings_snapshot=earnings_snapshot, earnings_status=earnings_status,
             outcome=outcome, outcome_status=outcome_status,
+            calibration_context=calibration_context, calibration_status=calibration_status,
         )
 
     def load_screen(

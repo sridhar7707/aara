@@ -263,10 +263,14 @@ from applications.trading_intelligence.contracts.decision_outcome_contract impor
     OutcomeStatus,
 )
 from applications.trading_intelligence.projections.approval_entry import ApprovalStatus
+from applications.trading_intelligence.projections.calibration_band_context import (
+    CalibrationBandContext,
+)
 from applications.trading_intelligence.projections.decision_view import DecisionState, DecisionView
 from applications.trading_intelligence.projections.evidence_entry import EvidenceEntry
 from applications.trading_intelligence.ui.decision_center.controller import DecisionCenterController
 from applications.trading_intelligence.ui.decision_center.screen import (
+    CALIBRATION_MIN_OUTCOMES,
     CONFIDENCE_QUALIFIER,
     DecisionDetailArea,
     DecisionListArea,
@@ -748,6 +752,22 @@ _EARNINGS_NOT_TRACKED_HTML = (
 _OUTCOME_SECTION_LABEL = "Decision Outcome"
 _OUTCOME_ERROR_MESSAGE = "Outcome information is temporarily unavailable."
 _OUTCOME_NOT_YET_RESOLVED_MESSAGE = "Not yet resolved."
+
+# Decision Quality Cross-Linking: a small, always-present section inside the
+# decision header (see _decision_header_html), sitting next to the
+# confidence breakdown -- which historical confidence band this decision's
+# own MODEL_ENSEMBLE.ensemble score falls into, and, once the SAME
+# conservative CALIBRATION_MIN_OUTCOMES floor Performance & Learning already
+# applies is met, that band's own real win/loss tally (reused verbatim from
+# services/decision_calibration_query_service.py -- no new statistic, no new
+# boundary, no calibration/accuracy claim). Below the floor, or when no band
+# applies at all, this renders an honest message instead of a fabricated
+# figure -- never "0%"/"100%"/"poor performance"/"good performance"/
+# "calibrated"/predictive language.
+_CALIBRATION_CONTEXT_SECTION_LABEL = "Historical Confidence Band"
+_CALIBRATION_CONTEXT_ERROR_MESSAGE = "Historical confidence band information is temporarily unavailable."
+_CALIBRATION_CONTEXT_UNAVAILABLE_MESSAGE = "No historical confidence band applies to this decision."
+_CALIBRATION_NOT_ENOUGH_DATA_MESSAGE = "Historical performance: not enough data yet."
 
 # MVP Loading States slice: _empty_detail()'s prior "" for why/evidence/
 # governance/approval/audit rendered as literal blank space under each
@@ -1713,6 +1733,7 @@ class DecisionCenterUI:
             DecisionCenterUI._decision_header_html(
                 decision, detail_area.evidence_reference, detail_area.risk_reference,
                 detail_area.evidence, detail_area.outcome, detail_area.outcome_status,
+                detail_area.calibration_context, detail_area.calibration_status,
             ),
             DecisionCenterUI._lifecycle_track_html(
                 decision.status, detail_area.decision_created_display,
@@ -2283,6 +2304,8 @@ class DecisionCenterUI:
         evidence: Tuple[EvidenceEntry, ...] = (),
         outcome: Optional[DecisionOutcome] = None,
         outcome_status: ReadStatus = ReadStatus.OK,
+        calibration_context: Optional[CalibrationBandContext] = None,
+        calibration_status: ReadStatus = ReadStatus.OK,
     ) -> str:
         badge = DecisionCenterUI._action_badge_html(decision.action)
         references_html = DecisionCenterUI._raw_reference_fields_html(
@@ -2293,6 +2316,7 @@ class DecisionCenterUI:
             f'<div class="identity-line">{html.escape(decision.symbol)} &middot; {badge}</div>'
             f"{DecisionCenterUI._recommendation_context_html(decision)}"
             f"{DecisionCenterUI._confidence_breakdown_html(evidence)}"
+            f"{DecisionCenterUI._format_calibration_context_html(calibration_context, calibration_status)}"
             f"{DecisionCenterUI._format_decision_outcome_html(outcome, outcome_status)}"
             f"{references_html}"
             "</div>"
@@ -2362,6 +2386,63 @@ class DecisionCenterUI:
             for label, value in fields
         )
         return f'<div class="aara-record-card-fields">{rows}</div>'
+
+    # --- Decision Quality Cross-Linking: calibration-band context ---------
+
+    @staticmethod
+    def _format_calibration_context_html(
+        context: Optional[CalibrationBandContext], status: ReadStatus,
+    ) -> str:
+        """Always renders the "Historical Confidence Band" label plus
+        exactly one of three honest bodies -- see the constants above this
+        class for the full rationale. Never returns an empty string (unlike
+        _confidence_breakdown_html): the section is always present, so a
+        reader never wonders whether it was simply omitted."""
+        if status is ReadStatus.ERROR:
+            body = DecisionCenterUI._error_message_html(_CALIBRATION_CONTEXT_ERROR_MESSAGE)
+        elif context is None:
+            body = (
+                '<div class="aara-empty-message aara-empty">'
+                f'{html.escape(_CALIBRATION_CONTEXT_UNAVAILABLE_MESSAGE)}</div>'
+            )
+        else:
+            body = DecisionCenterUI._calibration_context_fields_html(context)
+        return (
+            '<div class="aara-calibration-context">'
+            f'<div class="aara-calibration-context-label">'
+            f'{html.escape(_CALIBRATION_CONTEXT_SECTION_LABEL)}</div>'
+            f"{body}"
+            "</div>"
+        )
+
+    @staticmethod
+    def _calibration_context_fields_html(context: CalibrationBandContext) -> str:
+        """Band identity is always statable -- plain arithmetic on an
+        already-real score, never a performance claim on its own. The real
+        win/loss/win-rate figure for that band is shown only once the SAME
+        CALIBRATION_MIN_OUTCOMES floor Performance & Learning already
+        applies is met (counted across all four bands, not just this one);
+        below it, an honest 'not enough data' message, never a fabricated
+        percentage. band.win_rate is None -- rendered as no percentage at
+        all -- for a band that itself counted no outcomes, even when the
+        screen-wide total meets the floor."""
+        band = context.band
+        band_sentence = (
+            f"This decision falls in the {band.label} historical confidence band."
+        )
+        if context.total_outcomes >= CALIBRATION_MIN_OUTCOMES:
+            rate = "" if band.win_rate is None else f" ({band.win_rate:.0%} win rate)"
+            performance_sentence = (
+                f"Historical performance in this band: {band.wins} wins, "
+                f"{band.losses} losses{rate} across {band.n} outcomes."
+            )
+        else:
+            performance_sentence = _CALIBRATION_NOT_ENOUGH_DATA_MESSAGE
+        return (
+            f'<div class="aara-calibration-context-band">{html.escape(band_sentence)}</div>'
+            f'<div class="aara-calibration-context-performance">'
+            f'{html.escape(performance_sentence)}</div>'
+        )
 
     @staticmethod
     def _model_ensemble_entry(

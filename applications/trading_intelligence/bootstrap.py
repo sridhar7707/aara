@@ -129,6 +129,9 @@ from applications.trading_intelligence.adapters.trades_db_decision_adapters impo
     TradesDbEvidenceSource,
     TradesDbGovernanceSource,
 )
+from applications.trading_intelligence.adapters.trades_db_decision_calibration_source import (
+    TradesDbDecisionCalibrationSource,
+)
 from applications.trading_intelligence.adapters.trades_db_decision_outcome_source import (
     TradesDbDecisionOutcomeSource,
 )
@@ -436,6 +439,16 @@ def build_application_from_trades_snapshot(db_path: Optional[str]) -> DecisionCe
     outcome_source = TradesDbDecisionOutcomeSource(
         DecisionOutcomeQueryService(TradesDbOutcomeReader(**legacy_source_kwargs(db_path)))
     )
+    # Decision Quality Cross-Linking: real-only on this path, same
+    # independent-per-section-adapter rationale as outcome_source above --
+    # its own DecisionOutcomeQueryService(TradesDbOutcomeReader(...)), not a
+    # shared instance. Reuses the frozen DecisionCalibrationQueryService --
+    # the exact same service Performance & Learning's own Model Confidence
+    # Calibration wiring already exercises (_build_performance_learning_screen).
+    calibration_source = TradesDbDecisionCalibrationSource(
+        DecisionOutcomeQueryService(TradesDbOutcomeReader(**legacy_source_kwargs(db_path))),
+        DecisionCalibrationQueryService(),
+    )
 
     controller = DecisionCenterController(
         query_service, evidence_query_service, governance_query_service, audit_source,
@@ -443,6 +456,7 @@ def build_application_from_trades_snapshot(db_path: Optional[str]) -> DecisionCe
         recommendation_diff_source=recommendation_diff_source,
         earnings_source=earnings_source,
         outcome_source=outcome_source,
+        calibration_source=calibration_source,
     )
     # Sprint 1: same "Operational data snapshot" freshness indicator
     # ui/morning_brief/, ui/portfolio_intelligence/, and
@@ -1458,6 +1472,7 @@ def _outcome_history_row(outcome) -> OutcomeHistoryRow:
         pairing_method=outcome.pairing_method.name,
         pairing_confidence=outcome.pairing_confidence.name,
         direction=direction,
+        decision_reference=outcome.decision_id,
     )
 
 

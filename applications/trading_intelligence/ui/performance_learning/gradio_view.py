@@ -86,6 +86,17 @@ _OUTCOME_HEADERS = [
     "Decision", "Entry date", "Status", "Exit date", "Holding days",
     "Realized P&L $", "Realized P&L %", "Exit basis", "Pairing method",
     "Pairing confidence", "Direction",
+    # Decision Quality Cross-Linking: a clean, standalone reference back to
+    # this outcome's originating Decision Center decision -- the SAME
+    # "Decision ID" column header Decision Center's own list table uses
+    # (ui/decision_center/gradio_view.py's _LIST_HEADERS), so the identity
+    # is immediately recognizable across both screens. True deep-link
+    # navigation to a specific decision is not supported by this product's
+    # Gradio architecture (see gradio_view.py's own module docstring on the
+    # shared shell nav -- it switches the outer tab, it does not target a
+    # row within a tab), so this is a plain, honest text reference, not a
+    # clickable link.
+    "Decision ID",
 ]
 
 _PAGE_HEADER_HTML = (
@@ -101,6 +112,7 @@ def _outcome_row_cells(row: OutcomeHistoryRow) -> List[str]:
         row.decision, row.entry_date, row.status, row.exit_date, row.holding_days,
         row.realized_pnl_usd, row.realized_pnl_pct, row.exit_basis,
         row.pairing_method, row.pairing_confidence, row.direction,
+        row.decision_reference,
     ]
 
 

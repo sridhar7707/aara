@@ -162,10 +162,12 @@ def test_valid_snapshot_populates_outcome_history():
         assert amzn.holding_days == "47"
         assert amzn.pairing_method == "WINDOW_SINGLE_BOT_EXIT"
         assert amzn.pairing_confidence == "HIGH"
+        assert amzn.decision_reference == "trade-1"
 
         slb = by_decision["SLB BUY · trade-3"]
         assert slb.status == "OPEN"
         assert slb.exit_date == "" and slb.realized_pnl_usd == "" and slb.direction == ""
+        assert slb.decision_reference == "trade-3"
 
         assert screen.summary == (
             "2 BUY decisions — 1 CLOSED · 0 PARTIAL · 1 OPEN · 0 AMBIGUOUS."

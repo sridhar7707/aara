@@ -72,6 +72,40 @@ _WAIT_ACTION = "WAIT"
 _SUPPORTING_POLARITY = "SUPPORTING"
 _CONTRADICTING_POLARITY = "CONTRADICTING"
 _DECISION_CREATED_EVENT_TYPE = "DECISION_CREATED"
+_MODEL_ENSEMBLE_EVIDENCE_TYPE = "MODEL_ENSEMBLE"
+
+
+def entry_ensemble_score_from_evidence(
+    evidence: Tuple[EvidenceEntry, ...]
+) -> Optional[float]:
+    """The recorded MODEL_ENSEMBLE.ensemble score for this decision, read
+    verbatim from the already-loaded Evidence section -- never recomputed,
+    re-weighted, or otherwise touched (that calculation lives entirely in
+    bot/strategy/ensemble.py, untouched). None when no MODEL_ENSEMBLE entry
+    is attached, the "ensemble" key is absent (adapters/
+    trade_decision_derivation.py omits it rather than storing a fabricated
+    0.0 when the underlying trades row has no ensemble_score), or the value
+    is not a real number (bool is deliberately excluded -- it is a subclass
+    of int in Python but never a real score here)."""
+    for entry in evidence:
+        if entry.evidence_type != _MODEL_ENSEMBLE_EVIDENCE_TYPE:
+            continue
+        value = (entry.data or {}).get("ensemble")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
+    return None
+
+
+# Decision Quality Cross-Linking: duplicated verbatim from
+# ui.performance_learning.screen.CALIBRATION_MIN_OUTCOMES -- the same
+# conservative display floor, not a second methodology. decision_center/
+# stays self-contained (it must not import ui.performance_learning, per
+# this product's per-screen self-containment convention -- see
+# ui/tests/test_performance_learning_structure.py's own forbidden-sibling
+# check), so the value is duplicated here rather than imported. If that
+# floor ever changes, both constants must be updated together.
+CALIBRATION_MIN_OUTCOMES = 30
 
 
 def provenance_label(action_source: Optional[str]) -> str:
@@ -196,6 +230,20 @@ class DecisionDetailArea:
     # never an error, in both cases.
     outcome: Optional["DecisionOutcome"] = None
     outcome_status: ReadStatus = ReadStatus.OK
+    # Decision Quality Cross-Linking: same forward-reference-string
+    # convention as the four fields above, for the same reason --
+    # CalibrationBandContext lives in applications.trading_intelligence.
+    # projections.calibration_band_context. `calibration_context` is the
+    # real CalibrationBandContext (band + total_outcomes across all four
+    # bands, both carried verbatim from services/
+    # decision_calibration_query_service.py) for this decision's own
+    # MODEL_ENSEMBLE.ensemble score, when the read succeeded and that score
+    # falls inside a known band; None when the read succeeded but the score
+    # is missing/out-of-range, or when no calibration_source collaborator
+    # was injected -- an honest "no band to reference" state, never an
+    # error, in both cases.
+    calibration_context: Optional["CalibrationBandContext"] = None
+    calibration_status: ReadStatus = ReadStatus.OK
 
     @property
     def is_empty(self) -> bool:
@@ -295,6 +343,27 @@ class DecisionDetailArea:
             )
             for entry in self.evidence
         )
+
+    # --- Decision Quality Cross-Linking: calibration-band context ---------
+
+    @property
+    def calibration_band_label(self) -> Optional[str]:
+        """This decision's own historical confidence band identity (e.g.
+        "0.60-0.65"), or None when no calibration_context is available."""
+        if self.calibration_context is None:
+            return None
+        return self.calibration_context.band.label
+
+    @property
+    def calibration_has_enough_data(self) -> Optional[bool]:
+        """Whether the SAME conservative display floor Performance &
+        Learning already applies (CALIBRATION_MIN_OUTCOMES, counted across
+        ALL FOUR bands, not just this decision's own band) is met. None
+        when no calibration_context is available -- there is nothing to
+        gate yet, distinct from a real False."""
+        if self.calibration_context is None:
+            return None
+        return self.calibration_context.total_outcomes >= CALIBRATION_MIN_OUTCOMES
 
 
 @dataclass(frozen=True)

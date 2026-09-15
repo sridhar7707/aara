@@ -747,6 +747,28 @@ footer { display: none !important; }
   margin-bottom: var(--space-xs);
 }
 
+/* Decision Quality Cross-Linking: which historical confidence band this
+   decision's own score falls into, plus that band's real performance once
+   enough data exists -- same calm muted-caption treatment as the outcome
+   section directly above, no new colour/weight vocabulary, no chart, no
+   badge. Sits directly under the confidence breakdown and above the
+   Decision Outcome section, inside the same decision header block. */
+.aara-decision-header .aara-calibration-context {
+  margin-top: var(--space-sm);
+}
+.aara-calibration-context-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-xs);
+}
+.aara-calibration-context-band,
+.aara-calibration-context-performance {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
 /* ADR-070 Sprint 3 (§9) -- per-record evidence polarity. One small, muted
    supporting label inside an evidence record's card, carrying only that
    record's own phrase ("Supported the BUY" / "Contradicted the BUY" /

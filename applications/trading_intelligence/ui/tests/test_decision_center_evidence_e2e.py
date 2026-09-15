@@ -46,6 +46,12 @@ from applications.trading_intelligence.contracts.decision_outcome_contract impor
     PairingConfidence,
     PairingMethod,
 )
+from applications.trading_intelligence.projections.calibration_band import (  # noqa: E402
+    CalibrationBand,
+)
+from applications.trading_intelligence.projections.calibration_band_context import (  # noqa: E402
+    CalibrationBandContext,
+)
 from applications.trading_intelligence.projections.decision_view import (  # noqa: E402
     DecisionState,
     DecisionView,
@@ -60,6 +66,7 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (  
     DecisionCenterUI,
 )
 from applications.trading_intelligence.ui.decision_center.screen import (  # noqa: E402
+    CALIBRATION_MIN_OUTCOMES,
     DecisionCenterScreen,
     DecisionDetailArea,
     DecisionListArea,
@@ -379,3 +386,101 @@ def test_decision_outcome_coexists_with_evidence_since_decision_in_the_real_brow
             assert "Near earnings" in visible_text
         finally:
             context.close()
+
+
+# --- Decision Quality Cross-Linking -----------------------------------------
+
+
+def _make_band_context(**overrides) -> CalibrationBandContext:
+    band_defaults = dict(label="0.60-0.65", wins=18, losses=12)
+    band_overrides = {k: v for k, v in overrides.items() if k in band_defaults}
+    band = CalibrationBand(**{**band_defaults, **band_overrides})
+    total_outcomes = overrides.get("total_outcomes", CALIBRATION_MIN_OUTCOMES)
+    return CalibrationBandContext(band=band, total_outcomes=total_outcomes)
+
+
+def test_calibration_context_enough_data_renders_in_the_real_browser(browser):
+    """1. Decision Center displays the calibration-context reference for
+    seeded real data, with a real performance figure once the SAME
+    conservative floor Performance & Learning already applies is met."""
+    context = _make_band_context(wins=18, losses=12, total_outcomes=30)
+    detail_area = DecisionDetailArea(
+        decision=_make_view(), calibration_context=context, calibration_status=ReadStatus.OK,
+    )
+    with _launched_app(detail_area) as url:
+        found_context, page = _page_with_text(browser, url, "0.60-0.65")
+        try:
+            visible_text = page.inner_text("body")
+            assert "historical confidence band" in visible_text.lower()
+            assert "0.60-0.65" in visible_text
+            assert "18 wins" in visible_text
+            assert "12 losses" in visible_text
+            assert "60%" in visible_text
+        finally:
+            found_context.close()
+
+
+def test_calibration_context_below_floor_renders_no_percentage_in_the_real_browser(browser):
+    """3. No calibration percentage appears when the band/sample is below
+    the existing floor -- an honest 'not enough data' message instead,
+    proven against a real seeded, real browser render (n=1, well under the
+    30-outcome floor -- the product's real, current sample size as of this
+    sprint)."""
+    context = _make_band_context(wins=1, losses=0, total_outcomes=1)
+    detail_area = DecisionDetailArea(
+        decision=_make_view(), calibration_context=context, calibration_status=ReadStatus.OK,
+    )
+    with _launched_app(detail_area) as url:
+        found_context, page = _page_with_text(browser, url, "not enough data yet")
+        try:
+            visible_text = page.inner_text("body")
+            assert "historical confidence band" in visible_text.lower()
+            assert "0.60-0.65" in visible_text
+            assert "Historical performance: not enough data yet." in visible_text
+            # Scoped to the calibration-context section only -- the page's
+            # unrelated headline Confidence field (e.g. "82%") legitimately
+            # contains a "%" elsewhere; this proves no percentage appears
+            # WITHIN the below-floor calibration section specifically.
+            section_text = page.locator(".aara-calibration-context").inner_text()
+            assert "%" not in section_text
+        finally:
+            found_context.close()
+
+
+def test_calibration_context_absent_renders_honest_unavailable_state_in_the_real_browser(browser):
+    """No calibration_context at all (missing/out-of-range score, or no
+    collaborator) -- an honest 'no band applies' message, never a
+    fabricated band, in a real browser render."""
+    detail_area = DecisionDetailArea(
+        decision=_make_view(), calibration_context=None, calibration_status=ReadStatus.OK,
+    )
+    with _launched_app(detail_area) as url:
+        found_context, page = _page_with_text(browser, url, "No historical confidence band applies")
+        try:
+            visible_text = page.inner_text("body")
+            assert "historical confidence band" in visible_text.lower()
+            assert "No historical confidence band applies" in visible_text
+        finally:
+            found_context.close()
+
+
+def test_calibration_context_coexists_with_decision_outcome_in_the_real_browser(browser):
+    """Regression guard, browser-level: the calibration-context section and
+    the pre-existing Decision Outcome section render together on the same
+    page without either clobbering the other."""
+    context = _make_band_context(wins=18, losses=12, total_outcomes=30)
+    outcome = _make_outcome()
+    detail_area = DecisionDetailArea(
+        decision=_make_view(), calibration_context=context, calibration_status=ReadStatus.OK,
+        outcome=outcome, outcome_status=ReadStatus.OK,
+    )
+    with _launched_app(detail_area) as url:
+        found_context, page = _page_with_text(browser, url, "0.60-0.65")
+        try:
+            visible_text = page.inner_text("body")
+            assert "historical confidence band" in visible_text.lower()
+            assert "0.60-0.65" in visible_text
+            assert "decision outcome" in visible_text.lower()
+            assert "CLOSED" in visible_text
+        finally:
+            found_context.close()

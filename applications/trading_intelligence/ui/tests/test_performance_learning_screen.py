@@ -350,3 +350,23 @@ def test_outcome_history_row_blank_fields_stay_blank():
     assert row.exit_date == ""
     assert row.realized_pnl_usd == ""
     assert row.direction == ""
+
+
+# --- Decision Quality Cross-Linking: decision_reference --------------------
+
+
+def test_outcome_history_row_decision_reference_defaults_to_empty_string():
+    """Additive field -- every existing kwargs-based construction site
+    (bootstrap.py, mock_data.py, every test fixture) stays valid without
+    naming it."""
+    row = _row()
+    assert row.decision_reference == ""
+
+
+def test_outcome_history_row_carries_the_real_decision_id_as_its_reference():
+    """A clean, standalone decision_id -- the SAME identity Decision
+    Center's own list table shows in its "Decision ID" column -- never a
+    second/heuristic identifier and never a composite string like the
+    existing `decision` field's own "SYMBOL ACTION · decision_id" shape."""
+    row = _row(decision_reference="trade-38")
+    assert row.decision_reference == "trade-38"

@@ -129,6 +129,14 @@ def test_build_application_sentinel_path_has_no_outcome_source():
     assert ui._controller._outcome_source is None
 
 
+def test_build_application_sentinel_path_has_no_calibration_source():
+    """Coexistence: build_application() (the Sentinel path) has no
+    trades.db to read at all, so it must not be given a Decision Quality
+    Cross-Linking calibration collaborator either."""
+    ui = build_application()
+    assert ui._controller._calibration_source is None
+
+
 # -- build_application_from_trades_snapshot() --------------------------
 
 def test_none_db_path_is_safe_and_builds():
@@ -313,6 +321,61 @@ def test_seeded_db_decision_outcome_renders_through_the_full_ui_layer():
         assert "LOSS" in header_html
         assert "-0.23%" in header_html
         assert "47" in header_html
+    finally:
+        os.remove(path)
+
+
+# --- Decision Quality Cross-Linking ----------------------------------------
+
+
+def test_seeded_db_wires_a_real_calibration_source():
+    """Confirms build_application_from_trades_snapshot() actually
+    constructs and injects TradesDbDecisionCalibrationSource into the
+    controller. trade-45's real ensemble_score (0.5222, from _seeded_db())
+    falls in the 0.50-0.55 band -- proving the shared decision_id/evidence
+    lineage: the same evidence Decision Center's own detail load already
+    reads (MODEL_ENSEMBLE.ensemble) drives a real band lookup, not a
+    fabricated one. No qualifying CLOSED WIN/LOSS outcome exists in this
+    tiny seeded db, so the honest, real result is an all-zero band -- never
+    an error."""
+    path = _seeded_db()
+    try:
+        ui = build_application_from_trades_snapshot(path)
+        assert ui._controller._calibration_source is not None
+        detail = ui._controller.load_decision_detail("trade-45")
+        assert detail.calibration_context is not None
+        assert detail.calibration_context.band.label == "0.50-0.55"
+        assert detail.calibration_context.total_outcomes == 0
+        assert detail.calibration_status is ReadStatus.OK
+    finally:
+        os.remove(path)
+
+
+def test_seeded_db_calibration_context_renders_through_the_full_ui_layer():
+    """End-to-end wiring proof, one level past
+    test_seeded_db_wires_a_real_calibration_source above: proves the same
+    seeded, real ensemble score survives all the way through the actual UI
+    render call (DecisionCenterUI._render_screen(), the exact function
+    demo.load()/the Refresh button invoke in the real app), using the real,
+    production build_application_from_trades_snapshot() wiring -- no fake
+    controller, no test-only shortcut. The header is detail output index 0
+    (see build()'s detail_outputs ordering) -- the Historical Confidence
+    Band section is rendered inside it (see gradio_view.py's
+    _format_calibration_context_html)."""
+    path = _seeded_db_with_closed_outcome()
+    try:
+        ui = build_application_from_trades_snapshot(path)
+
+        list_rows, list_empty, *detail = ui._render_screen()
+
+        assert list_rows[0][0] == "trade-1"
+        header_html = detail[0]
+        assert "Historical Confidence Band" in header_html
+        assert "0.60-0.65" in header_html
+        # Only 1 qualifying outcome in this tiny seeded db -- well below the
+        # 30-outcome floor -- so the honest small-n message, never a
+        # fabricated percentage.
+        assert "Historical performance: not enough data yet." in header_html
     finally:
         os.remove(path)
 

@@ -136,6 +136,16 @@ class OutcomeHistoryRow:
     pairing_method: str
     pairing_confidence: str
     direction: str
+    # Decision Quality Cross-Linking: the raw decision_id (e.g. "trade-38")
+    # this outcome was derived from -- the SAME identity Decision Center's
+    # own list table shows in its "Decision ID" column, carried through
+    # verbatim (see bootstrap.py's _outcome_history_row). A clean,
+    # standalone reference, distinct from the `decision` field above's own
+    # composite "SYMBOL ACTION · decision_id" display string -- no second or
+    # heuristic identifier is introduced. Defaults to "" so every existing
+    # kwargs-based construction site (mock_data.py, every test fixture)
+    # stays valid without naming it.
+    decision_reference: str = ""
 
 
 @dataclass(frozen=True)

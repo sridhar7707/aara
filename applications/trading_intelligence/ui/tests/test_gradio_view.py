@@ -33,6 +33,10 @@ from applications.trading_intelligence.contracts.decision_outcome_contract impor
     PairingConfidence,
     PairingMethod,
 )
+from applications.trading_intelligence.projections.calibration_band import CalibrationBand
+from applications.trading_intelligence.projections.calibration_band_context import (
+    CalibrationBandContext,
+)
 from applications.trading_intelligence.ui.decision_center.gradio_view import (
     _ACCESSIBLE_NAME_SETUP_JS,
     _ACTION_BADGE_CLASSES,
@@ -76,6 +80,7 @@ from applications.trading_intelligence.ui.decision_center.gradio_view import (
     DecisionCenterUI,
 )
 from applications.trading_intelligence.ui.decision_center.screen import (
+    CALIBRATION_MIN_OUTCOMES,
     CONFIDENCE_QUALIFIER,
     DecisionCenterScreen,
     DecisionDetailArea,
@@ -1625,6 +1630,162 @@ def test_success_detail_output_tuple_shape_is_unchanged_by_the_outcome_section()
 
     assert len(detail_values) == 11
     assert "Decision Outcome" in detail_values[0]
+
+
+# --- Decision Quality Cross-Linking ----------------------------------------
+
+
+def _make_band_context(**overrides):
+    band_defaults = dict(label="0.60-0.65", wins=6, losses=4)
+    band_overrides = {k: v for k, v in overrides.items() if k in band_defaults}
+    band = CalibrationBand(**{**band_defaults, **band_overrides})
+    total_outcomes = overrides.get("total_outcomes", CALIBRATION_MIN_OUTCOMES)
+    return CalibrationBandContext(band=band, total_outcomes=total_outcomes)
+
+
+def test_calibration_context_enough_data_renders_band_and_real_performance():
+    context = _make_band_context(label="0.60-0.65", wins=6, losses=4, total_outcomes=30)
+
+    out = DecisionCenterUI._format_calibration_context_html(context, ReadStatus.OK)
+
+    assert "Historical Confidence Band" in out
+    assert "0.60-0.65" in out
+    assert "6 wins" in out
+    assert "4 losses" in out
+    assert "60%" in out
+    assert "not enough data" not in out.lower()
+
+
+def test_calibration_context_below_floor_renders_honest_not_enough_data():
+    context = _make_band_context(total_outcomes=CALIBRATION_MIN_OUTCOMES - 1)
+
+    out = DecisionCenterUI._format_calibration_context_html(context, ReadStatus.OK)
+
+    assert "0.60-0.65" in out
+    assert "Historical performance: not enough data yet." in out
+    # never a fabricated percentage below the floor
+    assert "%" not in out
+
+
+def test_calibration_context_none_renders_honest_unavailable_state():
+    """No context at all (collaborator absent, or a HEALTHY read with no
+    matching band -- e.g. a missing/out-of-range score) -- an honest
+    'no band applies' message, never a fabricated band."""
+    out = DecisionCenterUI._format_calibration_context_html(None, ReadStatus.OK)
+
+    assert "Historical Confidence Band" in out
+    assert "No historical confidence band applies" in out
+
+
+def test_calibration_context_error_status_renders_shared_error_message():
+    out = DecisionCenterUI._format_calibration_context_html(None, ReadStatus.ERROR)
+
+    assert "Historical Confidence Band" in out
+    assert "unavailable" in out.lower()
+    assert "No historical confidence band applies" not in out
+
+
+def test_calibration_context_section_label_present_in_every_state():
+    """The section itself is never silently omitted -- same always-present
+    convention as the Decision Outcome section."""
+    for context, status in (
+        (_make_band_context(total_outcomes=30), ReadStatus.OK),
+        (_make_band_context(total_outcomes=1), ReadStatus.OK),
+        (None, ReadStatus.OK),
+        (None, ReadStatus.ERROR),
+    ):
+        out = DecisionCenterUI._format_calibration_context_html(context, status)
+        assert "Historical Confidence Band" in out
+
+
+def test_calibration_context_never_fabricates_zero_or_hundred_percent_below_the_floor():
+    """Task guardrail: below the floor, never '0%'/'100%' and never
+    predictive/quality language -- an honest 'not enough data' only."""
+    context = _make_band_context(wins=0, losses=0, total_outcomes=0)
+
+    out = DecisionCenterUI._format_calibration_context_html(context, ReadStatus.OK)
+
+    forbidden = ("0%", "100%", "poor performance", "good performance", "calibrated", "validated")
+    lowered = out.lower()
+    for phrase in forbidden:
+        assert phrase.lower() not in lowered
+    assert "Historical performance: not enough data yet." in out
+
+
+def test_calibration_context_win_rate_blank_when_band_has_no_outcomes_even_above_floor():
+    """A band with n == 0 (win_rate is None) must never render a fabricated
+    percentage, even when the screen-wide total meets the floor (i.e. all
+    the qualifying outcomes landed in OTHER bands)."""
+    context = _make_band_context(wins=0, losses=0, total_outcomes=CALIBRATION_MIN_OUTCOMES)
+
+    out = DecisionCenterUI._format_calibration_context_html(context, ReadStatus.OK)
+
+    assert "0 wins" in out
+    assert "0 losses" in out
+    assert "%" not in out
+
+
+def test_decision_header_html_wires_the_calibration_context_section_in():
+    view = _make_view()
+    context = _make_band_context(total_outcomes=30)
+
+    out = DecisionCenterUI._decision_header_html(
+        view, None, None, (), None, ReadStatus.OK, context, ReadStatus.OK,
+    )
+
+    assert "Historical Confidence Band" in out
+    assert "0.60-0.65" in out
+
+
+def test_decision_header_html_calibration_context_defaults_to_unavailable():
+    """The two new params are optional -- an existing call site that does
+    not pass them still renders an honest state, never a crash."""
+    view = _make_view()
+
+    out = DecisionCenterUI._decision_header_html(view)
+
+    assert "Historical Confidence Band" in out
+    assert "No historical confidence band applies" in out
+
+
+def test_decision_header_html_calibration_context_coexists_with_outcome_and_confidence_breakdown():
+    """Regression guard: adding the calibration-context section must not
+    disturb the existing confidence-breakdown/outcome rendering it sits
+    alongside in the same header block."""
+    view = _make_view()
+    entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot", data={
+        "xgb": 0.5385, "lstm": 0.4375, "sentiment": 0.0936, "macro": 0.6403,
+    })
+    context = _make_band_context(total_outcomes=30)
+
+    out = DecisionCenterUI._decision_header_html(
+        view, None, None, (entry,), _make_outcome(), ReadStatus.OK, context, ReadStatus.OK,
+    )
+
+    assert "Confidence components" in out
+    assert "XGB" in out
+    assert CONFIDENCE_QUALIFIER in out
+    assert "Decision Outcome" in out
+    assert "CLOSED" in out
+    assert "Historical Confidence Band" in out
+    assert "0.60-0.65" in out
+
+
+def test_success_detail_output_tuple_shape_is_unchanged_by_the_calibration_context_section():
+    """Additive-only guard: the calibration-context section is folded into
+    the header string (the first _DetailValues element) -- it must never
+    grow _DetailValues' own arity, change _on_row_select's arity, or touch
+    build()'s component wiring."""
+    view = _make_view(decision_id="dec-cal-1")
+    detail_area = DecisionDetailArea(
+        decision=view, calibration_context=_make_band_context(total_outcomes=30),
+        calibration_status=ReadStatus.OK,
+    )
+
+    detail_values = DecisionCenterUI._success_detail(detail_area)
+
+    assert len(detail_values) == 11
+    assert "Historical Confidence Band" in detail_values[0]
 
 
 def _empty_decision_center_screen():

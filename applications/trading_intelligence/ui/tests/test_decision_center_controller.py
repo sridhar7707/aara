@@ -987,3 +987,126 @@ def test_load_decision_detail_does_not_query_outcome_for_a_missing_decision():
     assert detail_area.is_empty is True
     assert detail_area.outcome is None
     assert detail_area.outcome_status is ReadStatus.OK
+
+
+# --- Decision Quality Cross-Linking: calibration-band context -------------
+
+
+def _make_model_ensemble_entry(score, **overrides):
+    defaults = dict(
+        evidence_id="ev-ensemble", evidence_type="MODEL_ENSEMBLE", source="aara-bot",
+        attached_at=datetime.datetime(2026, 8, 4, 12, 5, 0), data={"ensemble": score},
+    )
+    defaults.update(overrides)
+    return EvidenceEntry(**defaults)
+
+
+class _InMemoryCalibrationSource:
+    """Fake calibration collaborator -- duck-typed like _InMemoryOutcomeSource
+    above. get_band_context(score) only, matching
+    TradesDbDecisionCalibrationSource's own real signature."""
+
+    def __init__(self, band_context_by_score=None):
+        self._band_context_by_score = band_context_by_score or {}
+        self.received_scores = []
+
+    def get_band_context(self, score):
+        self.received_scores.append(score)
+        return self._band_context_by_score.get(score)
+
+
+class _BoomCalibrationSource:
+    def get_band_context(self, score):
+        raise TradingIntelligenceReadError("boom")
+
+
+def test_load_decision_detail_attaches_calibration_context_when_collaborator_present():
+    calibration_source = _InMemoryCalibrationSource({0.62: "some-context"})
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": _make_contract()})),
+        DecisionEvidenceQueryService(
+            _InMemoryEvidenceSource({"dec-001": [_make_model_ensemble_entry(0.62)]})
+        ),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        calibration_source=calibration_source,
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.calibration_context == "some-context"
+    assert detail.calibration_status is ReadStatus.OK
+    assert calibration_source.received_scores == [0.62]
+
+
+def test_load_decision_detail_calibration_context_is_none_when_collaborator_absent():
+    """No calibration_source injected -- the Sentinel path's existing
+    construction must keep working unchanged, with an honest OK/None
+    result, never an error, and never a read attempt."""
+    controller = _make_controller(
+        decisions={"dec-001": _make_contract()},
+        evidence_by_decision={"dec-001": [_make_model_ensemble_entry(0.62)]},
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.calibration_context is None
+    assert detail.calibration_status is ReadStatus.OK
+
+
+def test_load_decision_detail_calibration_context_is_none_when_no_model_ensemble_evidence():
+    calibration_source = _InMemoryCalibrationSource({0.62: "some-context"})
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": _make_contract()})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource({"dec-001": [_make_entry()]})),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        calibration_source=calibration_source,
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.calibration_context is None
+    assert detail.calibration_status is ReadStatus.OK
+    assert calibration_source.received_scores == [None]
+
+
+def test_load_decision_detail_reports_calibration_error_but_keeps_other_concerns():
+    contract = _make_contract()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(
+            _InMemoryEvidenceSource({"dec-001": [_make_model_ensemble_entry(0.62)]})
+        ),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        calibration_source=_BoomCalibrationSource(),
+    )
+
+    detail = controller.load_decision_detail("dec-001")
+
+    assert detail.decision is not None
+    assert detail.evidence == (_make_model_ensemble_entry(0.62),)
+    assert detail.evidence_status is ReadStatus.OK
+    assert detail.calibration_context is None
+    assert detail.calibration_status is ReadStatus.ERROR
+
+
+def test_load_decision_detail_does_not_query_calibration_for_a_missing_decision():
+    class _AssertNotCalledCalibrationSource:
+        def get_band_context(self, score):
+            raise AssertionError("calibration must not be queried for a missing decision")
+
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource()),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        calibration_source=_AssertNotCalledCalibrationSource(),
+    )
+
+    detail_area = controller.load_decision_detail("missing-decision")
+
+    assert detail_area.is_empty is True
+    assert detail_area.calibration_context is None
+    assert detail_area.calibration_status is ReadStatus.OK

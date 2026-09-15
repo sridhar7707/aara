@@ -9,6 +9,8 @@ This is a historical realized-outcome view only -- it makes no
 predictive-accuracy or statistical-significance claim, and these tests
 assert none.
 """
+import pytest
+
 from applications.trading_intelligence.contracts.decision_outcome_contract import (
     DecisionOutcome,
     OutcomeDirection,
@@ -226,3 +228,94 @@ def test_result_is_deterministic_for_the_same_input():
 def test_bands_are_calibration_band_instances():
     bands = _calibrate(_outcome(score=0.60))
     assert all(isinstance(b, CalibrationBand) for b in bands)
+
+
+# --- get_band_for_score: Decision Quality Cross-Linking sprint -------------
+#
+# A pure lookup of the SAME band get_calibration() already produces for a
+# given score -- reuses _band_index's exact boundaries, computes no new
+# win/loss/n figure of its own.
+
+
+def test_get_band_for_score_returns_the_matching_band_with_its_real_tally():
+    lineage = _lineage(
+        _outcome(direction=OutcomeDirection.WIN, score=0.61),
+        _outcome(direction=OutcomeDirection.LOSS, score=0.62),
+    )
+    service = DecisionCalibrationQueryService()
+
+    band = service.get_band_for_score(lineage, 0.615)
+
+    assert band.label == "0.60-0.65"
+    assert (band.n, band.wins, band.losses) == (2, 1, 1)
+
+
+def test_get_band_for_score_matches_get_calibration_exactly():
+    lineage = _lineage(
+        _outcome(direction=OutcomeDirection.WIN, score=0.51),
+        _outcome(direction=OutcomeDirection.LOSS, score=0.53),
+    )
+    service = DecisionCalibrationQueryService()
+
+    via_lookup = service.get_band_for_score(lineage, 0.52)
+    via_full = _band(service.get_calibration(lineage), "0.50-0.55")
+
+    assert via_lookup == via_full
+
+
+def test_get_band_for_score_exact_lower_boundaries():
+    lineage = _lineage()
+    service = DecisionCalibrationQueryService()
+    for score, label in (
+        (0.50, "0.50-0.55"),
+        (0.55, "0.55-0.60"),
+        (0.60, "0.60-0.65"),
+        (0.65, "0.65-1.00"),
+    ):
+        assert service.get_band_for_score(lineage, score).label == label
+
+
+def test_get_band_for_score_upper_bound_is_exclusive_except_final_band():
+    lineage = _lineage()
+    service = DecisionCalibrationQueryService()
+
+    assert service.get_band_for_score(lineage, 0.5499).label == "0.50-0.55"
+    assert service.get_band_for_score(lineage, 0.55).label == "0.55-0.60"
+
+
+def test_get_band_for_score_final_band_includes_its_upper_bound_of_one():
+    lineage = _lineage()
+    service = DecisionCalibrationQueryService()
+
+    assert service.get_band_for_score(lineage, 1.00).label == "0.65-1.00"
+
+
+def test_get_band_for_score_returns_none_for_a_score_outside_every_band():
+    lineage = _lineage()
+    service = DecisionCalibrationQueryService()
+
+    assert service.get_band_for_score(lineage, 0.49) is None
+    assert service.get_band_for_score(lineage, 1.01) is None
+
+
+def test_get_band_for_score_returns_none_for_a_missing_score():
+    lineage = _lineage()
+    service = DecisionCalibrationQueryService()
+
+    assert service.get_band_for_score(lineage, None) is None
+
+
+def test_get_band_for_score_computes_no_new_win_loss_figure():
+    """The returned band's n/wins/losses are exactly get_calibration()'s
+    own tally for that band -- this method adds no second counting path."""
+    lineage = _lineage(
+        _outcome(direction=OutcomeDirection.WIN, score=0.90),
+        _outcome(direction=OutcomeDirection.WIN, score=0.91),
+        _outcome(direction=OutcomeDirection.LOSS, score=0.92),
+    )
+    service = DecisionCalibrationQueryService()
+
+    band = service.get_band_for_score(lineage, 0.905)
+
+    assert (band.n, band.wins, band.losses) == (3, 2, 1)
+    assert band.win_rate == pytest.approx(2 / 3)

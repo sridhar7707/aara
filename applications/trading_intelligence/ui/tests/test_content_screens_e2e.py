@@ -614,6 +614,39 @@ def test_performance_learning_renders_real_outcome_and_loss_review_and_honest_at
             context.close()
 
 
+def test_performance_learning_outcome_history_shows_the_decision_center_reference(browser):
+    """2. Performance & Learning displays the Decision Center reference for
+    a resolvable outcome -- the "Decision ID" column, a clean standalone
+    identity (not the existing composite "AMZN BUY · trade-38" text) --
+    proven against a real seeded row in a real browser render."""
+    row = OutcomeHistoryRow(
+        decision="AMZN BUY · trade-38", entry_date="2026-07-16 11:50 CDT",
+        status="CLOSED", exit_date="2026-09-02 09:33 CDT", holding_days="47",
+        realized_pnl_usd="-27.77", realized_pnl_pct="-0.23%", exit_basis="Bot fill",
+        pairing_method="WINDOW_SINGLE_BOT_EXIT", pairing_confidence="HIGH",
+        direction="LOSS", decision_reference="trade-38",
+    )
+    base = build_performance_learning_mock_screen()
+    screen = replace(
+        base,
+        outcome_rows=(row,),
+        outcome_health=_HEALTHY,
+        summary="1 BUY decisions — 1 CLOSED · 0 PARTIAL · 0 OPEN · 0 AMBIGUOUS.",
+    )
+    ui = PerformanceLearningUI(screen=screen)
+    with _launched_app(ui) as url:
+        context, page = _page_with_text(browser, url, "trade-38")
+        try:
+            # The new column header itself -- proves the reference column
+            # actually rendered, not merely that "trade-38" already appears
+            # as a substring inside the pre-existing "decision" column.
+            assert page.locator("th", has_text="Decision ID").count() > 0
+            visible_text = page.inner_text("body")
+            assert "trade-38" in visible_text
+        finally:
+            context.close()
+
+
 def test_performance_learning_honest_empty_outcome_history(browser):
     """A HEALTHY read with zero BUY decisions -> the honest empty message,
     never a fabricated row or a fabricated loss-review sentence."""

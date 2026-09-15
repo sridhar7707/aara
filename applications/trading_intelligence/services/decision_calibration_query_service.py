@@ -99,3 +99,21 @@ class DecisionCalibrationQueryService:
             CalibrationBand(label=label, wins=wins[index], losses=losses[index])
             for index, label in enumerate(BAND_LABELS)
         )
+
+    def get_band_for_score(
+        self, lineage: OutcomeLineage, score: Optional[float]
+    ) -> Optional[CalibrationBand]:
+        """The single :class:`CalibrationBand` (from the SAME tuple
+        :meth:`get_calibration` produces) whose range contains ``score``,
+        or ``None`` when ``score`` is ``None`` or lies outside every band
+        (``score < 0.50`` or ``score > 1.00``) -- the identical
+        band-membership rule ``_band_index`` already applies for
+        :meth:`get_calibration`'s own tally, reused verbatim here. Computes
+        no new win/loss/n figure of its own; delegates entirely to
+        :meth:`get_calibration` for the tally."""
+        if score is None:
+            return None
+        index = _band_index(score)
+        if index is None:
+            return None
+        return self.get_calibration(lineage)[index]
