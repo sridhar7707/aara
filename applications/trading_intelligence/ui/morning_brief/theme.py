@@ -78,4 +78,95 @@ CSS = """
 .mb-risk-state-output {
   margin-bottom: 4px;
 }
+
+/* Sprint 8B (Command Center): KPI card strip, top of page. */
+.mb-kpi-row {
+  display: block;
+}
+.mb-kpi-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 4px 0 8px 0;
+}
+.mb-kpi-card {
+  flex: 1 1 140px;
+  background: var(--mb-color-surface);
+  border: 1px solid var(--mb-color-border);
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+.mb-kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mb-color-text-secondary);
+}
+.mb-kpi-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--mb-color-navy);
+  margin-top: 2px;
+}
+
+/* The Portfolio Value Trend chart, promoted to the page's visual
+   centerpiece -- extra breathing room around the larger chart. */
+.mb-hero-chart {
+  margin: 4px 0 8px 0;
+}
+
+/* Sprint 8B: Portfolio Drawdown chart, directly under Value Trend. */
+.mb-portfolio-drawdown-chart {
+  margin: 4px 0 8px 0;
+}
+
+/* Sprint 8B: condensed Morning Brief card grid -- the four existing
+   frozen-IA sections plus Decision Activity / Current Risk State, wrapped
+   in cards inside one row rather than a long vertical stack. Content
+   styling within each card is fully reused (.mb-section-label,
+   .mb-available-summary, .mb-unavailable-message, the shared integration-
+   health renderer) -- these rules only control the card container. */
+.mb-brief-grid {
+  gap: 10px;
+  margin: 4px 0;
+}
+.mb-brief-card {
+  background: var(--mb-color-surface);
+  border: 1px solid var(--mb-color-border);
+  border-radius: 6px;
+  padding: 10px 14px;
+}
+.mb-brief-card .mb-section-label {
+  margin-top: 0;
+}
+
+/* Sprint 8B: drill-down navigation cards, bottom of page. */
+.mb-drilldown-row {
+  gap: 10px;
+  margin: 4px 0 12px 0;
+}
+.mb-drilldown-card {
+  background: var(--mb-color-surface);
+  border: 1px solid var(--mb-color-border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  transition: border-color 0.15s ease;
+}
+.mb-drilldown-card:hover {
+  border-color: var(--mb-color-gold);
+}
+.mb-drilldown-card-inner {
+  display: block;
+}
+.mb-drilldown-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--mb-color-navy);
+}
+.mb-drilldown-desc {
+  font-size: 12px;
+  color: var(--mb-color-text-secondary);
+  margin-top: 4px;
+}
 """

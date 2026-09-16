@@ -60,9 +60,11 @@ from applications.trading_intelligence.ui.integration_health_view import (
 from applications.trading_intelligence.ui.morning_brief.mock_data import build_mock_screen
 from applications.trading_intelligence.ui.morning_brief.screen import (
     PORTFOLIO_SNAPSHOT_TITLE,
+    DrawdownPoint,
     MorningBriefScreen,
     MorningBriefSection,
     PortfolioHistoryPoint,
+    PortfolioKpis,
 )
 from applications.trading_intelligence.ui.morning_brief.theme import CSS
 from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
@@ -139,6 +141,90 @@ _RISK_STATE_UNAVAILABLE_MESSAGE = (
     "Current risk state is not available -- the operational risk state "
     "could not be read in this environment."
 )
+
+# Sprint 8B (Command Center): the KPI-card strip and the Portfolio Drawdown
+# chart, both reusing data this screen already fetches for its existing
+# sections (see bootstrap.py's _build_morning_brief_screen) -- no new
+# adapter, no new read. Never a recommendation, a trading signal, or a
+# claim of predictive validity -- purely a visual restatement of already-
+# real, already-displayed facts.
+_KPI_UNAVAILABLE_MESSAGE = (
+    "Portfolio KPIs are not available -- the portfolio snapshot could not "
+    "be read in this environment."
+)
+_DRAWDOWN_SECTION_LABEL_HTML = '<div class="mb-section-label">Portfolio Drawdown</div>'
+_DRAWDOWN_UNAVAILABLE_MESSAGE = (
+    "Portfolio drawdown is not available -- the managed portfolio "
+    "snapshot history could not be read in this environment."
+)
+_DRAWDOWN_EMPTY_MESSAGE = "No portfolio history is recorded yet."
+
+# Drill-down navigation: clear visual links to the four detail screens.
+# label MUST match, verbatim, the corresponding real gr.TabbedInterface tab
+# button's own text content (bootstrap.py's SHELL_NAV_LABELS) -- the JS
+# bridge below finds the hidden real tab by exact text match, the same
+# technique bootstrap.py's own _INNER_NAV_LINK_JS already uses for the
+# shared shell nav (not reused directly: that bridge is fragile,
+# extensively documented, and shared by all six screens; this is a small,
+# independent, narrowly-scoped bridge using the identical technique,
+# scoped only to these four cards).
+_DRILLDOWN_TARGETS = (
+    ("Portfolio Intelligence", "Holdings, capital allocation, and reconciliation detail."),
+    ("Decision Center", "Why each decision was made -- evidence, confidence, and outcomes."),
+    ("Risk Intelligence", "Concentration, drawdown, and the current risk-governor state."),
+    ("Performance & Learning", "Outcome history and this product's own evidence-maturity floor."),
+)
+
+_DRILLDOWN_NAV_JS = """
+<script>
+(function () {
+  function findRealTab(label) {
+    return Array.from(document.querySelectorAll('button[role="tab"]')).find(
+      function (btn) { return btn.textContent.trim() === label; }
+    );
+  }
+
+  function activateTab(label) {
+    var tabButton = findRealTab(label);
+    if (tabButton) {
+      tabButton.click();
+    }
+  }
+
+  function wireCard(card) {
+    var label = card.getAttribute("data-target-label");
+    if (!label) {
+      return;
+    }
+    card.style.cursor = "pointer";
+    card.tabIndex = 0;
+    card.setAttribute("role", "button");
+    card.addEventListener("click", function () { activateTab(label); });
+    card.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activateTab(label);
+      }
+    });
+  }
+
+  var attempts = 0;
+  var maxAttempts = 100;
+  var intervalId = setInterval(function () {
+    attempts += 1;
+    var cards = document.querySelectorAll(".mb-drilldown-card-inner");
+    if (cards.length > 0) {
+      clearInterval(intervalId);
+      Array.from(cards).forEach(wireCard);
+      return;
+    }
+    if (attempts >= maxAttempts) {
+      clearInterval(intervalId);
+    }
+  }, 50);
+})();
+</script>
+"""
 
 # Local primitive, not a cross-package import (same "duplicate the
 # primitive" convention ui/portfolio_intelligence/gradio_view.py uses for
@@ -222,6 +308,7 @@ class MorningBriefUI:
         with gr.Blocks(
             title="AARA Trading Intelligence — Morning Brief",
             css=CSS + _INTEGRATION_HEALTH_CSS,
+            head=_DRILLDOWN_NAV_JS,
         ) as demo:
             gr.HTML(SHELL_IDENTITY_HTML, elem_classes=["aara-shell-header"])
             gr.HTML(build_shell_nav_html("Morning Brief"), elem_classes=["aara-shell-nav"])
@@ -235,32 +322,13 @@ class MorningBriefUI:
                 _format_snapshot_line_html(self._snapshot_fetched_at_provider())
             )
 
-            section_bodies = []
-            for section in initial.sections:
-                gr.HTML(self._format_section_label_html(section))
-                if section.title == PORTFOLIO_SNAPSHOT_TITLE:
-                    # Static disclosure, shown in every state (available or
-                    # unavailable). Not a dynamic output -- not added to
-                    # `outputs`, so _render()/_OUTPUT_COUNT are unchanged.
-                    gr.HTML(_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML)
-                section_bodies.append(gr.HTML(self._section_body_html(section)))
-
-            # Decision Activity & Risk State Context sprint: two small,
-            # independently-gated facts near Portfolio Snapshot, above the
-            # Portfolio Value Trend chart. Always present (never hidden
-            # outright) -- content switches between the honest unavailable
-            # message and the real summary, matching the Concentration
-            # section's own always-visible-with-switching-content pattern
-            # (ui/risk_intelligence/gradio_view.py).
-            decision_activity_output = gr.HTML(
-                self._decision_activity_state(initial)[0],
-                elem_classes=["mb-decision-activity-output"],
-            )
-            risk_state_output = gr.HTML(
-                self._current_risk_state_state(initial)[0],
-                elem_classes=["mb-risk-state-output"],
+            # --- Sprint 8B (Command Center): KPI card strip, top of page --
+            kpi_row_output = gr.HTML(
+                self._kpi_row_state(initial)[0], elem_classes=["mb-kpi-row"],
             )
 
+            # --- Portfolio Value Trend, promoted -- the page's visual
+            # centerpiece, directly under the KPI strip.
             gr.HTML(_PORTFOLIO_HISTORY_SECTION_LABEL_HTML)
             history_message_value, history_message_visible = (
                 self._portfolio_history_message_state(initial)
@@ -276,17 +344,88 @@ class MorningBriefUI:
                 x_title="Date",
                 y_title="Portfolio Value ($)",
                 visible=history_visible,
-                elem_classes=["mb-portfolio-history-chart"],
+                elem_classes=["mb-portfolio-history-chart", "mb-hero-chart"],
+                height=320,
             )
             portfolio_history_caption_output = gr.HTML(
                 self._portfolio_history_caption_html(initial)
             )
+
+            # --- Sprint 8B: Portfolio Drawdown, directly under Value Trend
+            gr.HTML(_DRAWDOWN_SECTION_LABEL_HTML)
+            drawdown_message_value, drawdown_message_visible = (
+                self._drawdown_message_state(initial)
+            )
+            drawdown_message_output = gr.HTML(
+                drawdown_message_value, visible=drawdown_message_visible,
+            )
+            drawdown_dataframe, drawdown_visible = self._drawdown_chart_state(initial)
+            drawdown_chart = gr.LinePlot(
+                value=drawdown_dataframe,
+                x="as_of",
+                y="drawdown_pct",
+                x_title="Date",
+                y_title="Drawdown (%)",
+                visible=drawdown_visible,
+                elem_classes=["mb-portfolio-drawdown-chart"],
+                height=220,
+            )
+            drawdown_caption_output = gr.HTML(self._drawdown_caption_html(initial))
+
+            # --- Morning Brief, condensed: the four existing frozen-IA
+            # sections plus Decision Activity / Current Risk State, all in
+            # one card grid rather than a long vertical stack. Same real
+            # content, same real data, only the container changes.
+            gr.HTML('<div class="mb-section-label">Morning Brief</div>')
+            section_bodies = []
+            with gr.Row(elem_classes=["mb-brief-grid"]):
+                for section in initial.sections:
+                    with gr.Column(elem_classes=["mb-brief-card"]):
+                        gr.HTML(self._format_section_label_html(section))
+                        if section.title == PORTFOLIO_SNAPSHOT_TITLE:
+                            # Static disclosure, shown in every state
+                            # (available or unavailable). Not a dynamic
+                            # output -- not added to `outputs`, so
+                            # _render()/_OUTPUT_COUNT are unchanged.
+                            gr.HTML(_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML)
+                        section_bodies.append(gr.HTML(self._section_body_html(section)))
+
+                # Decision Activity & Risk State Context sprint: two small,
+                # independently-gated facts, now folded into the same card
+                # grid rather than standing alone. Always present (never
+                # hidden outright) -- content switches between the honest
+                # unavailable message and the real summary, matching the
+                # Concentration section's own always-visible-with-switching-
+                # content pattern (ui/risk_intelligence/gradio_view.py).
+                with gr.Column(elem_classes=["mb-brief-card"]):
+                    gr.HTML('<div class="mb-section-label">Decisions Requiring Attention</div>')
+                    decision_activity_output = gr.HTML(
+                        self._decision_activity_state(initial)[0],
+                        elem_classes=["mb-decision-activity-output"],
+                    )
+                with gr.Column(elem_classes=["mb-brief-card"]):
+                    gr.HTML('<div class="mb-section-label">Risk / Attention</div>')
+                    risk_state_output = gr.HTML(
+                        self._current_risk_state_state(initial)[0],
+                        elem_classes=["mb-risk-state-output"],
+                    )
+
+            # --- Sprint 8B: drill-down navigation cards, bottom of page --
+            gr.HTML('<div class="mb-section-label">Explore Further</div>')
+            with gr.Row(elem_classes=["mb-drilldown-row"]):
+                for label, description in _DRILLDOWN_TARGETS:
+                    gr.HTML(
+                        self._format_drilldown_card_html(label, description),
+                        elem_classes=["mb-drilldown-card"],
+                    )
 
             outputs = [
                 rendered_at_output, snapshot_output, *section_bodies,
                 portfolio_history_message_output, portfolio_history_chart,
                 portfolio_history_caption_output,
                 decision_activity_output, risk_state_output,
+                kpi_row_output,
+                drawdown_message_output, drawdown_chart, drawdown_caption_output,
             ]
 
             # Same disable -> render -> enable double-submit guard chain as
@@ -341,6 +480,10 @@ class MorningBriefUI:
             self._portfolio_history_message_state(screen)
         )
         history_dataframe, history_visible = self._portfolio_history_chart_state(screen)
+        drawdown_message_value, drawdown_message_visible = (
+            self._drawdown_message_state(screen)
+        )
+        drawdown_dataframe, drawdown_visible = self._drawdown_chart_state(screen)
         return (
             gr.update(value=_format_rendered_at_html(self._now())),
             gr.update(
@@ -355,6 +498,10 @@ class MorningBriefUI:
             gr.update(value=self._portfolio_history_caption_html(screen)),
             gr.update(value=self._decision_activity_state(screen)[0]),
             gr.update(value=self._current_risk_state_state(screen)[0]),
+            gr.update(value=self._kpi_row_state(screen)[0]),
+            gr.update(value=drawdown_message_value, visible=drawdown_message_visible),
+            gr.update(value=drawdown_dataframe, visible=drawdown_visible),
+            gr.update(value=self._drawdown_caption_html(screen)),
         )
 
     @staticmethod
@@ -506,4 +653,152 @@ class MorningBriefUI:
             f'<div class="mb-available-summary">'
             f'{html.escape(screen.current_risk_state_summary)}</div>',
             True,
+        )
+
+    # --- Sprint 8B: KPI card strip ----------------------------------------
+    #
+    # Every fact here is read verbatim (or purely derived, see
+    # bootstrap.py's _compute_todays_change) from the SAME real values
+    # Portfolio Snapshot / Current Risk State already display -- no new
+    # read, no invented figure. An unset Optional field renders an honest
+    # "N/A" placeholder, never a fabricated number or the literal string
+    # "None".
+
+    @staticmethod
+    def _kpi_row_state(screen: MorningBriefScreen) -> Tuple[str, bool]:
+        if not screen.kpis_is_available:
+            return (
+                render_unavailable(
+                    screen.portfolio_snapshot.health,
+                    fallback_message=_KPI_UNAVAILABLE_MESSAGE,
+                ),
+                True,
+            )
+        return (MorningBriefUI._format_kpi_row_html(screen.kpis), True)
+
+    @staticmethod
+    def _format_todays_change_value(
+        usd: Optional[float], pct: Optional[float]
+    ) -> str:
+        """Sign (+/-) alone conveys direction -- no red/green stoplight
+        color, matching brand/guidelines/FORBIDDEN_UI_PATTERNS.md and this
+        product's other numeric displays (Risk Intelligence's own
+        .ri-gap-nonzero, the WARNING/DEFENSIVE state badges)."""
+        if usd is None or pct is None:
+            return "N/A"
+        sign = "+" if usd >= 0 else "-"
+        return f"{sign}${abs(usd):,.2f} ({sign}{abs(pct):.2f}%)"
+
+    @staticmethod
+    def _format_kpi_row_html(kpis: PortfolioKpis) -> str:
+        def _card(label: str, value: str) -> str:
+            return (
+                '<div class="mb-kpi-card">'
+                f'<div class="mb-kpi-label">{html.escape(label)}</div>'
+                f'<div class="mb-kpi-value">{html.escape(value)}</div>'
+                "</div>"
+            )
+
+        invested_pct = kpis.invested_pct
+        cards = [
+            _card("Portfolio Value", f"${kpis.total_value:,.2f}"),
+            _card(
+                "Today's Change",
+                MorningBriefUI._format_todays_change_value(
+                    kpis.todays_change_usd, kpis.todays_change_pct
+                ),
+            ),
+            _card(
+                "Invested %",
+                f"{invested_pct:.2f}%" if invested_pct is not None else "N/A",
+            ),
+            _card("Available Cash", f"${kpis.available_cash:,.2f}"),
+            _card(
+                "Open Positions",
+                str(kpis.open_positions) if kpis.open_positions is not None else "N/A",
+            ),
+            _card(
+                "Risk State",
+                kpis.risk_state if kpis.risk_state is not None else "N/A",
+            ),
+        ]
+        return f'<div class="mb-kpi-cards">{"".join(cards)}</div>'
+
+    # --- Sprint 8B: Portfolio Drawdown chart --------------------------------
+    #
+    # Same message/chart/caption shape as the Portfolio Value Trend chart
+    # above (_portfolio_history_message_state / _portfolio_history_chart_
+    # state / _portfolio_history_caption_html) -- duplicated rather than
+    # shared since the two charts carry different columns and messages.
+
+    @staticmethod
+    def _drawdown_message_state(screen: MorningBriefScreen) -> Tuple[str, bool]:
+        if not screen.drawdown_history_is_available:
+            return (
+                render_unavailable(
+                    screen.drawdown_history_health,
+                    fallback_message=_DRAWDOWN_UNAVAILABLE_MESSAGE,
+                ),
+                True,
+            )
+        if screen.drawdown_history_is_empty:
+            return (
+                f'<div class="mb-unavailable-message">'
+                f'{html.escape(_DRAWDOWN_EMPTY_MESSAGE)}</div>',
+                True,
+            )
+        return ("", False)
+
+    @staticmethod
+    def _drawdown_chart_state(screen: MorningBriefScreen) -> Tuple[pd.DataFrame, bool]:
+        if screen.drawdown_history_is_available and not screen.drawdown_history_is_empty:
+            return (
+                MorningBriefUI._format_drawdown_dataframe(screen.drawdown_history),
+                True,
+            )
+        return (MorningBriefUI._format_drawdown_dataframe(()), False)
+
+    @staticmethod
+    def _format_drawdown_dataframe(points: Tuple[DrawdownPoint, ...]) -> pd.DataFrame:
+        """Two real columns only -- each point's own as_of instant and its
+        own drawdown_pct, computed by bootstrap.py's
+        _recent_morning_brief_drawdown_history() over the full, unwindowed
+        history before windowing. No other derived column is ever added
+        here."""
+        return pd.DataFrame(
+            {
+                "as_of": [pd.Timestamp(point.as_of) for point in points],
+                "drawdown_pct": [point.drawdown_pct for point in points],
+            }
+        )
+
+    @staticmethod
+    def _drawdown_caption_html(screen: MorningBriefScreen) -> str:
+        if not screen.drawdown_history_is_available or screen.drawdown_history_is_empty:
+            return ""
+        most_recent_as_of = screen.drawdown_history[-1].as_of
+        return (
+            '<div class="mb-subtitle">'
+            f"{html.escape(_SECTION_AS_OF_PREFIX + most_recent_as_of)}"
+            "</div>"
+        )
+
+    # --- Sprint 8B: drill-down navigation cards -----------------------------
+    #
+    # Static content -- labels/descriptions never vary with screen state, so
+    # these are built once in build() and are never added to `outputs` /
+    # _render() (same "static, non-refreshed content" precedent as Risk
+    # Intelligence's Risk Parameters card).
+
+    @staticmethod
+    def _format_drilldown_card_html(label: str, description: str) -> str:
+        # `label` is drawn only from the fixed, internal _DRILLDOWN_TARGETS
+        # tuple (never user input) and must match the real tab button's
+        # textContent verbatim for the JS bridge's exact-match lookup to
+        # work, so it is not html-escaped in the attribute.
+        return (
+            f'<div class="mb-drilldown-card-inner" data-target-label="{label}">'
+            f'<div class="mb-drilldown-title">{html.escape(label)}</div>'
+            f'<div class="mb-drilldown-desc">{html.escape(description)}</div>'
+            "</div>"
         )

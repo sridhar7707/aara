@@ -46,6 +46,58 @@ class PortfolioHistoryPoint:
 
 
 @dataclass(frozen=True)
+class DrawdownPoint:
+    """Command Center sprint: one real portfolio_snapshots row plus its own
+    drawdown from the running peak observed up to and including that
+    point. Duplicated from ui/risk_intelligence/screen.py's own
+    DrawdownPoint shape (positive-when-underwater sign convention:
+    drawdown_pct is 0.0 at a new peak, a positive percentage the further
+    below it) rather than imported -- this package is self-contained (see
+    gradio_view.py's own module docstring) and does not cross-import any
+    other screen package. Computed by bootstrap.py's own
+    _compute_drawdown_history() -- the exact same function Risk
+    Intelligence already uses -- over the FULL, unwindowed portfolio
+    history, never a peak reset by this screen's own display window."""
+    as_of: str
+    portfolio_value: float
+    drawdown_pct: float
+
+
+@dataclass(frozen=True)
+class PortfolioKpis:
+    """Command Center sprint: the headline KPI-card facts, sourced
+    verbatim from the SAME real PortfolioSnapshotValue Portfolio
+    Snapshot's own available_summary already reads (total_value /
+    available_cash / invested_amount / open_positions), plus the SAME
+    real risk state Current Risk State already reads (risk_state) and a
+    pure derivation over the SAME already-fetched portfolio_history
+    (todays_change_usd / todays_change_pct) -- no new adapter, no new
+    read. Every Optional field is None only when its own underlying
+    source did not have that specific fact (e.g. risk_state read failed
+    while the portfolio snapshot read succeeded); the KPIs object itself
+    exists whenever the portfolio snapshot read succeeded."""
+    total_value: float
+    available_cash: float
+    invested_amount: float
+    open_positions: Optional[int] = None
+    risk_state: Optional[str] = None
+    todays_change_usd: Optional[float] = None
+    todays_change_pct: Optional[float] = None
+
+    @property
+    def invested_pct(self) -> Optional[float]:
+        if self.total_value <= 0:
+            return None
+        return (self.invested_amount / self.total_value) * 100
+
+    @property
+    def available_cash_pct(self) -> Optional[float]:
+        if self.total_value <= 0:
+            return None
+        return (self.available_cash / self.total_value) * 100
+
+
+@dataclass(frozen=True)
 class MorningBriefSection:
     title: str
     unavailable_message: str
@@ -109,6 +161,33 @@ class MorningBriefScreen:
     decision_activity_health: Optional[IntegrationHealth] = None
     current_risk_state_summary: Optional[str] = None
     current_risk_state_health: Optional[IntegrationHealth] = None
+    # Command Center sprint: the KPI-card strip and the drawdown chart, both
+    # additive, NOT part of the frozen four-section IA (matching
+    # portfolio_history's own existing precedent). `kpis` is None only when
+    # the underlying portfolio-snapshot read itself failed -- mirrors
+    # portfolio_snapshot.is_available's own convention (same source).
+    # `drawdown_history` follows the same None-vs-empty convention as
+    # portfolio_history: None means unavailable, an empty tuple is a real
+    # "connected, no rows in this window yet" result.
+    kpis: Optional[PortfolioKpis] = None
+    drawdown_history: Optional[Tuple[DrawdownPoint, ...]] = None
+    drawdown_history_health: Optional[IntegrationHealth] = None
+
+    @property
+    def kpis_is_available(self) -> bool:
+        return self.kpis is not None
+
+    @property
+    def drawdown_history_is_available(self) -> bool:
+        return self.drawdown_history is not None
+
+    @property
+    def drawdown_history_is_empty(self) -> bool:
+        return self.drawdown_history is not None and len(self.drawdown_history) == 0
+
+    @property
+    def drawdown_history_empty_state_message(self) -> str:
+        return "No portfolio history is recorded yet."
 
     @property
     def decision_activity_is_available(self) -> bool:

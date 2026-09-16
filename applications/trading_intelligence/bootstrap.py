@@ -201,8 +201,10 @@ from applications.trading_intelligence.ui.morning_brief.mock_data import (
     build_mock_screen as build_mock_morning_brief_screen,
 )
 from applications.trading_intelligence.ui.morning_brief.screen import (
+    DrawdownPoint as MorningBriefDrawdownPoint,
     MorningBriefScreen,
     PortfolioHistoryPoint as MorningBriefPortfolioHistoryPoint,
+    PortfolioKpis,
 )
 from applications.trading_intelligence.ui.performance_learning.gradio_view import (
     PerformanceLearningUI,
@@ -774,6 +776,74 @@ def _recent_morning_brief_portfolio_history(
     return tuple(windowed)
 
 
+def _compute_todays_change(points) -> Tuple[Optional[float], Optional[float]]:
+    """Sprint 8B (Command Center): (dollar_change, pct_change) comparing
+    the latest point's portfolio_value to the earliest point recorded on
+    that SAME calendar date -- a pure derivation over the SAME already-
+    fetched portfolio_history points Morning Brief's own chart already
+    reads (points must carry .as_of / .portfolio_value; duck-typed like
+    _recent_morning_brief_portfolio_history's own points param). No new
+    read. (None, None) -- never a fabricated 0 -- when there are fewer
+    than 2 points, the latest timestamp cannot be parsed, no earlier point
+    from the same date exists (the latest point IS today's only point), or
+    the same-date baseline value is not positive (avoids a division
+    error)."""
+    if len(points) < 2:
+        return None, None
+    latest = points[-1]
+    try:
+        latest_date = datetime.fromisoformat(latest.as_of).date()
+    except (TypeError, ValueError):
+        return None, None
+    baseline = None
+    for point in points:
+        try:
+            point_date = datetime.fromisoformat(point.as_of).date()
+        except (TypeError, ValueError):
+            continue
+        if point_date == latest_date:
+            baseline = point
+            break
+    if baseline is None or baseline is latest or baseline.portfolio_value <= 0:
+        return None, None
+    dollar_change = latest.portfolio_value - baseline.portfolio_value
+    pct_change = (dollar_change / baseline.portfolio_value) * 100
+    return dollar_change, pct_change
+
+
+def _recent_morning_brief_drawdown_history(
+    points, window_days: int = _MORNING_BRIEF_PORTFOLIO_HISTORY_WINDOW_DAYS,
+) -> Tuple[MorningBriefDrawdownPoint, ...]:
+    """Sprint 8B (Command Center): reuses _compute_drawdown_history() --
+    the exact same function Risk Intelligence's own Portfolio Drawdown
+    chart already uses -- over the FULL, unwindowed portfolio history (so
+    the running peak is the portfolio's own true all-time peak, never
+    reset by this screen's own display window), then applies the SAME
+    recent-window slice _recent_morning_brief_portfolio_history uses for
+    its own chart. Re-wraps each point into this package's own local
+    DrawdownPoint type rather than Risk Intelligence's (self-containment;
+    this package does not import ui/risk_intelligence/). No new
+    computation of drawdown itself -- only windowing and re-wrapping."""
+    full_drawdown = _compute_drawdown_history(points)
+    cutoff = _now_utc() - timedelta(days=window_days)
+    windowed = []
+    for point in full_drawdown:
+        try:
+            parsed = datetime.fromisoformat(point.as_of)
+        except (TypeError, ValueError):
+            continue
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        if parsed >= cutoff:
+            windowed.append(
+                MorningBriefDrawdownPoint(
+                    as_of=point.as_of, portfolio_value=point.portfolio_value,
+                    drawdown_pct=point.drawdown_pct,
+                )
+            )
+    return tuple(windowed)
+
+
 # Decision Activity & Risk State Context sprint: two small, additive
 # Morning Brief facts near Portfolio Snapshot. Both reuse existing,
 # already-tested data paths -- no new adapter, no new pairing/derivation.
@@ -1069,6 +1139,31 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
             risk_state_result.value.state, risk_state_result.value.as_of,
         )
 
+    # Sprint 8B (Command Center): KPI strip + Drawdown chart. Both reuse
+    # data this function already fetched above -- no new read.
+    kpis = None
+    if snapshot_result.value is not None:
+        todays_change_usd, todays_change_pct = _compute_todays_change(
+            portfolio_history or ()
+        )
+        kpis = PortfolioKpis(
+            total_value=snapshot_result.value.total_value,
+            available_cash=snapshot_result.value.available_cash,
+            invested_amount=snapshot_result.value.invested_amount,
+            open_positions=snapshot_result.value.open_positions,
+            risk_state=(
+                risk_state_result.value.state
+                if risk_state_result.value is not None else None
+            ),
+            todays_change_usd=todays_change_usd,
+            todays_change_pct=todays_change_pct,
+        )
+    drawdown_history = (
+        _recent_morning_brief_drawdown_history(history_result.value)
+        if history_result.value is not None
+        else None
+    )
+
     return replace(
         illustrative_screen,
         portfolio_snapshot=portfolio_snapshot,
@@ -1081,6 +1176,9 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
         decision_activity_health=lineage_result.health,
         current_risk_state_summary=current_risk_state_summary,
         current_risk_state_health=risk_state_result.health,
+        kpis=kpis,
+        drawdown_history=drawdown_history,
+        drawdown_history_health=history_result.health,
     )
 
 

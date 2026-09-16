@@ -332,3 +332,48 @@ def test_keyboard_space_activates_the_focused_nav_item(page):
         )
     except Exception as exc:  # noqa: BLE001
         _fail(page, "keyboard_space", exc)
+
+
+def test_drilldown_card_click_activates_its_target_screen(page):
+    """Sprint 8B (Command Center): Morning Brief's four drill-down cards are
+    wired by an independent, narrowly-scoped bridge
+    (``_DRILLDOWN_NAV_JS`` in ui/morning_brief/gradio_view.py) using the
+    same find-real-tab-by-text technique as ``_INNER_NAV_LINK_JS``, but
+    never touching that shared bridge. This proves clicking a real card in
+    the full composed app actually switches to its named target tab --
+    the same standard the nav-item walk above holds for the shared nav."""
+    try:
+        target_label, target_marker = NAV_SCREENS[3]  # Risk Intelligence
+        _wait_settled_on(page, NAV_SCREENS[0][1])
+        _sync_api.expect(_marker(page, NAV_SCREENS[0][1])).to_be_visible(
+            timeout=_TIMEOUT_MS
+        )
+
+        # Wait for _DRILLDOWN_NAV_JS to finish wiring the visible card
+        # (it sets style.cursor + tabIndex once wired), same signal the
+        # `page` fixture already waits on for the shared nav bridge.
+        page.wait_for_function(
+            """(label) => {
+                const card = document.querySelector(
+                    `.mb-drilldown-card-inner[data-target-label="${label}"]`
+                );
+                return !!card && card.style.cursor === 'pointer'
+                    && card.getAttribute('tabindex') === '0';
+            }""",
+            arg=target_label,
+            timeout=_TIMEOUT_MS,
+        )
+
+        page.locator(
+            f'.mb-drilldown-card-inner[data-target-label="{target_label}"]'
+        ).first.click(timeout=_TIMEOUT_MS)
+
+        _wait_settled_on(page, target_marker)
+        _sync_api.expect(_marker(page, target_marker)).to_be_visible(
+            timeout=_TIMEOUT_MS
+        )
+        _sync_api.expect(_marker(page, NAV_SCREENS[0][1])).to_be_hidden(
+            timeout=_TIMEOUT_MS
+        )
+    except Exception as exc:  # noqa: BLE001
+        _fail(page, "drilldown_card_click", exc)

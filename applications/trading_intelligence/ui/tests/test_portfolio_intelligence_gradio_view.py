@@ -696,7 +696,8 @@ def test_format_drawdown_summary_html_shows_both_fields():
 # all-time peak before any filtering, never a peak reset by the window.
 
 
-def test_drawdown_render_state_follows_the_selected_timeframe():
+def test_drawdown_render_state_follows_the_selected_timeframe(monkeypatch):
+    monkeypatch.setattr(PortfolioIntelligenceUI, "_now", staticmethod(lambda: _NOW))
     points = (_point(400, 100.0), _point(200, 50.0), _point(0, 100.0))
     message, message_visible, chart_df, chart_visible, summary = (
         PortfolioIntelligenceUI()._drawdown_render_state(points, None, "1D")
@@ -973,7 +974,8 @@ def test_history_render_state_insufficient_for_timeframe_is_honest_and_distinct(
     assert summary == ""
 
 
-def test_history_render_state_populated_for_a_timeframe_with_matching_points():
+def test_history_render_state_populated_for_a_timeframe_with_matching_points(monkeypatch):
+    monkeypatch.setattr(PortfolioIntelligenceUI, "_now", staticmethod(lambda: _NOW))
     points = (_point(400, 1.0), _point(0, 2.0))
     message, message_visible, chart_df, chart_visible, summary = (
         PortfolioIntelligenceUI()._history_render_state(points, None, "1D")
@@ -987,7 +989,8 @@ def test_history_render_state_populated_for_a_timeframe_with_matching_points():
 # --- Visual Dashboard Phase A: timeframe change event (no re-fetch) ------
 
 
-def test_on_timeframe_change_filters_the_state_held_history_not_a_new_fetch():
+def test_on_timeframe_change_filters_the_state_held_history_not_a_new_fetch(monkeypatch):
+    monkeypatch.setattr(PortfolioIntelligenceUI, "_now", staticmethod(lambda: _NOW))
     ui = PortfolioIntelligenceUI()
     points = (_point(400, 1.0), _point(0, 2.0))
 
@@ -1041,7 +1044,8 @@ def test_timeframe_change_event_only_touches_the_six_history_outputs():
     assert len(change_dep["outputs"]) == 6
 
 
-def test_render_with_explicit_timeframe_filters_the_chart():
+def test_render_with_explicit_timeframe_filters_the_chart(monkeypatch):
+    monkeypatch.setattr(PortfolioIntelligenceUI, "_now", staticmethod(lambda: _NOW))
     points = (_point(400, 1.0), _point(0, 2.0))
     ui = PortfolioIntelligenceUI(screen_provider=lambda: PortfolioScreen(portfolio_history=points))
 

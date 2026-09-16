@@ -21,7 +21,9 @@ from applications.trading_intelligence.ui.morning_brief.screen import (
     MARKET_MOOD_REGIME_TITLE,
     OVERNIGHT_HOLDINGS_NEWS_TITLE,
     PORTFOLIO_SNAPSHOT_TITLE,
+    DrawdownPoint,
     PortfolioHistoryPoint,
+    PortfolioKpis,
 )
 from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
 
@@ -343,8 +345,9 @@ def test_default_render_shows_no_available_summary_markup():
 # render-clock line + operational-snapshot line + one body per
 # MorningBriefScreen.sections (4) + Sprint 1 portfolio-history message,
 # chart, and caption (3) + Decision Activity & Risk State Context sprint's
-# two independently-gated facts (2)
-_OUTPUT_COUNT = 11
+# two independently-gated facts (2) + Sprint 8B (Command Center)'s KPI row
+# (1) and drawdown message/chart/caption (3)
+_OUTPUT_COUNT = 15
 
 
 def _refresh_button(demo):
@@ -622,7 +625,11 @@ def test_section_health_does_not_change_availability():
 
 
 def _history_chart(demo):
-    charts = [b for b in demo.blocks.values() if isinstance(b, gr.LinePlot)]
+    charts = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.LinePlot)
+        and "mb-portfolio-history-chart" in (b.elem_classes or [])
+    ]
     assert len(charts) == 1
     return charts[0]
 
@@ -727,6 +734,234 @@ def test_portfolio_history_refresh_updates_the_chart():
     assert first[7]["visible"] is False
     assert second[7]["visible"] is True
     assert second[7]["value"]["portfolio_value"].tolist() == [100500.0]
+
+
+# --- Sprint 8B: Trading Intelligence Command Center -------------------------
+
+
+def _kpi_block(demo):
+    blocks = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.HTML) and "mb-kpi-row" in (b.elem_classes or [])
+    ]
+    assert len(blocks) == 1
+    return blocks[0]
+
+
+def _drawdown_chart(demo):
+    charts = [b for b in demo.blocks.values() if isinstance(b, gr.LinePlot)]
+    assert len(charts) == 2  # value chart + drawdown chart
+    drawdown = [
+        c for c in charts if "mb-portfolio-drawdown-chart" in (c.elem_classes or [])
+    ]
+    assert len(drawdown) == 1
+    return drawdown[0]
+
+
+def _drilldown_cards(demo):
+    return [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.HTML) and "mb-drilldown-card" in (b.elem_classes or [])
+    ]
+
+
+# --- KPI row -----------------------------------------------------------
+
+
+def test_kpi_row_unavailable_by_default():
+    demo = MorningBriefUI().build()
+
+    block = _kpi_block(demo)
+    assert "not available" in block.value.lower()
+
+
+def test_kpi_row_populated_renders_all_six_facts():
+    kpis = PortfolioKpis(
+        total_value=103000.0, available_cash=37000.0, invested_amount=66000.0,
+        open_positions=7, risk_state="NORMAL",
+        todays_change_usd=3000.0, todays_change_pct=3.0,
+    )
+    screen = replace(build_mock_screen(), kpis=kpis)
+    demo = MorningBriefUI(screen=screen).build()
+
+    block = _kpi_block(demo)
+    assert "$103,000.00" in block.value
+    assert "$37,000.00" in block.value
+    assert "7" in block.value
+    assert "NORMAL" in block.value
+    assert "+$3,000.00" in block.value
+    assert "+3.00%" in block.value
+    assert "64.08%" in block.value  # invested_pct = 66000/103000*100
+
+
+def test_kpi_row_negative_change_renders_a_minus_sign_not_a_fabricated_color():
+    kpis = PortfolioKpis(
+        total_value=97000.0, available_cash=37000.0, invested_amount=60000.0,
+        todays_change_usd=-3000.0, todays_change_pct=-3.0,
+    )
+    screen = replace(build_mock_screen(), kpis=kpis)
+    demo = MorningBriefUI(screen=screen).build()
+
+    block = _kpi_block(demo)
+    assert "-$3,000.00" in block.value
+    assert "-3.00%" in block.value
+
+
+def test_kpi_row_missing_optional_facts_render_an_honest_placeholder_not_fabricated_data():
+    kpis = PortfolioKpis(total_value=100000.0, available_cash=40000.0, invested_amount=60000.0)
+    screen = replace(build_mock_screen(), kpis=kpis)
+    demo = MorningBriefUI(screen=screen).build()
+
+    block = _kpi_block(demo)
+    # No open_positions / risk_state / todays_change supplied -- must not
+    # invent a count, a state, or a $/% figure.
+    assert "None" not in block.value
+
+
+# --- Drawdown chart ------------------------------------------------------
+
+
+def test_drawdown_unavailable_by_default_renders_the_message_and_hides_the_chart():
+    demo = MorningBriefUI().build()
+
+    html_values = _html_values(demo)
+    assert any("aara-integration-status" in v for v in html_values)
+    assert _drawdown_chart(demo).visible is False
+
+
+def test_drawdown_empty_renders_the_message_and_hides_the_chart():
+    screen = replace(build_mock_screen(), drawdown_history=())
+    demo = MorningBriefUI(screen=screen).build()
+
+    html_values = _html_values(demo)
+    assert any("No portfolio history is recorded yet." in v for v in html_values)
+    assert _drawdown_chart(demo).visible is False
+
+
+def test_drawdown_with_real_points_renders_the_chart():
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=0.0),
+        DrawdownPoint(as_of="2026-09-02T00:00:00+00:00", portfolio_value=95000.0, drawdown_pct=5.0),
+    )
+    screen = replace(build_mock_screen(), drawdown_history=points)
+    demo = MorningBriefUI(screen=screen).build()
+
+    chart = _drawdown_chart(demo)
+    assert chart.visible is True
+    assert [row[1] for row in chart.value["data"]] == [0.0, 5.0]
+
+
+def test_drawdown_chart_has_only_the_two_real_columns():
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=0.0),
+    )
+    screen = replace(build_mock_screen(), drawdown_history=points)
+    chart = _drawdown_chart(MorningBriefUI(screen=screen).build())
+
+    assert set(chart.value["columns"]) == {"as_of", "drawdown_pct"}
+
+
+def test_drawdown_refresh_updates_the_chart():
+    empty_screen = replace(build_mock_screen(), drawdown_history=())
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=7.5),
+    )
+    populated_screen = replace(build_mock_screen(), drawdown_history=points)
+    calls = []
+
+    def provider():
+        calls.append(True)
+        return empty_screen if len(calls) <= 2 else populated_screen
+
+    ui = MorningBriefUI(screen_provider=provider)
+    first = ui._render()
+    second = ui._render()
+
+    # New outputs are appended at the end: index 11 is the KPI row, 12 is
+    # the drawdown message, 13 is the drawdown chart, 14 is the caption.
+    assert first[13]["visible"] is False
+    assert second[13]["visible"] is True
+    assert second[13]["value"]["drawdown_pct"].tolist() == [7.5]
+
+
+# --- Condensed Morning Brief grid ----------------------------------------
+
+
+def test_existing_sections_still_render_inside_the_condensed_grid():
+    """Structural change only -- the four existing sections' own real
+    content must render unchanged, just inside a new card-grid layout."""
+    screen = _real_portfolio_screen()
+    demo = MorningBriefUI(screen=screen).build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "Total value $1.00" in combined
+    assert PORTFOLIO_SNAPSHOT_TITLE in combined
+    assert MARKET_MOOD_REGIME_TITLE in combined
+    assert CANDIDATE_SCREENING_SUMMARY_TITLE in combined
+    assert OVERNIGHT_HOLDINGS_NEWS_TITLE in combined
+
+
+def test_brief_grid_wrapper_is_present():
+    rows = [b for b in MorningBriefUI().build().blocks.values() if isinstance(b, gr.Row)]
+    assert any("mb-brief-grid" in (r.elem_classes or []) for r in rows)
+
+
+# --- Drill-down navigation cards ------------------------------------------
+
+
+_EXPECTED_DRILLDOWN_TARGETS = (
+    "Portfolio Intelligence", "Decision Center", "Risk Intelligence",
+    "Performance & Learning",
+)
+
+
+def test_drilldown_cards_present_for_the_four_expected_screens():
+    demo = MorningBriefUI().build()
+    cards = _drilldown_cards(demo)
+
+    assert len(cards) == 4
+    values = "\n".join(c.value for c in cards)
+    for label in _EXPECTED_DRILLDOWN_TARGETS:
+        assert f'data-target-label="{label}"' in values
+
+
+def test_drilldown_cards_are_present_regardless_of_screen_state():
+    """Static, non-refreshed content -- present even on the fully
+    unavailable default screen, and unaffected by Refresh."""
+    demo = MorningBriefUI().build()
+    cards = _drilldown_cards(demo)
+    assert len(cards) == 4
+
+
+def test_drilldown_cards_do_not_appear_in_render_outputs():
+    """Fully static -- must not grow _OUTPUT_COUNT or the render tuple."""
+    ui = MorningBriefUI()
+    assert len(ui._render()) == _OUTPUT_COUNT
+
+
+def test_drilldown_row_wrapper_is_present():
+    rows = [b for b in MorningBriefUI().build().blocks.values() if isinstance(b, gr.Row)]
+    assert any("mb-drilldown-row" in (r.elem_classes or []) for r in rows)
+
+
+def test_no_fake_or_illustrative_data_anywhere_on_the_command_center():
+    """Task guardrail: even fully populated, nothing on this screen may be
+    invented -- every KPI/chart/drilldown value traces to a real seeded
+    fact or a static, non-data label."""
+    kpis = PortfolioKpis(
+        total_value=103000.0, available_cash=37000.0, invested_amount=66000.0,
+        open_positions=7, risk_state="NORMAL",
+        todays_change_usd=3000.0, todays_change_pct=3.0,
+    )
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=103000.0, drawdown_pct=0.0),
+    )
+    screen = replace(build_mock_screen(), kpis=kpis, drawdown_history=points)
+    demo = MorningBriefUI(screen=screen).build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "Illustrative Data" not in combined
+    assert "illustrative" not in combined.lower()
 
 
 # --- Decision Activity & Risk State Context sprint -------------------------

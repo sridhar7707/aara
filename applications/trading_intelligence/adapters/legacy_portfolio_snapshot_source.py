@@ -58,7 +58,7 @@ section -- the intended, safe behavior, not a bug.
 import os
 import sqlite3
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 from applications.platform.integrations import IntegrationHealth, ReadResult
 from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
@@ -74,9 +74,13 @@ _DB_PATH = "trades.db"
 # `portfolio_value > 0` guard drops fabricated zero rows; timestamp is an
 # ISO-8601 string so lexical DESC order is chronological order. `timestamp`
 # is also returned so Morning Brief can show when this row was written.
+# Command Center sprint: `open_positions` added -- the same row already
+# carries this column (bot/_main_db.py's own DDL), it just wasn't selected
+# before; no new table, no new read.
 _SELECT_LATEST_SNAPSHOT = (
-    "SELECT portfolio_value, available_cash, timestamp FROM portfolio_snapshots "
-    "WHERE portfolio_value > 0 ORDER BY timestamp DESC LIMIT 1"
+    "SELECT portfolio_value, available_cash, timestamp, open_positions "
+    "FROM portfolio_snapshots WHERE portfolio_value > 0 "
+    "ORDER BY timestamp DESC LIMIT 1"
 )
 
 # Same `portfolio_value > 0` fabricated-zero-row guard as
@@ -95,12 +99,16 @@ class PortfolioSnapshotValue:
     Morning Brief's Portfolio Snapshot formatter already reads
     (total_value / available_cash / invested_amount), so swapping the
     source needs no change to the presentation string. `as_of` is the
-    `portfolio_snapshots.timestamp` of the row these figures came from."""
+    `portfolio_snapshots.timestamp` of the row these figures came from.
+    `open_positions` is that same row's own recorded count (Command Center
+    sprint) -- Optional because the column is nullable; None means "not
+    recorded on this row", never coerced to a fabricated 0."""
 
     total_value: float
     available_cash: float
     invested_amount: float
     as_of: str
+    open_positions: Optional[int] = None
 
 
 def _sqlite_health(exc: sqlite3.Error) -> IntegrationHealth:
@@ -145,12 +153,14 @@ class LegacyPortfolioSnapshotSource:
         if row is None or row[0] is None or row[1] is None:
             return ReadResult.empty(_PROVIDER)
         portfolio_value, available_cash = float(row[0]), float(row[1])
+        open_positions = int(row[3]) if row[3] is not None else None
         return ReadResult.healthy(
             PortfolioSnapshotValue(
                 total_value=portfolio_value,
                 available_cash=available_cash,
                 invested_amount=portfolio_value - available_cash,
                 as_of=str(row[2]) if row[2] is not None else "",
+                open_positions=open_positions,
             ),
             _PROVIDER,
         )

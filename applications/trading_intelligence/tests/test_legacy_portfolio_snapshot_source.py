@@ -75,6 +75,8 @@ def test_is_healthy_with_the_most_recent_row_and_derives_invested(portfolio_snap
         invested_amount=100029.85 - 59869.06,
         # the latest row's own portfolio_snapshots.timestamp
         as_of="2026-08-31T19:39:42+00:00",
+        # the latest row's own portfolio_snapshots.open_positions
+        open_positions=5,
     )
 
 
@@ -258,6 +260,32 @@ def test_get_portfolio_history_skips_nonpositive_portfolio_value_rows():
         assert result.value == (
             PortfolioHistoryPoint(as_of="2026-08-30T00:00:00+00:00", portfolio_value=77000.0),
         )
+    finally:
+        os.remove(path)
+
+
+def test_open_positions_is_none_when_the_column_is_null():
+    """Command Center sprint: open_positions is Optional -- a NULL column
+    value (older/malformed row) must never be coerced to 0, which would
+    misrepresent an unknown count as a real zero-positions fact."""
+    path = tempfile.mktemp(suffix=".db")
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE portfolio_snapshots (timestamp TEXT PRIMARY KEY, "
+        "portfolio_value REAL, available_cash REAL, open_positions INTEGER)"
+    )
+    conn.execute(
+        "INSERT INTO portfolio_snapshots VALUES "
+        "('2026-08-31T00:00:00+00:00', 50000.0, 10000.0, NULL)"
+    )
+    conn.commit()
+    conn.close()
+    try:
+        source = LegacyPortfolioSnapshotSource(db_path=path)
+        result = source.get_latest_portfolio_snapshot()
+        assert result.health.status is IntegrationStatus.HEALTHY
+        assert result.value.total_value == 50000.0
+        assert result.value.open_positions is None
     finally:
         os.remove(path)
 
