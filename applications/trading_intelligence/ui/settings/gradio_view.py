@@ -40,7 +40,7 @@ from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, buil
 
 _PAGE_HEADER_HTML = (
     '<div class="st-page-header">'
-    "<h2>Settings</h2>"
+    '<h2 class="aara-page-title">Settings</h2>'
     '<div class="st-subtitle">User settings, thresholds, and notification preferences</div>'
     "</div>"
 )

@@ -336,7 +336,7 @@ _REAL_DATA_HTML = (
 
 _PAGE_HEADER_HTML = (
     '<div class="pi-page-header">'
-    "<h2>Portfolio Intelligence</h2>"
+    '<h2 class="aara-page-title">Portfolio Intelligence</h2>'
     '<div class="pi-subtitle">Holdings, capital allocation, and current exposure</div>'
     "</div>"
 )
@@ -1364,6 +1364,13 @@ class PortfolioIntelligenceUI:
             return _PARTIAL_DATA_HTML
         return _UNAVAILABLE_DATA_HTML
 
+    # Impeccable critique finding #5: of these seven capital metrics, only
+    # "Realized Profit" is a signed P&L figure that can meaningfully be
+    # negative in this domain (Allocated/Available Cash/Invested/Reserve/
+    # Tradeable Cash/Total Value are not) -- so it is the one label this
+    # set's negative-value modifier below is keyed to.
+    _NEGATIVE_ELIGIBLE_CAPITAL_METRIC = "Realized Profit"
+
     @staticmethod
     def _format_capital_summary_html(capital: CapitalSummary) -> str:
         fields = [
@@ -1375,10 +1382,18 @@ class PortfolioIntelligenceUI:
             ("Total Value", capital.total_value),
             ("Realized Profit", capital.realized_profit),
         ]
+
+        def _value_class(label: str, value: float) -> str:
+            is_negative = (
+                label == PortfolioIntelligenceUI._NEGATIVE_ELIGIBLE_CAPITAL_METRIC
+                and value < 0
+            )
+            return "pi-metric-value" + (" pi-metric-value--negative" if is_negative else "")
+
         metrics_html = "".join(
             '<div class="pi-metric">'
             f'<span class="pi-metric-label aara-metric-label">{html.escape(label)}</span>'
-            f'<span class="pi-metric-value">${value:,.2f}</span>'
+            f'<span class="{_value_class(label, value)}">${value:,.2f}</span>'
             "</div>"
             for label, value in fields
         )

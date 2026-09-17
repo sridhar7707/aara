@@ -135,6 +135,35 @@ def test_num_helper_right_aligns():
     assert "text-align: right" in block
 
 
+# --- Impeccable critique finding #4: shared page-title primitive --------
+
+
+def test_page_title_uses_the_reserved_page_title_type_token():
+    """--aara-type-page-title (20px) was declared but unused before this
+    task -- .aara-page-title is the first consumer."""
+    block = DESIGN_SYSTEM_CSS.split(".aara-page-title {")[1].split("}")[0]
+    assert "font-size: var(--aara-type-page-title);" in block
+
+
+def test_page_title_is_uppercase_and_tracked_not_plain_mixed_case():
+    block = DESIGN_SYSTEM_CSS.split(".aara-page-title {")[1].split("}")[0]
+    assert "text-transform: uppercase;" in block
+    assert "letter-spacing: 0.04em;" in block
+    assert "color: var(--aara-navy);" in block
+
+
+def test_page_title_is_not_named_aara_eyebrow():
+    """Decision Center's own theme.py already defines a private, differently-
+    valued .aara-eyebrow (22px, weight 600) -- the composed app merges every
+    screen's CSS into one stylesheet, so reusing that exact class name here
+    would let the merge order silently decide which definition wins for
+    every screen. The shared primitive must use its own, non-colliding
+    name -- no actual .aara-eyebrow RULE may be defined here (the name may
+    still appear in this file's own explanatory comment text, same as any
+    other design-doc cross-reference)."""
+    assert ".aara-eyebrow {" not in DESIGN_SYSTEM_CSS
+
+
 # --- composition wiring --------------------------------------------------------
 
 def test_composed_app_css_includes_the_design_system_first():

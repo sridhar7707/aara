@@ -173,14 +173,19 @@ def test_open_partial_ambiguous_rows_have_blank_exit_pnl_direction():
 
 
 def test_closed_row_renders_persisted_outcome_values_verbatim():
+    """Impeccable critique finding #5: a negative Realized P&L $/% value
+    is wrapped in the pl-negative-value span (gradio_view.py's
+    _pnl_cell) -- the number itself is still the persisted value
+    verbatim, unrounded and unreformatted, just with the negative-token
+    span added around it."""
     frame = _dataframe(PerformanceLearningUI(screen=_populated_screen([_closed_row()])).build())
     data = frame.value["data"] if isinstance(frame.value, dict) else frame.value
     cells = data[0]
     assert cells[2] == "CLOSED"
     assert cells[3] == "2026-09-02 09:33 CDT"
     assert cells[4] == "47"
-    assert cells[5] == "-27.77"
-    assert cells[6] == "-0.23%"
+    assert cells[5] == '<span class="pl-negative-value">-27.77</span>'
+    assert cells[6] == '<span class="pl-negative-value">-0.23%</span>'
     assert cells[10] == "LOSS"
 
 

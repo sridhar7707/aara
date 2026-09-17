@@ -18,15 +18,22 @@ CSS = """
   --pl-color-text: var(--aara-text, #1A1A1A);
   --pl-color-text-secondary: var(--aara-text-muted, #666666);
   --pl-color-border: var(--aara-border, #E2E8F0);
+  --pl-color-negative: var(--aara-negative-fg, #7A2E2E);
 }
 
 .gradio-container {
   background: var(--pl-color-background) !important;
 }
 
+/* Impeccable critique finding #4: mirrors design_system.py's shared
+   .aara-page-title primitive (identical values) so a standalone
+   PerformanceLearningUI().build() (no design_system.py loaded) still
+   renders the same uppercase/tracked page title as the composed app. */
 .pl-page-header h2 {
   font-size: 20px;
   font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--pl-color-navy);
   margin: 0;
 }
@@ -98,6 +105,20 @@ CSS = """
   font-size: 11px;
   font-weight: 600;
   color: var(--pl-color-text-secondary);
+}
+/* Impeccable critique finding #5: Realized P&L $ / % are the two Outcome
+   History columns holding a signed P&L figure -- a real loss gets the
+   product's one restrained, desaturated negative token (already used in
+   Portfolio Intelligence's Unrealized P&L chart and chart_view.py's
+   WIN_LOSS_COLOR_MAP) instead of plain default text. The literal minus
+   sign already in the cell's own text (see bootstrap.py's
+   _outcome_history_row: f"{value:,.2f}" / f"{value:.2%}") is unchanged
+   and remains the primary signal; this is reinforcement, not the only
+   cue. Only the two P&L columns render as markdown (see gradio_view.py's
+   outcome_table datatype) so this span can render at all -- every other
+   column stays plain "str" and is unaffected. */
+.pl-outcome-table .pl-negative-value {
+  color: var(--pl-color-negative);
 }
 
 /* Sprint 1 Phase 3: the loss/failure-analysis callout. .pl-summary above

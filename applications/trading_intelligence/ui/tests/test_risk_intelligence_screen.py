@@ -2,12 +2,14 @@ import pytest
 
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
     CURRENT_RISK_PARAMETERS,
+    MAX_POSITION_SIZE_PCT,
     ConcentrationHolding,
     DrawdownPoint,
     RiskHistoryEntry,
     RiskParameter,
     RiskScreen,
     RiskSnapshot,
+    holding_exceeds_max_position_size,
 )
 
 
@@ -287,6 +289,57 @@ def test_current_risk_parameters_is_a_fixed_tuple_not_a_screen_field():
     instance, never gated on availability/health (it is not a live read)."""
     assert isinstance(CURRENT_RISK_PARAMETERS, tuple)
     assert len(CURRENT_RISK_PARAMETERS) == 6
+
+
+def test_max_position_size_pct_matches_the_displayed_parameter():
+    """MAX_POSITION_SIZE_PCT is read from the SAME CURRENT_RISK_PARAMETERS
+    entry the Risk Parameters card renders as "Max Position Size" -- not a
+    second, independently-maintained literal."""
+    assert MAX_POSITION_SIZE_PCT == 20.0
+    displayed = next(
+        p for p in CURRENT_RISK_PARAMETERS if p.label == "Max Position Size"
+    )
+    assert displayed.numeric_value == MAX_POSITION_SIZE_PCT
+
+
+def test_other_risk_parameters_have_no_numeric_value():
+    """Only "Max Position Size" carries a numeric_value -- every other
+    parameter (a plain count, a ratio, "Disabled") has no comparable
+    percent-of-portfolio figure, and none is invented here."""
+    others = [p for p in CURRENT_RISK_PARAMETERS if p.label != "Max Position Size"]
+    assert all(p.numeric_value is None for p in others)
+
+
+# --- Impeccable critique finding #1: exceeds-stated-maximum comparison --
+
+
+def test_holding_below_max_position_size_does_not_exceed():
+    assert holding_exceeds_max_position_size(19.9, 20.0) is False
+
+
+def test_holding_equal_to_max_position_size_does_not_exceed():
+    """Equality is not "exceeds" -- a position sitting exactly at the
+    stated maximum has not gone past it."""
+    assert holding_exceeds_max_position_size(20.0, 20.0) is False
+
+
+def test_holding_above_max_position_size_exceeds():
+    assert holding_exceeds_max_position_size(21.8, 20.0) is True
+
+
+def test_missing_max_position_size_never_flags_a_comparison():
+    """A missing (None) maximum means no comparison can be made -- never
+    treated as "no limit, so anything exceeds it"."""
+    assert holding_exceeds_max_position_size(21.8, None) is False
+
+
+def test_missing_weight_never_flags_a_comparison():
+    """A missing (None) weight means no comparison can be made."""
+    assert holding_exceeds_max_position_size(None, 20.0) is False
+
+
+def test_both_missing_never_flags_a_comparison():
+    assert holding_exceeds_max_position_size(None, None) is False
 
 
 # --- Current drawdown context --------------------------------------------

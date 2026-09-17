@@ -33,7 +33,9 @@ def test_every_non_healthy_status_maps_to_its_fixed_phrase(health, expected_phra
     out = render_unavailable(health, fallback_message=_FALLBACK)
 
     assert expected_phrase in out
-    assert out.startswith('<div class="aara-integration-status">')
+    # a real provider failure gets the error treatment, not the
+    # honest-absence one -- see render_unavailable()'s own docstring.
+    assert out.startswith('<div class="aara-error-message">')
     assert out.rstrip().endswith("</div>")
     # a known reason replaces, never appends, the generic fallback sentence
     assert _FALLBACK not in out
@@ -138,4 +140,7 @@ def test_output_is_a_single_wrapped_div():
 
 def test_css_constant_defines_the_shared_class_rule():
     assert ".aara-integration-status {" in CSS
+    # error vs. honest-absence split: a genuine ADR-061 failure gets its
+    # own distinct rule, reusing Decision Center's aara-error-message name.
+    assert ".aara-error-message {" in CSS
     assert "}" in CSS

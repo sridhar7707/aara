@@ -30,9 +30,15 @@ CSS = """
   background: var(--st-color-background) !important;
 }
 
+/* Impeccable critique finding #4: mirrors design_system.py's shared
+   .aara-page-title primitive (identical values) so a standalone
+   SettingsUI().build() (no design_system.py loaded) still renders the
+   same uppercase/tracked page title as the composed app. */
 .st-page-header h2 {
   font-size: 20px;
   font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--st-color-navy);
   margin: 0;
 }
@@ -94,5 +100,35 @@ CSS = """
 .st-preference-control input[type="radio"]:focus-visible {
   outline: 2px solid var(--st-color-navy) !important;
   outline-offset: 2px;
+}
+
+/* Impeccable critique finding #3: these two preference controls are
+   intentionally non-interactive (gradio_view.py sets interactive=False --
+   nothing consumes their value, see screen.py's own docstring), but
+   rendered with no visual distinction from a live control: Gradio's base
+   theme leaves accent-color: auto (native browser blue) on the radio dot
+   and opacity: 1 on the disabled label -- live-verified via a rendered
+   DOM inspection (getComputedStyle), the same way the focus-visible rule
+   above was verified. cursor: not-allowed already applies natively on a
+   disabled input/label (also confirmed live) -- no rule needed for that
+   part. `.disabled` and `.selected` are Gradio's own real, stable classes
+   on the rendered <label> (confirmed via that same inspection), not the
+   hashed svelte-* build class, which is why this targets them instead of
+   inventing a new hook. Scoped to this screen's own .st-preference-control
+   -- no other screen renders a gr.Radio with interactive=False today, so
+   this cannot leak onto or collide with anything else. Text is never the
+   ONLY signal removed here: the "not currently configurable" disclosure
+   above each control already states the condition in words (see
+   .st-session-only-notice above); this is the visual reinforcement,
+   reusing this file's own --st-color-* aliases (which themselves resolve
+   through --aara-navy / --aara-text-muted) rather than a new color. */
+.st-preference-control input[type="radio"] {
+  accent-color: var(--st-color-navy);
+}
+.st-preference-control label.disabled {
+  opacity: 0.55;
+}
+.st-preference-control label.disabled .ml-2 {
+  color: var(--st-color-text-secondary);
 }
 """

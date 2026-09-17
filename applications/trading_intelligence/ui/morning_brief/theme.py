@@ -17,15 +17,22 @@ CSS = """
   --mb-color-text: var(--aara-text, #1A1A1A);
   --mb-color-text-secondary: var(--aara-text-muted, #666666);
   --mb-color-border: var(--aara-border, #E2E8F0);
+  --mb-color-negative: var(--aara-negative-fg, #7A2E2E);
 }
 
 .gradio-container {
   background: var(--mb-color-background) !important;
 }
 
+/* Impeccable critique finding #4: mirrors design_system.py's shared
+   .aara-page-title primitive (identical values) so a standalone
+   MorningBriefUI().build() (no design_system.py loaded) still renders
+   the same uppercase/tracked page title as the composed app. */
 .mb-page-header h2 {
   font-size: 20px;
   font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--mb-color-navy);
   margin: 0;
 }
@@ -108,6 +115,19 @@ CSS = """
   font-weight: 700;
   color: var(--mb-color-navy);
   margin-top: 2px;
+}
+/* Impeccable critique finding #5: Today's Change is the one KPI card
+   value that is a signed delta -- a real loss gets the product's one
+   restrained, desaturated negative token (already used in the Unrealized
+   P&L chart and chart_view.py's WIN_LOSS_COLOR_MAP) instead of the same
+   navy every other KPI value uses. The +/- sign in the text is unchanged
+   and remains the primary signal; this is reinforcement, not the only
+   cue. Only applied via the mb-kpi-value--negative modifier
+   gradio_view.py adds specifically to Today's Change's own card -- every
+   other KPI value keeps plain .mb-kpi-value navy, since none of them can
+   meaningfully be negative in this domain. */
+.mb-kpi-value--negative {
+  color: var(--mb-color-negative);
 }
 
 /* The Portfolio Value Trend chart, promoted to the page's visual

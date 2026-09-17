@@ -71,7 +71,7 @@ from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, buil
 
 _PAGE_HEADER_HTML = (
     '<div class="mb-page-header">'
-    "<h2>Morning Brief</h2>"
+    '<h2 class="aara-page-title">Morning Brief</h2>'
     '<div class="mb-subtitle">Single-glance daily summary before market open</div>'
     "</div>"
 )
@@ -680,10 +680,15 @@ class MorningBriefUI:
     def _format_todays_change_value(
         usd: Optional[float], pct: Optional[float]
     ) -> str:
-        """Sign (+/-) alone conveys direction -- no red/green stoplight
-        color, matching brand/guidelines/FORBIDDEN_UI_PATTERNS.md and this
-        product's other numeric displays (Risk Intelligence's own
-        .ri-gap-nonzero, the WARNING/DEFENSIVE state badges)."""
+        """The sign (+/-) alone still conveys direction in the text itself
+        -- color is never the only signal. Impeccable critique finding #5:
+        a negative value additionally gets the product's one restrained,
+        desaturated --aara-negative-fg token (see _format_kpi_row_html's
+        mb-kpi-value--negative modifier) -- the SAME token already used
+        for a loss in the Unrealized P&L chart
+        (ui/portfolio_intelligence/gradio_view.py) and chart_view.py's
+        WIN_LOSS_COLOR_MAP, not a new red/green stoplight pair (still
+        forbidden by brand/guidelines/FORBIDDEN_UI_PATTERNS.md)."""
         if usd is None or pct is None:
             return "N/A"
         sign = "+" if usd >= 0 else "-"
@@ -691,15 +696,23 @@ class MorningBriefUI:
 
     @staticmethod
     def _format_kpi_row_html(kpis: PortfolioKpis) -> str:
-        def _card(label: str, value: str) -> str:
+        def _card(label: str, value: str, *, negative: bool = False) -> str:
+            value_class = "mb-kpi-value" + (" mb-kpi-value--negative" if negative else "")
             return (
                 '<div class="mb-kpi-card">'
                 f'<div class="mb-kpi-label">{html.escape(label)}</div>'
-                f'<div class="mb-kpi-value">{html.escape(value)}</div>'
+                f'<div class="{value_class}">{html.escape(value)}</div>'
                 "</div>"
             )
 
         invested_pct = kpis.invested_pct
+        # Only Today's Change is a signed delta -- Portfolio Value,
+        # Invested %, Available Cash, Open Positions, and Risk State are
+        # never negative in this domain, so none of them take the
+        # negative modifier.
+        todays_change_is_negative = (
+            kpis.todays_change_usd is not None and kpis.todays_change_usd < 0
+        )
         cards = [
             _card("Portfolio Value", f"${kpis.total_value:,.2f}"),
             _card(
@@ -707,6 +720,7 @@ class MorningBriefUI:
                 MorningBriefUI._format_todays_change_value(
                     kpis.todays_change_usd, kpis.todays_change_pct
                 ),
+                negative=todays_change_is_negative,
             ),
             _card(
                 "Invested %",

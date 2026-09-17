@@ -23,15 +23,22 @@ CSS = """
   --pi-color-text: var(--aara-text, #1A1A1A);
   --pi-color-text-secondary: var(--aara-text-muted, #666666);
   --pi-color-border: var(--aara-border, #E2E8F0);
+  --pi-color-negative: var(--aara-negative-fg, #7A2E2E);
 }
 
 .gradio-container {
   background: var(--pi-color-background) !important;
 }
 
+/* Impeccable critique finding #4: mirrors design_system.py's shared
+   .aara-page-title primitive (identical values) so a standalone
+   PortfolioIntelligenceUI().build() (no design_system.py loaded) still
+   renders the same uppercase/tracked page title as the composed app. */
 .pi-page-header h2 {
   font-size: 20px;
   font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--pi-color-navy);
   margin: 0;
 }
@@ -103,6 +110,20 @@ CSS = """
   font-weight: 700;
   font-family: Monaco, "Courier New", monospace;
   color: var(--pi-color-navy);
+}
+/* Impeccable critique finding #5: Realized Profit is the one capital
+   metric that is a signed P&L figure -- a real loss gets the product's
+   one restrained, desaturated negative token (already used in this same
+   screen's Unrealized P&L chart, see _PNL_COLOR_MAP above) instead of the
+   same navy every other capital metric uses. The $-prefixed sign in the
+   text (e.g. "$-192.56") is unchanged and remains the primary signal;
+   this is reinforcement, not the only cue. Only applied via the
+   pi-metric-value--negative modifier gradio_view.py adds specifically to
+   Realized Profit's own span -- every other capital metric keeps plain
+   .pi-metric-value navy, since none of them can meaningfully be negative
+   in this domain. */
+.pi-metric-value--negative {
+  color: var(--pi-color-negative);
 }
 
 .pi-allocation-bar {

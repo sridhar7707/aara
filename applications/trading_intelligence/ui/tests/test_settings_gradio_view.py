@@ -52,6 +52,24 @@ def test_shell_header_and_nav_blocks_carry_the_expected_elem_classes():
     assert any("aara-shell-nav" in (block.elem_classes or []) for block in html_blocks)
 
 
+def test_page_title_carries_the_shared_eyebrow_treatment():
+    """Impeccable critique finding #4: the page title uses the shared
+    .aara-page-title primitive (design_system.py) instead of a plain
+    mixed-case <h2>, matching the treatment now applied consistently
+    across all six screens."""
+    ui = SettingsUI()
+
+    demo = ui.build()
+
+    combined = "\n".join(_html_values(demo))
+    assert '<h2 class="aara-page-title">Settings</h2>' in combined
+
+
+def test_theme_mirrors_the_shared_page_title_treatment_for_standalone_render():
+    assert "letter-spacing: 0.04em;" in CSS
+    assert "text-transform: uppercase;" in CSS
+
+
 def test_all_three_frozen_area_titles_render():
     ui = SettingsUI()
 
@@ -197,3 +215,30 @@ def test_theme_defines_a_focus_visible_rule_for_preference_radios():
     styling for this element."""
     assert '.st-preference-control input[type="radio"]:focus-visible' in CSS
     assert "outline: 2px solid var(--st-color-navy) !important;" in CSS
+
+
+# --- Impeccable critique finding #3: disabled-control affordance ---------
+
+
+def test_theme_overrides_the_default_gradio_blue_radio_accent():
+    """Gradio's own base theme leaves accent-color: auto on the radio
+    input, which resolves to the browser's native blue -- live-verified
+    (getComputedStyle) against the standalone-rendered page. This must be
+    overridden with the screen's own --st-color-navy alias (itself
+    resolving through --aara-navy), not a new color."""
+    assert '.st-preference-control input[type="radio"] {' in CSS
+    assert "accent-color: var(--st-color-navy);" in CSS
+
+
+def test_theme_reduces_opacity_and_mutes_text_for_disabled_preference_labels():
+    """`.disabled` is Gradio's own real, stable class on the rendered
+    <label> for a non-interactive Radio option (live-verified via a
+    rendered DOM inspection, not the hashed svelte-* build class) --
+    Gradio leaves it at opacity: 1 by default. Reduced opacity plus a
+    muted --st-color-text-secondary (--aara-text-muted alias) foreground
+    give the intentionally-inert controls a real disabled affordance,
+    matching the "reduced opacity, muted foreground" ask."""
+    assert ".st-preference-control label.disabled {" in CSS
+    assert "opacity: 0.55;" in CSS
+    assert ".st-preference-control label.disabled .ml-2 {" in CSS
+    assert "color: var(--st-color-text-secondary);" in CSS

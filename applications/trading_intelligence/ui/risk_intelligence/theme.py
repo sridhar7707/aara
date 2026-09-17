@@ -42,9 +42,21 @@ CSS = """
   background: var(--ri-color-background) !important;
 }
 
+/* Impeccable critique finding #4: mirrors design_system.py's shared
+   .aara-page-title primitive (identical values) so a standalone
+   RiskIntelligenceUI().build() (no design_system.py loaded) still
+   renders the same uppercase/tracked page title as the composed app.
+   Before this task, gradio_view.py's markup carried class="aara-eyebrow"
+   -- a name that was never actually defined here or in design_system.py,
+   so it only appeared styled by accident, borrowing Decision Center's
+   own private .aara-eyebrow rule when this screen happened to be
+   composed alongside it; standalone, the title rendered without the
+   uppercase/tracking this rule now supplies directly. */
 .ri-page-header h2 {
   font-size: 20px;
   font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--ri-color-navy);
   margin: 0;
 }
@@ -324,5 +336,25 @@ CSS = """
   font-variant-numeric: tabular-nums;
   text-align: right;
   color: var(--ri-color-text);
+}
+
+/* Impeccable critique finding #1: a holding whose weight_pct exceeds the
+   stated Max Position Size gets this one-line factual note directly under
+   its row -- a sibling block in the same .ri-concentration-list flex
+   column, not part of .ri-concentration-row's own grid, so it naturally
+   spans the row's full width with no grid-column rule needed. Reuses the
+   shared --aara-status-warning-* tokens rather than a new color -- the
+   same rgba(200, 164, 93, 0.20) / #7c5f2a pair .ri-state-badge.state-
+   warning above already duplicates locally, so this is not a new hue on
+   the page. Text carries the meaning; color is never the only signal
+   (same discipline as the state badges). No banner: a small inline note,
+   matching every other supporting line on this page. */
+.ri-concentration-limit-note {
+  margin-top: var(--ri-space-2);
+  padding: var(--ri-space-3) var(--ri-space-8);
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--aara-status-warning-bg, rgba(200, 164, 93, 0.20));
+  color: var(--aara-status-warning-fg, #7c5f2a);
 }
 """

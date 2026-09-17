@@ -75,10 +75,12 @@ from applications.trading_intelligence.ui.integration_health_view import (
 )
 from applications.trading_intelligence.ui.risk_intelligence.screen import (
     CURRENT_RISK_PARAMETERS,
+    MAX_POSITION_SIZE_PCT,
     DrawdownPoint,
     RiskHistoryEntry,
     RiskScreen,
     RiskSnapshot,
+    holding_exceeds_max_position_size,
 )
 from applications.trading_intelligence.ui.risk_intelligence.theme import CSS
 from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
@@ -124,7 +126,7 @@ _SHARED_STATE_BADGE_MODIFIERS = {
 
 _PAGE_HEADER_HTML = (
     '<div class="ri-page-header">'
-    '<h2 class="aara-eyebrow">Risk Intelligence</h2>'
+    '<h2 class="aara-page-title">Risk Intelligence</h2>'
     '<div class="ri-subtitle">Current risk-governor state and position sizing</div>'
     "</div>"
 )
@@ -208,6 +210,17 @@ _CONCENTRATION_DISCLAIMER = (
     "A factual description of how open-position value is distributed by "
     "symbol. This is not a risk violation, a breach of any limit, or a "
     "trading signal."
+)
+# Impeccable critique finding #1: a holding's real weight_pct can exceed
+# the real MAX_POSITION_SIZE_PCT (the same figure Risk Parameters below
+# shows as "Max Position Size") with nothing on this screen naming that
+# relationship. Wording states the observed numbers, never a judgment --
+# consistent with _CONCENTRATION_DISCLAIMER above, which this note does
+# not contradict: "exceeds the stated maximum" describes a comparison
+# between two already-displayed figures, not a "violation" or "breach."
+_CONCENTRATION_LIMIT_NOTE_TEMPLATE = (
+    "Position exceeds the stated maximum ({weight:.1f}% actual vs. "
+    "{limit:.1f}% stated maximum)."
 )
 
 # Static, read-only "current configuration" fact card -- CURRENT_RISK_
@@ -879,7 +892,13 @@ class RiskIntelligenceUI:
         descriptive fact, not a risk violation or trading signal.
         Deterministic order: weight_pct descending, symbol ascending on
         ties -- same rule RiskScreen.largest_concentration_holding uses, so
-        the summary line and the bar list always agree."""
+        the summary line and the bar list always agree.
+
+        A holding whose real weight_pct exceeds the real
+        MAX_POSITION_SIZE_PCT (see holding_exceeds_max_position_size --
+        None-safe, equality-safe) gets one extra factual line directly
+        under its row; every other holding's row is unchanged from
+        before."""
         largest = screen.largest_concentration_holding
         summary_html = (
             f'<div class="ri-concentration-summary">Largest single holding: '
@@ -894,6 +913,7 @@ class RiskIntelligenceUI:
             "</div>"
             f'<span class="ri-concentration-pct">{holding.weight_pct:.1f}%</span>'
             "</div>"
+            + RiskIntelligenceUI._concentration_limit_note_html(holding.weight_pct)
             for holding in ordered
         )
         return (
@@ -904,6 +924,20 @@ class RiskIntelligenceUI:
             f"{html.escape(_CONCENTRATION_DISCLAIMER)}</div>"
             "</div>"
         )
+
+    @staticmethod
+    def _concentration_limit_note_html(weight_pct: Optional[float]) -> str:
+        """Empty string (no markup at all) for a holding within the stated
+        maximum, or when either figure is missing -- see
+        holding_exceeds_max_position_size's own None-safe, equality-safe
+        rule. MAX_POSITION_SIZE_PCT is read once from screen.py's own
+        CURRENT_RISK_PARAMETERS entry, never a second threshold."""
+        if not holding_exceeds_max_position_size(weight_pct, MAX_POSITION_SIZE_PCT):
+            return ""
+        message = _CONCENTRATION_LIMIT_NOTE_TEMPLATE.format(
+            weight=weight_pct, limit=MAX_POSITION_SIZE_PCT
+        )
+        return f'<div class="ri-concentration-limit-note">{html.escape(message)}</div>'
 
     @staticmethod
     def _format_risk_parameters_html() -> str:

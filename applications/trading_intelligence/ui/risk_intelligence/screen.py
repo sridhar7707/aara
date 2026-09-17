@@ -78,6 +78,28 @@ class ConcentrationHolding:
     weight_pct: float
 
 
+def holding_exceeds_max_position_size(
+    weight_pct: Optional[float], max_position_size_pct: Optional[float]
+) -> bool:
+    """True only when `weight_pct` is strictly greater than
+    `max_position_size_pct` -- both are real, already-displayed figures
+    (a holding's weight_pct, and MAX_POSITION_SIZE_PCT below); this never
+    computes, fetches, or infers either one.
+
+    None-safe: either argument missing means no comparison can be made, so
+    this returns False rather than guessing -- it never treats "unknown" as
+    "exceeds." Equality-safe: a holding sitting exactly at the stated
+    maximum has not exceeded it (`>`, not `>=`).
+
+    Purely descriptive, matching this module's existing Concentration
+    disclaimer -- naming an observed relationship between two numbers the
+    screen already shows, never a risk violation, breach, or trading
+    signal judgment."""
+    if weight_pct is None or max_position_size_pct is None:
+        return False
+    return weight_pct > max_position_size_pct
+
+
 @dataclass(frozen=True)
 class RiskParameter:
     """One duplicated, read-only literal mirroring a value from the bot's
@@ -88,9 +110,20 @@ class RiskParameter:
     instead of a SQL SELECT). Display only: shown as the system's current
     configuration, never as proof the UI itself enforces it -- enforcement,
     if any, happens entirely in bot/risk/* and bot/_main_cycle.py, both
-    untouched by this package."""
+    untouched by this package.
+
+    `numeric_value` is an optional companion to `value_display` -- the same
+    already-duplicated config.py figure, additionally exposed as a percent-
+    scale number (matching ConcentrationHolding.weight_pct's own 0-100
+    scale) so a caller can compare against it deterministically instead of
+    parsing `value_display`'s free-text string. None for every parameter
+    that has no such comparable figure (e.g. "Disabled", a plain count).
+    Never a second, independently-chosen threshold -- only "Max Position
+    Size" sets it below, from the exact same MAX_POSITION_PCT literal
+    `value_display` already renders."""
     label: str
     value_display: str
+    numeric_value: Optional[float] = None
 
 
 # Duplicated from config.py (repo root) -- MUST be kept in sync by hand
@@ -102,7 +135,9 @@ class RiskParameter:
 # manual sync is a simple diff, not a re-derivation.
 CURRENT_RISK_PARAMETERS: Tuple[RiskParameter, ...] = (
     # config.py: MAX_POSITION_PCT = 0.20
-    RiskParameter(label="Max Position Size", value_display="20% of portfolio"),
+    RiskParameter(
+        label="Max Position Size", value_display="20% of portfolio", numeric_value=20.0
+    ),
     # config.py: MAX_RISK_PER_TRADE_PCT = 0.015
     RiskParameter(label="Max Risk Per Trade", value_display="1.5% of portfolio"),
     # config.py: MAX_POSITION_DRIFT_PCT = 0.25
@@ -113,6 +148,16 @@ CURRENT_RISK_PARAMETERS: Tuple[RiskParameter, ...] = (
     RiskParameter(label="Correlation Threshold", value_display="0.85"),
     # config.py: MACD_CONFIRMATION_MIN = -inf (Gate 7.9, disabled by default)
     RiskParameter(label="MACD Confirmation Minimum", value_display="Disabled"),
+)
+
+# The single numeric source of truth for "does this holding exceed the
+# stated maximum" -- read from the SAME CURRENT_RISK_PARAMETERS entry above
+# by label, never a second literal. None if that entry is ever removed or
+# renamed, so a caller must treat a missing maximum as "no comparison" (see
+# holding_exceeds_max_position_size below) rather than fabricating one.
+MAX_POSITION_SIZE_PCT: Optional[float] = next(
+    (p.numeric_value for p in CURRENT_RISK_PARAMETERS if p.label == "Max Position Size"),
+    None,
 )
 
 

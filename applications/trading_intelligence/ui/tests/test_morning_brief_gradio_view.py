@@ -16,6 +16,7 @@ from applications.trading_intelligence.ui.morning_brief.gradio_view import (
     MorningBriefUI,
 )
 from applications.trading_intelligence.ui.morning_brief.mock_data import build_mock_screen
+from applications.trading_intelligence.ui.morning_brief.theme import CSS
 from applications.trading_intelligence.ui.morning_brief.screen import (
     CANDIDATE_SCREENING_SUMMARY_TITLE,
     MARKET_MOOD_REGIME_TITLE,
@@ -67,6 +68,24 @@ def test_shell_header_and_nav_blocks_carry_the_expected_elem_classes():
     html_blocks = [block for block in demo.blocks.values() if isinstance(block, gr.HTML)]
     assert any("aara-shell-header" in (block.elem_classes or []) for block in html_blocks)
     assert any("aara-shell-nav" in (block.elem_classes or []) for block in html_blocks)
+
+
+def test_page_title_carries_the_shared_eyebrow_treatment():
+    """Impeccable critique finding #4: the page title uses the shared
+    .aara-page-title primitive (design_system.py) instead of a plain
+    mixed-case <h2>, matching the treatment now applied consistently
+    across all six screens."""
+    ui = MorningBriefUI()
+
+    demo = ui.build()
+
+    combined = "\n".join(_html_values(demo))
+    assert '<h2 class="aara-page-title">Morning Brief</h2>' in combined
+
+
+def test_theme_mirrors_the_shared_page_title_treatment_for_standalone_render():
+    assert "letter-spacing: 0.04em;" in CSS
+    assert "text-transform: uppercase;" in CSS
 
 
 def test_all_four_frozen_section_titles_render():
@@ -794,7 +813,11 @@ def test_kpi_row_populated_renders_all_six_facts():
     assert "64.08%" in block.value  # invested_pct = 66000/103000*100
 
 
-def test_kpi_row_negative_change_renders_a_minus_sign_not_a_fabricated_color():
+def test_kpi_row_negative_change_renders_the_minus_sign_and_the_negative_token():
+    """Impeccable critique finding #5: a negative Today's Change gets the
+    product's one restrained --aara-negative-fg token (mb-kpi-value--
+    negative), not a red/green stoplight color -- and the minus sign in
+    the text is unchanged and remains the primary signal either way."""
     kpis = PortfolioKpis(
         total_value=97000.0, available_cash=37000.0, invested_amount=60000.0,
         todays_change_usd=-3000.0, todays_change_pct=-3.0,
@@ -805,6 +828,57 @@ def test_kpi_row_negative_change_renders_a_minus_sign_not_a_fabricated_color():
     block = _kpi_block(demo)
     assert "-$3,000.00" in block.value
     assert "-3.00%" in block.value
+    assert "mb-kpi-value--negative" in block.value
+
+
+def test_kpi_row_positive_change_does_not_render_the_negative_token():
+    kpis = PortfolioKpis(
+        total_value=103000.0, available_cash=37000.0, invested_amount=66000.0,
+        todays_change_usd=3000.0, todays_change_pct=3.0,
+    )
+    screen = replace(build_mock_screen(), kpis=kpis)
+    demo = MorningBriefUI(screen=screen).build()
+
+    block = _kpi_block(demo)
+    assert "+$3,000.00" in block.value
+    assert "mb-kpi-value--negative" not in block.value
+
+
+def test_kpi_row_zero_change_does_not_render_the_negative_token():
+    """Zero is not negative -- it must retain the same plain treatment as
+    a positive value."""
+    kpis = PortfolioKpis(
+        total_value=100000.0, available_cash=37000.0, invested_amount=63000.0,
+        todays_change_usd=0.0, todays_change_pct=0.0,
+    )
+    screen = replace(build_mock_screen(), kpis=kpis)
+    demo = MorningBriefUI(screen=screen).build()
+
+    block = _kpi_block(demo)
+    assert "+$0.00" in block.value
+    assert "mb-kpi-value--negative" not in block.value
+
+
+def test_kpi_row_only_todays_change_can_carry_the_negative_token():
+    """The other five KPI values never take the negative modifier, even
+    though this fixture's own totals could technically be read as signed
+    numbers -- only Today's Change is a delta in this domain."""
+    kpis = PortfolioKpis(
+        total_value=97000.0, available_cash=37000.0, invested_amount=60000.0,
+        open_positions=7, risk_state="NORMAL",
+        todays_change_usd=-3000.0, todays_change_pct=-3.0,
+    )
+    screen = replace(build_mock_screen(), kpis=kpis)
+    demo = MorningBriefUI(screen=screen).build()
+
+    block = _kpi_block(demo)
+    assert block.value.count("mb-kpi-value--negative") == 1
+
+
+def test_theme_defines_the_negative_kpi_token_and_reuses_aara_negative_fg():
+    assert "--mb-color-negative: var(--aara-negative-fg, #7A2E2E);" in CSS
+    assert ".mb-kpi-value--negative {" in CSS
+    assert "color: var(--mb-color-negative);" in CSS
 
 
 def test_kpi_row_missing_optional_facts_render_an_honest_placeholder_not_fabricated_data():

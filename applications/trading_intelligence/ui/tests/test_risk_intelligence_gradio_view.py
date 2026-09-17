@@ -124,7 +124,7 @@ def test_default_build_still_renders_shell_header_nav_page_header_and_announcer(
     combined = "\n".join(html_values)
     assert SHELL_IDENTITY_HTML in html_values
     assert build_shell_nav_html("Risk Intelligence") in html_values
-    assert '<h2 class="aara-eyebrow">Risk Intelligence</h2>' in combined
+    assert '<h2 class="aara-page-title">Risk Intelligence</h2>' in combined
     live_blocks = [
         block for block in demo.blocks.values()
         if isinstance(block, gr.HTML) and getattr(block, "elem_id", None) == _LIVE_ANNOUNCER_ELEM_ID
@@ -167,6 +167,25 @@ def test_shell_header_and_nav_blocks_carry_the_expected_elem_classes():
     html_blocks = [block for block in demo.blocks.values() if isinstance(block, gr.HTML)]
     assert any("aara-shell-header" in (block.elem_classes or []) for block in html_blocks)
     assert any("aara-shell-nav" in (block.elem_classes or []) for block in html_blocks)
+
+
+def test_page_title_carries_the_shared_eyebrow_treatment():
+    """Impeccable critique finding #4: the page title uses the shared
+    .aara-page-title primitive (design_system.py). Before this task the
+    markup referenced class="aara-eyebrow", a name never actually defined
+    in this screen's own theme.py or design_system.py -- it only rendered
+    styled by accident, borrowing Decision Center's private CSS when
+    composed alongside it."""
+    demo = RiskIntelligenceUI().build()
+
+    combined = _combined_html(demo)
+    assert '<h2 class="aara-page-title">Risk Intelligence</h2>' in combined
+    assert "aara-eyebrow" not in combined
+
+
+def test_theme_mirrors_the_shared_page_title_treatment_for_standalone_render():
+    assert "letter-spacing: 0.04em;" in CSS
+    assert "text-transform: uppercase;" in CSS
 
 
 def test_state_badge_html_reflects_every_state():
@@ -374,7 +393,7 @@ def test_page_header_title_carries_the_aara_eyebrow_class():
         if isinstance(block, gr.HTML) and isinstance(getattr(block, "value", None), str)
     ]
     combined = "\n".join(html_values)
-    assert '<h2 class="aara-eyebrow">Risk Intelligence</h2>' in combined
+    assert '<h2 class="aara-page-title">Risk Intelligence</h2>' in combined
 
 
 def test_gradio_view_module_defines_no_illustrative_data_disclosure():
@@ -786,7 +805,9 @@ def test_unavailable_state_names_the_auth_failure_reason_when_health_says_so():
     combined = _combined_html(demo)
 
     assert "authentication failed" in combined
-    assert "aara-integration-status" in combined
+    # a real non-HEALTHY status is a provider failure, not an honest
+    # absence -- render_unavailable() renders it with the error class.
+    assert "aara-error-message" in combined
     for fabricated in (
         "ri-state-badge", "state-normal", "state-warning", "state-defensive",
         "ri-current-state", "ri-sizing-metrics", "ri-history-detail-card",
@@ -1087,6 +1108,75 @@ def test_concentration_section_label_present():
 
     combined = "\n".join(_html_values(demo))
     assert "Concentration" in combined
+
+
+# --- Impeccable critique finding #1: exceeds-stated-maximum note ---------
+
+
+def test_concentration_holding_above_max_position_size_shows_the_factual_note():
+    holdings = _concentration_holdings(("GOOGL", 21.8))
+    screen = RiskScreen(concentration_holdings=holdings)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "ri-concentration-limit-note" in combined
+    assert "Position exceeds the stated maximum" in combined
+    assert "21.8%" in combined
+    assert "20.0%" in combined
+
+
+def test_concentration_holding_below_max_position_size_shows_no_note():
+    holdings = _concentration_holdings(("AAPL", 19.9))
+    screen = RiskScreen(concentration_holdings=holdings)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "ri-concentration-limit-note" not in combined
+    assert "Position exceeds the stated maximum" not in combined
+
+
+def test_concentration_holding_equal_to_max_position_size_shows_no_note():
+    """Equality is not "exceeds" -- a position sitting exactly at the
+    stated maximum must render exactly like every other normal-state
+    holding, with no note."""
+    holdings = _concentration_holdings(("AAPL", 20.0))
+    screen = RiskScreen(concentration_holdings=holdings)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    combined = "\n".join(_html_values(demo))
+    assert "ri-concentration-limit-note" not in combined
+
+
+def test_concentration_mixed_holdings_only_flags_the_one_that_exceeds():
+    """The normal-state presentation for every other holding is unchanged
+    -- only the row that actually exceeds gets the extra note."""
+    holdings = _concentration_holdings(("GOOGL", 21.8), ("AAPL", 15.0))
+    screen = RiskScreen(concentration_holdings=holdings)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    combined = "\n".join(_html_values(demo))
+    assert combined.count("ri-concentration-limit-note") == 1
+    assert "GOOGL" in combined
+    assert "AAPL" in combined
+
+
+def test_concentration_limit_note_never_uses_alarmist_wording():
+    """Same guardrail as
+    test_concentration_never_implies_a_risk_violation_or_trading_signal,
+    exercised specifically against a holding that DOES trigger the new
+    note -- the factual note itself must not introduce alarmist framing
+    even though it is now genuinely present in the rendered output."""
+    holdings = _concentration_holdings(("GOOGL", 95.0))
+    screen = RiskScreen(concentration_holdings=holdings)
+    demo = RiskIntelligenceUI(screen=screen).build()
+
+    lowered = "\n".join(_html_values(demo)).lower()
+    assert "ri-concentration-limit-note" in lowered
+    for forbidden in (
+        "alert", "warning:", "exceeds limit", "is a violation", "in breach",
+        "trading signal:", "risk violation detected", "unsafe",
+    ):
+        assert forbidden not in lowered
 
 
 # --- Risk Parameters (static) ---------------------------------------------

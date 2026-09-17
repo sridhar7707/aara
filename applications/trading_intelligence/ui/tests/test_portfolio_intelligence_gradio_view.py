@@ -52,6 +52,7 @@ from applications.trading_intelligence.ui.portfolio_intelligence.screen import (
     ReconciliationRow,
     ReconciliationStatus,
 )
+from applications.trading_intelligence.ui.portfolio_intelligence.theme import CSS
 from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, build_shell_nav_html
 
 
@@ -232,6 +233,22 @@ def test_shell_header_and_nav_blocks_carry_the_expected_elem_classes():
     assert any("aara-shell-nav" in (block.elem_classes or []) for block in html_blocks)
 
 
+def test_page_title_carries_the_shared_eyebrow_treatment():
+    """Impeccable critique finding #4: the page title uses the shared
+    .aara-page-title primitive (design_system.py) instead of a plain
+    mixed-case <h2>, matching the treatment now applied consistently
+    across all six screens."""
+    demo = PortfolioIntelligenceUI().build()
+
+    combined = "\n".join(_html_values(demo))
+    assert '<h2 class="aara-page-title">Portfolio Intelligence</h2>' in combined
+
+
+def test_theme_mirrors_the_shared_page_title_treatment_for_standalone_render():
+    assert "letter-spacing: 0.04em;" in CSS
+    assert "text-transform: uppercase;" in CSS
+
+
 # --- Formatters (called directly, real inputs) ----------------------
 
 
@@ -253,6 +270,58 @@ def test_capital_summary_html_includes_every_metric():
     assert "Total Value" in summary_html
     assert "Realized Profit" in summary_html
     assert "$50.00" in summary_html
+
+
+# --- Impeccable critique finding #5: Realized Profit negative token -----
+
+
+def test_negative_realized_profit_renders_the_negative_token():
+    """Realized Profit is the one capital metric that can meaningfully be
+    negative in this domain -- it gets the product's one restrained
+    --aara-negative-fg token, not a red/green stoplight color. The
+    $-prefixed sign in the text (e.g. "$-50.00") is unchanged and remains
+    the primary signal; this is reinforcement, not the only cue."""
+    capital = _make_capital(realized_profit=-50.0)
+
+    summary_html = PortfolioIntelligenceUI._format_capital_summary_html(capital)
+
+    assert "$-50.00" in summary_html
+    assert "pi-metric-value--negative" in summary_html
+
+
+def test_positive_realized_profit_does_not_render_the_negative_token():
+    capital = _make_capital(realized_profit=50.0)
+
+    summary_html = PortfolioIntelligenceUI._format_capital_summary_html(capital)
+
+    assert "pi-metric-value--negative" not in summary_html
+
+
+def test_zero_realized_profit_does_not_render_the_negative_token():
+    """Zero is not negative -- it must retain the same plain treatment as
+    a positive value."""
+    capital = _make_capital(realized_profit=0.0)
+
+    summary_html = PortfolioIntelligenceUI._format_capital_summary_html(capital)
+
+    assert "pi-metric-value--negative" not in summary_html
+
+
+def test_only_realized_profit_can_carry_the_negative_token():
+    """The other six capital metrics never take the negative modifier,
+    even when this fixture's own values happen to be small -- only
+    Realized Profit is a signed P&L figure in this domain."""
+    capital = _make_capital(realized_profit=-50.0)
+
+    summary_html = PortfolioIntelligenceUI._format_capital_summary_html(capital)
+
+    assert summary_html.count("pi-metric-value--negative") == 1
+
+
+def test_theme_defines_the_negative_metric_token_and_reuses_aara_negative_fg():
+    assert "--pi-color-negative: var(--aara-negative-fg, #7A2E2E);" in CSS
+    assert ".pi-metric-value--negative {" in CSS
+    assert "color: var(--pi-color-negative);" in CSS
 
 
 def test_allocation_html_reflects_cash_and_invested_weights():
