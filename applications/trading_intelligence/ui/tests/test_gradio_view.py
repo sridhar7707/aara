@@ -1656,6 +1656,30 @@ def test_calibration_context_enough_data_renders_band_and_real_performance():
     assert "not enough data" not in out.lower()
 
 
+def test_calibration_context_enough_data_carries_the_same_caveat_performance_learning_uses():
+    """Hardening (combined Sprint 5+6+7): Performance & Learning attaches
+    a "historical tally only... no statistical significance" caveat to
+    this identical win-rate statistic (CALIBRATION_DISCLAIMER) -- Decision
+    Center must show the same caveat whenever it shows the same real
+    percentage, not just the bare number."""
+    context = _make_band_context(label="0.60-0.65", wins=6, losses=4, total_outcomes=30)
+
+    out = DecisionCenterUI._format_calibration_context_html(context, ReadStatus.OK)
+
+    assert "no statistical significance" in out.lower()
+
+
+def test_calibration_context_below_floor_does_not_carry_the_disclaimer():
+    """No percentage is shown below the floor, so there is nothing for
+    the caveat to qualify -- matches Performance & Learning's own table,
+    which likewise omits its disclaimer whenever no band table renders."""
+    context = _make_band_context(total_outcomes=CALIBRATION_MIN_OUTCOMES - 1)
+
+    out = DecisionCenterUI._format_calibration_context_html(context, ReadStatus.OK)
+
+    assert "statistical significance" not in out.lower()
+
+
 def test_calibration_context_below_floor_renders_honest_not_enough_data():
     context = _make_band_context(total_outcomes=CALIBRATION_MIN_OUTCOMES - 1)
 
@@ -1981,6 +2005,22 @@ def test_news_cache_diff_error_state_uses_the_existing_error_convention():
     assert 'class="aara-error-message"' in out
 
 
+def test_news_cache_diff_unavailable_message_does_not_single_out_today():
+    """Hardening (combined Sprint 5+6+7): this state fires when EITHER the
+    decision date's or today's cached snapshot is missing -- for an older
+    decision it is typically the decision-date side that has aged out of
+    the cache, permanently, not "today" (which the prior wording named
+    specifically, implying the gap would resolve by simply waiting)."""
+    area = DecisionDetailArea(
+        decision=_make_view(), news_cache_diff=None, news_cache_diff_status=ReadStatus.OK,
+    )
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "today" not in out.lower()
+    assert "yet" not in out.lower()
+
+
 def test_render_detail_includes_news_cache_diff_as_the_new_final_element():
     diff = _make_diff(is_identical=True)
     controller = _FakeController(
@@ -2067,6 +2107,20 @@ def test_recommendation_evidence_unavailable_state_is_honest_not_an_error():
     out = DecisionCenterUI._format_news_cache_diff_html(area)
 
     assert "aara-error-message" not in out
+
+
+def test_recommendation_diff_unavailable_message_does_not_single_out_today():
+    """Same wording fix as the news-cache diff counterpart -- see
+    test_news_cache_diff_unavailable_message_does_not_single_out_today."""
+    area = DecisionDetailArea(
+        decision=_make_view(), recommendation_diff=None,
+        recommendation_diff_status=ReadStatus.OK,
+    )
+
+    out = DecisionCenterUI._format_news_cache_diff_html(area)
+
+    assert "today" not in out.lower()
+    assert "yet" not in out.lower()
 
 
 def test_recommendation_evidence_error_state_uses_the_existing_error_convention():

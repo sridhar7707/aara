@@ -792,6 +792,15 @@ footer { display: none !important; }
   font-size: 12px;
   color: var(--color-text-secondary);
 }
+/* Hardening (combined Sprint 5+6+7): same italic/muted treatment as
+   Performance & Learning's own .pl-cal-disclaimer for this identical
+   caveat -- no new typography, no new literal. */
+.aara-calibration-context-disclaimer {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--color-text-secondary);
+  margin-top: 2px;
+}
 
 /* ADR-070 Sprint 3 (§9) -- per-record evidence polarity. One small, muted
    supporting label inside an evidence record's card, carrying only that

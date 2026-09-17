@@ -820,6 +820,112 @@ def test_load_decision_detail_does_not_query_recommendation_diff_for_a_missing_d
     assert detail_area.recommendation_diff_status is ReadStatus.OK
 
 
+class _RecordingNewsCacheDiffSource:
+    """Records the (symbol, decision_timestamp) it was called with, so the
+    caller can assert the CORRECT anchor timestamp was used."""
+
+    def __init__(self):
+        self.calls = []
+
+    def get_diff(self, symbol, decision_timestamp):
+        self.calls.append((symbol, decision_timestamp))
+        return None
+
+
+def test_load_decision_detail_uses_the_decision_created_timestamp_for_news_cache_diff():
+    """The DECISION_CREATED audit entry's own recorded created_at is the
+    correct decision_timestamp anchor for Evidence Since Decision (see
+    trades_db_news_cache_diff_source.py's get_diff() docstring: "decision_
+    timestamp's own date") -- NOT the contract's updated_at, which reflects
+    the decision's latest status/governance transition, a different value
+    with a different meaning (screen.py's decision_created_display makes
+    this same distinction for the display-string version of this same
+    timestamp)."""
+    created_at = datetime.datetime(2026, 8, 1, 9, 0, 0)
+    updated_at = datetime.datetime(2026, 8, 4, 12, 0, 0)  # a later status change
+    contract = _make_contract(updated_at=updated_at)
+    audit_entry = _make_audit_entry(created_at=created_at)
+    diff_source = _RecordingNewsCacheDiffSource()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource({"dec-001": [audit_entry]}),
+        news_cache_diff_source=diff_source,
+    )
+
+    controller.load_decision_detail("dec-001")
+
+    assert diff_source.calls == [("AAPL", created_at)]
+
+
+def test_load_decision_detail_falls_back_to_updated_at_for_news_cache_diff_when_no_decision_created_entry():
+    """Preserves prior behavior when the audit trail carries no DECISION_
+    CREATED entry (e.g. a read error, or a timeline that genuinely lacks
+    one) -- never leaves the diff source with no anchor at all."""
+    updated_at = datetime.datetime(2026, 8, 4, 12, 0, 0)
+    contract = _make_contract(updated_at=updated_at)
+    diff_source = _RecordingNewsCacheDiffSource()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),  # no audit entries at all
+        news_cache_diff_source=diff_source,
+    )
+
+    controller.load_decision_detail("dec-001")
+
+    assert diff_source.calls == [("AAPL", updated_at)]
+
+
+class _RecordingRecommendationDiffSource:
+    """Recommendation-diff counterpart of _RecordingNewsCacheDiffSource."""
+
+    def __init__(self):
+        self.calls = []
+
+    def get_diff(self, symbol, decision_timestamp):
+        self.calls.append((symbol, decision_timestamp))
+        return None
+
+
+def test_load_decision_detail_uses_the_decision_created_timestamp_for_recommendation_diff():
+    created_at = datetime.datetime(2026, 8, 1, 9, 0, 0)
+    updated_at = datetime.datetime(2026, 8, 4, 12, 0, 0)
+    contract = _make_contract(updated_at=updated_at)
+    audit_entry = _make_audit_entry(created_at=created_at)
+    diff_source = _RecordingRecommendationDiffSource()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource({"dec-001": [audit_entry]}),
+        recommendation_diff_source=diff_source,
+    )
+
+    controller.load_decision_detail("dec-001")
+
+    assert diff_source.calls == [("AAPL", created_at)]
+
+
+def test_load_decision_detail_falls_back_to_updated_at_for_recommendation_diff_when_no_decision_created_entry():
+    updated_at = datetime.datetime(2026, 8, 4, 12, 0, 0)
+    contract = _make_contract(updated_at=updated_at)
+    diff_source = _RecordingRecommendationDiffSource()
+    controller = DecisionCenterController(
+        DecisionQueryService(_InMemoryDecisionSource({"dec-001": contract})),
+        DecisionEvidenceQueryService(_InMemoryEvidenceSource()),
+        DecisionGovernanceQueryService(_InMemoryGovernanceSource()),
+        _InMemoryAuditSource(),
+        recommendation_diff_source=diff_source,
+    )
+
+    controller.load_decision_detail("dec-001")
+
+    assert diff_source.calls == [("AAPL", updated_at)]
+
+
 class _InMemoryEarningsSource:
     """Fake earnings collaborator -- duck-typed like
     _InMemoryRecommendationDiffSource above (no services/ wrapper, no

@@ -704,7 +704,15 @@ _AUDIT_ERROR_MESSAGE = "Audit trail is temporarily unavailable."
 # materiality/severity/urgency/invalidation/alert/re-evaluation/confidence/
 # thesis/counterfactual meaning is ever attached to any of these strings.
 _NEWS_CACHE_DIFF_NO_CHANGE_MESSAGE = "No change in cached headlines since this decision"
-_NEWS_CACHE_DIFF_UNAVAILABLE_MESSAGE = "No cached headlines available yet for today."
+# Hardening (combined Sprint 5+6+7): this state fires whenever EITHER
+# snapshot is missing -- the decision date's own cache (which can age out
+# for an older decision) or today's (see trades_db_news_cache_diff_
+# source.py's get_diff(): None when either side is a genuine "nothing
+# cached for that date" result). The prior wording ("...yet for today")
+# named only the today side and implied the gap will resolve itself by
+# waiting -- misleading whenever it is actually the older, decision-date
+# side that is permanently missing. Kept source-agnostic instead.
+_NEWS_CACHE_DIFF_UNAVAILABLE_MESSAGE = "No cached headlines available for this comparison."
 _NEWS_CACHE_DIFF_ERROR_MESSAGE = "Evidence since decision is temporarily unavailable."
 _NEWS_CACHE_DIFF_NO_CHANGE_HTML = (
     f'<div class="aara-empty-message aara-empty">{html.escape(_NEWS_CACHE_DIFF_NO_CHANGE_MESSAGE)}</div>'
@@ -718,7 +726,9 @@ _NEWS_CACHE_DIFF_UNAVAILABLE_HTML = (
 # same discipline as the news-cache facts above. Rendered into the SAME
 # "Evidence Since Decision" HTML string (see _format_news_cache_diff_html)
 # -- no new section, no new _DetailValues slot.
-_RECOMMENDATION_DIFF_UNAVAILABLE_MESSAGE = "No recommendation history available yet for today."
+# Hardening (combined Sprint 5+6+7): same source-agnostic wording fix as
+# _NEWS_CACHE_DIFF_UNAVAILABLE_MESSAGE above, for the identical reason.
+_RECOMMENDATION_DIFF_UNAVAILABLE_MESSAGE = "No recommendation history available for this comparison."
 _RECOMMENDATION_DIFF_ERROR_MESSAGE = "Recommendation history is temporarily unavailable."
 _RECOMMENDATION_DIFF_UNAVAILABLE_HTML = (
     f'<div class="aara-empty-message aara-empty">{html.escape(_RECOMMENDATION_DIFF_UNAVAILABLE_MESSAGE)}</div>'
@@ -768,6 +778,21 @@ _CALIBRATION_CONTEXT_SECTION_LABEL = "Historical Confidence Band"
 _CALIBRATION_CONTEXT_ERROR_MESSAGE = "Historical confidence band information is temporarily unavailable."
 _CALIBRATION_CONTEXT_UNAVAILABLE_MESSAGE = "No historical confidence band applies to this decision."
 _CALIBRATION_NOT_ENOUGH_DATA_MESSAGE = "Historical performance: not enough data yet."
+# Hardening (combined Sprint 5+6+7): the same caveat sentence Performance
+# & Learning already attaches to this identical statistic
+# (CALIBRATION_DISCLAIMER, ui/performance_learning/screen.py) -- its final
+# sentence only (the preceding sentence describes P&L's own four-band
+# table layout, not applicable to this screen's single-band sentence), so
+# this package still does not cross-import another screen package.
+# Rendered only alongside the real win/loss/win-rate figure below (never
+# in the below-floor/none/error branches, which show no percentage to
+# caveat), so a reader never sees a win-rate percentage on this screen
+# without the same "no statistical significance" caveat Performance &
+# Learning's own table carries for the exact same number.
+_CALIBRATION_CONTEXT_DISCLAIMER = (
+    "A historical tally only: it does not measure how accurate the scores "
+    "are and implies no statistical significance."
+)
 
 # MVP Loading States slice: _empty_detail()'s prior "" for why/evidence/
 # governance/approval/audit rendered as literal blank space under each
@@ -2436,12 +2461,18 @@ class DecisionCenterUI:
                 f"Historical performance in this band: {band.wins} wins, "
                 f"{band.losses} losses{rate} across {band.n} outcomes."
             )
+            disclaimer_html = (
+                '<div class="aara-calibration-context-disclaimer">'
+                f'{html.escape(_CALIBRATION_CONTEXT_DISCLAIMER)}</div>'
+            )
         else:
             performance_sentence = _CALIBRATION_NOT_ENOUGH_DATA_MESSAGE
+            disclaimer_html = ""
         return (
             f'<div class="aara-calibration-context-band">{html.escape(band_sentence)}</div>'
             f'<div class="aara-calibration-context-performance">'
             f'{html.escape(performance_sentence)}</div>'
+            f"{disclaimer_html}"
         )
 
     @staticmethod

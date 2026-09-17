@@ -172,10 +172,32 @@ class DecisionCenterController:
             audit_trail = ()
             audit_trail_status = ReadStatus.ERROR
 
+        # Hardening (combined Sprint 5+6+7): Evidence/Recommendation Since
+        # Decision must anchor on the DECISION'S OWN creation time, not
+        # view.updated_at -- updated_at reflects the decision's LATEST
+        # status/governance transition, a different value with a different
+        # meaning (screen.py's decision_created_display docstring already
+        # makes this exact distinction for the display-string version of
+        # this same timestamp; trades_db_news_cache_diff_source.py's own
+        # get_diff() docstring names its parameter "decision_timestamp").
+        # Passing updated_at silently narrowed the "since decision" window
+        # for any decision whose status changed after creation (e.g. a
+        # later approval), excluding real evidence changes that happened
+        # between the true decision date and that later update. Falls back
+        # to view.updated_at only when the audit trail carries no
+        # DECISION_CREATED entry (a read error, or a genuinely absent
+        # entry), preserving the prior behavior in that edge case rather
+        # than passing no anchor at all.
+        decision_timestamp = view.updated_at
+        for entry in audit_trail:
+            if entry.event_type == "DECISION_CREATED":
+                decision_timestamp = entry.created_at
+                break
+
         if self._news_cache_diff_source is not None:
             try:
                 news_cache_diff = self._news_cache_diff_source.get_diff(
-                    view.symbol, view.updated_at
+                    view.symbol, decision_timestamp
                 )
                 news_cache_diff_status = ReadStatus.OK
             except TradingIntelligenceReadError:
@@ -188,7 +210,7 @@ class DecisionCenterController:
         if self._recommendation_diff_source is not None:
             try:
                 recommendation_diff = self._recommendation_diff_source.get_diff(
-                    view.symbol, view.updated_at
+                    view.symbol, decision_timestamp
                 )
                 recommendation_diff_status = ReadStatus.OK
             except TradingIntelligenceReadError:
