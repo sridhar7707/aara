@@ -30,15 +30,14 @@ CSS = """
   background: var(--st-color-background) !important;
 }
 
-/* Impeccable critique finding #4: mirrors design_system.py's shared
-   .aara-page-title primitive (identical values) so a standalone
-   SettingsUI().build() (no design_system.py loaded) still renders the
-   same uppercase/tracked page title as the composed app. */
+/* Mirrors design_system.py's shared .aara-page-title primitive
+   (identical values) so a standalone SettingsUI().build() (no
+   design_system.py loaded) still renders the same page title as the
+   composed app. Normal-case, not uppercase/tracked (visual-quality pass,
+   2026-09-17) -- see that primitive's own comment for why. */
 .st-page-header h2 {
   font-size: 20px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--st-color-navy);
   margin: 0;
 }
@@ -100,6 +99,20 @@ CSS = """
 .st-preference-control input[type="radio"]:focus-visible {
   outline: 2px solid var(--st-color-navy) !important;
   outline-offset: 2px;
+}
+
+/* Visual-quality pass (2026-09-17): this control's own wrapper (a
+   Gradio "block") carries Gradio's raw default card chrome -- its own
+   border-radius and box-shadow, not this app's standard 8px/subtle-
+   shadow values every other screen's own cards were just normalized to.
+   Live-verified: noticeably heavier default shadow than the rest of the
+   app. Border/background/padding are left as Gradio's own defaults
+   (already a plain white surface + light border, close enough not to
+   risk disturbing the block's internal layout); only elevation is
+   corrected to match. */
+.st-preference-control {
+  border-radius: 8px !important;
+  box-shadow: 0 1px 3px rgba(11, 31, 58, 0.06) !important;
 }
 
 /* Impeccable critique finding #3: these two preference controls are

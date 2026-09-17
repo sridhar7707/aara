@@ -42,21 +42,20 @@ CSS = """
   background: var(--ri-color-background) !important;
 }
 
-/* Impeccable critique finding #4: mirrors design_system.py's shared
-   .aara-page-title primitive (identical values) so a standalone
-   RiskIntelligenceUI().build() (no design_system.py loaded) still
-   renders the same uppercase/tracked page title as the composed app.
-   Before this task, gradio_view.py's markup carried class="aara-eyebrow"
-   -- a name that was never actually defined here or in design_system.py,
-   so it only appeared styled by accident, borrowing Decision Center's
-   own private .aara-eyebrow rule when this screen happened to be
-   composed alongside it; standalone, the title rendered without the
-   uppercase/tracking this rule now supplies directly. */
+/* Mirrors design_system.py's shared .aara-page-title primitive
+   (identical values) so a standalone RiskIntelligenceUI().build() (no
+   design_system.py loaded) still renders the same page title as the
+   composed app. Before this file had its own rule at all,
+   gradio_view.py's markup carried class="aara-eyebrow" -- a name that
+   was never actually defined here or in design_system.py, so it only
+   appeared styled by accident, borrowing Decision Center's own private
+   .aara-eyebrow rule when this screen happened to be composed alongside
+   it. Normal-case, not uppercase/tracked (visual-quality pass,
+   2026-09-17) -- see design_system.py's .aara-page-title comment for
+   why. */
 .ri-page-header h2 {
   font-size: 20px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--ri-color-navy);
   margin: 0;
 }
@@ -96,6 +95,7 @@ CSS = """
   background: var(--ri-color-surface);
   border: 1px solid var(--ri-color-border);
   border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(11, 31, 58, 0.06);
 }
 
 .ri-state-badge {

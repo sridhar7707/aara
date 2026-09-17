@@ -145,10 +145,15 @@ def test_page_title_uses_the_reserved_page_title_type_token():
     assert "font-size: var(--aara-type-page-title);" in block
 
 
-def test_page_title_is_uppercase_and_tracked_not_plain_mixed_case():
+def test_page_title_is_normal_case_not_uppercase_or_tracked():
+    """Visual-quality pass (2026-09-17): reverses the original all-caps/
+    tracked treatment -- a full six-screen audit found it read closer to
+    a generic dashboard than this product's calm tone, especially
+    stacked under the equally-uppercase shell nav row. Bold navy at 20px
+    already carries enough weight without shouting."""
     block = DESIGN_SYSTEM_CSS.split(".aara-page-title {")[1].split("}")[0]
-    assert "text-transform: uppercase;" in block
-    assert "letter-spacing: 0.04em;" in block
+    assert "text-transform" not in block
+    assert "letter-spacing: normal;" in block
     assert "color: var(--aara-navy);" in block
 
 

@@ -184,8 +184,12 @@ def test_page_title_carries_the_shared_eyebrow_treatment():
 
 
 def test_theme_mirrors_the_shared_page_title_treatment_for_standalone_render():
-    assert "letter-spacing: 0.04em;" in CSS
-    assert "text-transform: uppercase;" in CSS
+    """Visual-quality pass (2026-09-17): normal-case, not uppercase/
+    tracked -- matches design_system.py's .aara-page-title primitive."""
+    block = CSS.split(".ri-page-header h2 {")[1].split("}")[0]
+    assert "text-transform" not in block
+    assert "font-weight: 700;" in block
+    assert "color: var(--ri-color-navy);" in block
 
 
 def test_state_badge_html_reflects_every_state():

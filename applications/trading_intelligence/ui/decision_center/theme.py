@@ -226,6 +226,15 @@ footer { display: none !important; }
   display: flex;
   gap: var(--space-lg);
 }
+/* Visual-quality pass (2026-09-17): the inactive-tab state never set its
+   own `color` -- only `.nav-item.active` did, three rules below. Live-
+   verified (getComputedStyle) this left the five inactive labels
+   inheriting a low-contrast default rather than any color this
+   stylesheet actually chose, which is why they read as barely legible
+   against the white nav bar. --color-text-secondary (already the app's
+   one muted-label color, ~5.7:1 on white, comfortably above the 4.5:1
+   text floor) is now explicit here, distinct from the active item's
+   solid navy + gold underline. */
 .aara-shell-nav-list .nav-item {
   display: inline-block;
   padding: var(--space-sm) 0;
@@ -233,6 +242,7 @@ footer { display: none !important; }
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+  color: var(--color-text-secondary);
   border-bottom: 2px solid transparent;
 }
 .aara-shell-nav-list .nav-item.active {
@@ -263,10 +273,24 @@ footer { display: none !important; }
   color: var(--color-text-secondary);
   margin: 0;
 }
+/* Visual-quality pass (2026-09-17): overrides the base .aara-eyebrow's
+   uppercase/tracking for this one page-level H1 usage only -- a full
+   six-screen audit found all-caps page titles read closer to a generic
+   dashboard than this product's calm, analytical tone, especially
+   stacked directly under the equally-uppercase shell nav row.
+   design_system.py's shared .aara-page-title primitive (the other five
+   screens' own page titles) was normalized the same way; this keeps
+   Decision Center's H1 visually consistent with them without touching
+   the base .aara-eyebrow class itself, so the smaller section/group
+   micro-labels below (.aara-section-label, .aara-section-label--group)
+   that also use .aara-eyebrow keep their existing tracked-caps
+   treatment -- a restrained pattern at that size, not the thing the
+   audit flagged. */
 .aara-page-header h1.aara-eyebrow {
   font-size: 22px;
   color: var(--color-navy-primary);
-  letter-spacing: 0.04em;
+  letter-spacing: normal;
+  text-transform: none;
 }
 .aara-page-header .aara-page-subtitle {
   font-size: 14px;

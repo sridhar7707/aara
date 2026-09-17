@@ -30,15 +30,14 @@ CSS = """
   background: var(--pi-color-background) !important;
 }
 
-/* Impeccable critique finding #4: mirrors design_system.py's shared
-   .aara-page-title primitive (identical values) so a standalone
-   PortfolioIntelligenceUI().build() (no design_system.py loaded) still
-   renders the same uppercase/tracked page title as the composed app. */
+/* Mirrors design_system.py's shared .aara-page-title primitive
+   (identical values) so a standalone PortfolioIntelligenceUI().build()
+   (no design_system.py loaded) still renders the same page title as the
+   composed app. Normal-case, not uppercase/tracked (visual-quality pass,
+   2026-09-17) -- see that primitive's own comment for why. */
 .pi-page-header h2 {
   font-size: 20px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--pi-color-navy);
   margin: 0;
 }
@@ -92,6 +91,7 @@ CSS = """
   background: var(--pi-color-surface);
   border: 1px solid var(--pi-color-border);
   border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(11, 31, 58, 0.06);
 }
 .pi-metric {
   display: flex;

@@ -24,15 +24,14 @@ CSS = """
   background: var(--mb-color-background) !important;
 }
 
-/* Impeccable critique finding #4: mirrors design_system.py's shared
-   .aara-page-title primitive (identical values) so a standalone
-   MorningBriefUI().build() (no design_system.py loaded) still renders
-   the same uppercase/tracked page title as the composed app. */
+/* Mirrors design_system.py's shared .aara-page-title primitive
+   (identical values) so a standalone MorningBriefUI().build() (no
+   design_system.py loaded) still renders the same page title as the
+   composed app. Normal-case, not uppercase/tracked (visual-quality pass,
+   2026-09-17) -- see that primitive's own comment for why. */
 .mb-page-header h2 {
   font-size: 20px;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--mb-color-navy);
   margin: 0;
 }
@@ -86,25 +85,40 @@ CSS = """
   margin-bottom: 4px;
 }
 
-/* Sprint 8B (Command Center): KPI card strip, top of page. */
+/* Sprint 8B (Command Center): KPI strip, top of page.
+   Visual-quality pass (2026-09-17): previously six individually-boxed
+   .mb-kpi-card tiles (own border + 6px radius + white surface each) --
+   live-verified as the single biggest contributor to this screen's
+   "excessively card-heavy" read (18 separate bordered boxes counted on
+   one page in the pre-pass audit). Restructured to the SAME flat-row-
+   in-one-card pattern Portfolio Intelligence's own Capital Summary
+   already uses (.pi-capital-summary/.pi-metric) -- one bordered card
+   (standard 8px radius + the shared subtle elevation shadow, matching
+   design_system.py's .aara-card values) holding six plain label/value
+   pairs, no per-metric border. Same real values, same six facts -- only
+   the container changed. */
 .mb-kpi-row {
   display: block;
 }
 .mb-kpi-cards {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 20px;
   margin: 4px 0 8px 0;
-}
-.mb-kpi-card {
-  flex: 1 1 140px;
+  padding: 12px 16px;
   background: var(--mb-color-surface);
   border: 1px solid var(--mb-color-border);
-  border-radius: 6px;
-  padding: 10px 14px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(11, 31, 58, 0.06);
+}
+.mb-kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
 }
 .mb-kpi-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -114,7 +128,6 @@ CSS = """
   font-size: 18px;
   font-weight: 700;
   color: var(--mb-color-navy);
-  margin-top: 2px;
 }
 /* Impeccable critique finding #5: Today's Change is the one KPI card
    value that is a signed delta -- a real loss gets the product's one
@@ -141,24 +154,28 @@ CSS = """
   margin: 4px 0 8px 0;
 }
 
-/* Sprint 8B: condensed Morning Brief card grid -- the four existing
-   frozen-IA sections plus Decision Activity / Current Risk State, wrapped
-   in cards inside one row rather than a long vertical stack. Content
-   styling within each card is fully reused (.mb-section-label,
-   .mb-available-summary, .mb-unavailable-message, the shared integration-
-   health renderer) -- these rules only control the card container. */
+/* Sprint 8B: condensed Morning Brief grid -- the four existing frozen-IA
+   sections plus Decision Activity / Current Risk State, laid out in one
+   row rather than a long vertical stack. Content styling within each
+   cell is fully reused (.mb-section-label, .mb-available-summary,
+   .mb-unavailable-message, the shared integration-health renderer) --
+   these rules only control the cell's own spacing.
+
+   Visual-quality pass (2026-09-17): .mb-brief-card previously wrapped
+   each cell in its OWN white bordered box around content that already
+   carries its own gold-left-border accent (.mb-available-summary) --
+   a double-boxed, nested-card look and, together with the KPI strip
+   above, the main source of this screen's "excessively card-heavy"
+   read. Six plain grid cells now, matching how Risk Intelligence /
+   Performance & Learning / Decision Center already present the same
+   kind of disclosure-style content directly on the page background, no
+   card. The gap below is widened from 10px to 24px (was masking the
+   loss of the cards' own visual separation) so the six sections still
+   read as distinct grouped facts by whitespace and the section label
+   alone, not by a border. */
 .mb-brief-grid {
-  gap: 10px;
+  gap: 24px;
   margin: 4px 0;
-}
-.mb-brief-card {
-  background: var(--mb-color-surface);
-  border: 1px solid var(--mb-color-border);
-  border-radius: 6px;
-  padding: 10px 14px;
-}
-.mb-brief-card .mb-section-label {
-  margin-top: 0;
 }
 
 /* Sprint 8B: drill-down navigation cards, bottom of page. */
@@ -169,7 +186,8 @@ CSS = """
 .mb-drilldown-card {
   background: var(--mb-color-surface);
   border: 1px solid var(--mb-color-border);
-  border-radius: 6px;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(11, 31, 58, 0.06);
   padding: 12px 14px;
   transition: border-color 0.15s ease;
 }
@@ -188,5 +206,19 @@ CSS = """
   font-size: 12px;
   color: var(--mb-color-text-secondary);
   margin-top: 4px;
+}
+
+/* Visual-quality pass (2026-09-17): live-verified at a 390px mobile
+   viewport -- unlike .mb-brief-grid above (whose gr.Column children
+   already stack via Gradio's own default responsive behavior), this
+   row's four gr.HTML cards are NOT wrapped in gr.Column, so Gradio's
+   base stacking rule never applies to them; they were compressed into
+   one unreadable 4-across row with badly truncated text. Same fix
+   pattern already used by ui/decision_center/theme.py's own
+   @media (max-width: 1100px) rule for its two-column layout: force a
+   column stack and full width below a phone-sized breakpoint. */
+@media (max-width: 640px) {
+  .mb-drilldown-row { flex-direction: column !important; }
+  .mb-drilldown-card { width: 100% !important; }
 }
 """

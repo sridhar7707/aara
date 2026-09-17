@@ -35,9 +35,11 @@ Design-system migration status:
   screen's markup yet. Batch B3 applies them -- except `.aara-page-title`
   (Impeccable critique finding #4), now wired into Morning Brief,
   Portfolio Intelligence, Risk Intelligence, Performance & Learning, and
-  Settings; Decision Center keeps its own private, already-audited
-  `.aara-eyebrow` page-title treatment unchanged (see `.aara-page-title`'s
-  own comment below for why the two are deliberately separate classes).
+  Settings; Decision Center keeps its own private `.aara-eyebrow` class
+  (see `.aara-page-title`'s own comment below for why the two are
+  deliberately separate classes), narrowly updated in its own file to
+  match this primitive's normal-case page-title treatment (visual-quality
+  pass, 2026-09-17) without otherwise touching Decision Center's CSS.
 
 Typeface decision (audit finding D-02)
 --------------------------------------
@@ -236,23 +238,31 @@ DESIGN_SYSTEM_CSS = """
    primitive's existing tradeoff). Deliberately NOT named .aara-eyebrow:
    Decision Center's own theme.py already privately defines a full
    three-tier .aara-eyebrow system (page h1 / section h2-h3 / group h2)
-   with its own tuned size (22px) and weight (600) from its V2-V4 audit
-   passes -- reusing that exact class name here would let the composed
-   app's stylesheet merge order silently decide which definition wins,
-   the same collision this product already avoided once (see
+   with its own tuned size and weight from its V2-V4 audit passes --
+   reusing that exact class name here would let the composed app's
+   stylesheet merge order silently decide which definition wins, the same
+   collision this product already avoided once (see
    integration_health_view.py's aara-error-message vs. Decision Center's
-   own aara-empty-message). This primitive is visually convergent with
-   Decision Center's eyebrow (same uppercase/tracked/navy language) by
-   design, without touching Decision Center's already-audited CSS at
-   all. font-weight stays 700 (not Decision Center's 600) and font-size
-   stays the token's 20px (not Decision Center's 22px) -- both already
-   match what five of these six screens' own page titles used before
-   this task; only the missing uppercase/tracking was added. */
+   own aara-empty-message). font-weight stays 700 and font-size stays the
+   token's 20px -- both already match what five of these six screens' own
+   page titles used before this task.
+
+   Visual-quality pass (2026-09-17): uppercase + letter-spacing removed.
+   The original version matched Decision Center's own eyebrow treatment
+   for cross-screen consistency (Impeccable critique finding #4), but a
+   full six-screen visual audit afterward found that tracked, all-caps
+   page titles read closer to a generic SaaS-dashboard convention than
+   the calm, analytical-workstation tone this product wants -- especially
+   stacked directly under the equally-uppercase shell nav row, where two
+   consecutive all-caps lines competed for the same "this is important"
+   signal. Normal-case bold navy at this size already carries enough
+   weight on its own. Decision Center's own H1 (still .aara-eyebrow, see
+   that file) was updated to match via a scoped override, not by editing
+   the shared base class -- see its own comment for why. */
 .aara-page-title {
   font-size: var(--aara-type-page-title);
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: normal;
   color: var(--aara-navy);
   margin: 0;
 }
