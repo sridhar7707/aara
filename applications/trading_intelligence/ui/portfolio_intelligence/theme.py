@@ -294,6 +294,24 @@ CSS = """
   margin: 4px 0;
 }
 
+/* Sprint 2: Allocation by Holding chart card. Card border/background/
+   padding/shadow come from the shared .aara-card primitive (ui/design_
+   system.py, only present when the composed app's DESIGN_SYSTEM_CSS is
+   loaded -- same standalone-vs-composed tradeoff ui/performance_learning/
+   theme.py's own Sprint 1 chart cards already document); this rule adds
+   only screen-local vertical spacing around the card. */
+.pi-allocation-chart-card {
+  margin: 4px 0 10px 0;
+}
+
+/* Sprint 3: Unrealized P&L by Holding chart card. Same treatment as
+   .pi-allocation-chart-card above -- border/background/padding/shadow
+   come from the shared .aara-card primitive; this rule adds only
+   screen-local vertical spacing around the card. */
+.pi-pnl-chart-card {
+  margin: 4px 0 10px 0;
+}
+
 /* Visual Dashboard Phase B: allocation-by-holding bars -- same visual
    language as .pi-allocation-bar above (navy fill on a bordered track),
    one row per holding instead of two fixed segments. */

@@ -42,20 +42,29 @@ Renders no "Illustrative Data" banner -- every value shown is real,
 sourced verbatim from Wave 2A; nothing is illustrative.
 """
 import html
-from typing import Any, Callable, List, Mapping, Optional
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import gradio as gr
+import pandas as pd
 
 from applications.trading_intelligence.contracts.candidate_decision_inspection_contract import (
     CandidateDecisionInspection,
     CandidateInspectionResult,
     DecisionInspectionResult,
+    LedgerFunnelSummary,
     candidate_filter_state,
 )
 from applications.trading_intelligence.ui.performance_learning.decision_ledger_funnel_view import (
     build_filter_controls_html,
     build_funnel_panel_html,
     prioritized_candidates,
+)
+from applications.trading_intelligence.ui.chart_view import (
+    WIN_LOSS_COLOR_MAP,
+    chart_header_html,
+    win_loss_long_dataframe,
 )
 from applications.trading_intelligence.ui.integration_health_view import (
     CSS as _INTEGRATION_HEALTH_CSS,
@@ -83,6 +92,28 @@ from applications.trading_intelligence.ui.shell import SHELL_IDENTITY_HTML, buil
 _gr_major = int(gr.__version__.split(".")[0])
 _DATAFRAME_HEIGHT_KWARG = "height" if _gr_major < 5 else "max_height"
 
+# Sprint 1 (visualization convention): both new charts are supporting/
+# secondary visualizations -- neither is this screen's single hero
+# (there isn't one; the calibration and regime charts are two co-equal
+# peers, each summarizing a table that stays the detail record right
+# below it) -- so both use the "secondary chart" height (220px), not the
+# 320px "hero chart" height ui/morning_brief/gradio_view.py's promoted
+# Portfolio Value Trend chart uses.
+_CHART_HEIGHT = 220
+
+_CALIBRATION_CHART_DESCRIPTION = (
+    "Realized win/loss counts for closed BUY decisions, grouped by entry "
+    "ensemble score."
+)
+_REGIME_CHART_DESCRIPTION = (
+    "Realized win/loss counts for closed BUY decisions, grouped by the "
+    "market regime recorded at entry."
+)
+# Content-specific card title -- deliberately distinct from the outer
+# REGIME_OUTCOMES_TITLE section label (.pl-section-label) rendered just
+# above the card, so the two do not repeat the same string back to back.
+_REGIME_CHART_TITLE = "Historical outcome by entry market regime"
+
 _OUTCOME_HEADERS = [
     "Decision", "Entry date", "Status", "Exit date", "Holding days",
     "Realized P&L $", "Realized P&L %", "Exit basis", "Pairing method",
@@ -100,9 +131,20 @@ _OUTCOME_HEADERS = [
     "Decision ID",
 ]
 
+# Impeccable critique finding #5: only the two Realized P&L columns need
+# to render a negative value's colored span (see _pnl_cell above), so
+# only those two columns use gr.Dataframe's "markdown" datatype -- every
+# other column stays "str" (unchanged; still plain, HTML-escaped-by-
+# Gradio text) exactly as before this task. Positional, matching
+# _OUTCOME_HEADERS'/_outcome_row_cells' own fixed column order.
+_OUTCOME_DATATYPES = [
+    "markdown" if header in ("Realized P&L $", "Realized P&L %") else "str"
+    for header in _OUTCOME_HEADERS
+]
+
 _PAGE_HEADER_HTML = (
     '<div class="pl-page-header">'
-    "<h2>Performance & Learning</h2>"
+    '<h2 class="aara-page-title">Performance & Learning</h2>'
     '<div class="pl-subtitle">Outcome history, attribution, and model confidence calibration</div>'
     "</div>"
 )
@@ -121,13 +163,90 @@ _EVIDENCE_MATURITY_UNAVAILABLE_MESSAGE = (
 )
 
 
+# Impeccable critique finding #5: Realized P&L $ / % are the two Outcome
+# History columns holding a signed P&L figure. bootstrap.py's
+# _outcome_history_row already formats them with Python's own f"{x:,.2f}"
+# / f"{x:.2%}" -- a negative value's string always starts with "-" (never
+# "+" for positive, per that formatting), and "" means "not applicable to
+# this outcome's state" (OPEN/PENDING), never a fabricated zero. Detecting
+# "negative" from that already-produced string, rather than re-deriving
+# it from a raw float here, keeps this a presentation-only change: no new
+# read, no recomputation, no touch to bootstrap.py's own P&L figures.
+def _pnl_cell(value: str) -> str:
+    """Wrap a negative Realized P&L $/% value in the shared
+    .pl-negative-value span (see theme.py) -- positive values and the
+    empty "not applicable" string render unchanged. The minus sign in the
+    text is the primary signal either way; this is reinforcement only."""
+    if not value.startswith("-"):
+        return value
+    return f'<span class="pl-negative-value">{html.escape(value)}</span>'
+
+
 def _outcome_row_cells(row: OutcomeHistoryRow) -> List[str]:
     return [
         row.decision, row.entry_date, row.status, row.exit_date, row.holding_days,
-        row.realized_pnl_usd, row.realized_pnl_pct, row.exit_basis,
+        _pnl_cell(row.realized_pnl_usd), _pnl_cell(row.realized_pnl_pct), row.exit_basis,
         row.pairing_method, row.pairing_confidence, row.direction,
         row.decision_reference,
     ]
+
+
+# Sprint 4: Decision pipeline chart -- an overview layer above the existing
+# Decision Ledger Inspection funnel text panel, answering "where do
+# candidates get filtered out before becoming a decision?". This is a
+# decision-pipeline visualization, not a performance/outcome chart, so it
+# does not reuse WIN_LOSS_COLOR_MAP or win_loss_long_dataframe (both scoped
+# to the win/loss-by-category shape calibration/regime use). Single series
+# -> the existing brand navy literal (#0B1F3A), same one WIN_LOSS_COLOR_MAP's
+# own "Win" entry and ui/portfolio_intelligence/gradio_view.py's Allocation
+# chart already reuse -- not a new palette entry.
+_PIPELINE_CHART_TITLE = "Decision pipeline"
+# Deliberately NOT "volume" -- the existing
+# test_executed_marker_does_not_enumerate_synthetic_gates guard (test_
+# performance_learning_decision_ledger_view.py) scans this whole panel for
+# the literal word "volume" (a real recorded gate name) to prove no
+# synthetic per-gate list is ever fabricated; "volume" in a chart
+# description would be a false positive against that unrelated, real
+# safety guard, so "counts" is used instead of "volume" here.
+_PIPELINE_CHART_DESCRIPTION = "Candidate counts at each stage of the decision lifecycle."
+# Authoritative stage order: the SAME narrative sequence build_funnel_panel_
+# html (decision_ledger_funnel_view.py) already presents -- total candidates
+# -> evaluations completed -> decisions recorded -> the executed/held/
+# rejected decision-event breakdown. Never sorted alphabetically or by
+# count.
+_PIPELINE_STAGE_LABELS = ("Candidates", "Evaluated", "Decisions", "Executed", "Held", "Rejected")
+_PIPELINE_SERIES_LABEL = "Stage"
+_PIPELINE_COLOR_MAP = {_PIPELINE_SERIES_LABEL: "#0B1F3A"}
+
+
+def _pipeline_chart_dataframe(summary: Optional[LedgerFunnelSummary]) -> pd.DataFrame:
+    """The Decision pipeline chart's dataframe -- six literal counts taken
+    verbatim from the SAME LedgerFunnelSummary the funnel text panel above
+    already reads (never a second read, never a recomputed figure), in the
+    authoritative _PIPELINE_STAGE_LABELS order. A stage legitimately at
+    zero (e.g. reject_count == 0) is still included at 0 -- never omitted.
+    `summary` is None whenever the caller has already determined the
+    funnel is unavailable (screen.ledger_funnel_available is False,
+    including the "HEALTHY but zero candidates" case) -- an empty,
+    schema-correct DataFrame is returned then, never six fabricated
+    zero-count rows implying real data exists when it does not."""
+    if summary is None:
+        return pd.DataFrame({"stage": [], "count": [], "series": []})
+    counts = (
+        summary.total_candidates,
+        summary.evaluations_completed,
+        summary.decision_events_recorded,
+        summary.executed_count,
+        summary.hold_count,
+        summary.reject_count,
+    )
+    return pd.DataFrame(
+        {
+            "stage": list(_PIPELINE_STAGE_LABELS),
+            "count": list(counts),
+            "series": [_PIPELINE_SERIES_LABEL] * len(counts),
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -386,6 +505,27 @@ def _ledger_body_html(screen: PerformanceLearningScreen) -> str:
     return f'{head}<div class="pl-dli-list">{cards}</div>{boundary}'
 
 
+# P0-2 (Refresh): local primitive, not a cross-package import -- same
+# "duplicate the primitive" convention ui/morning_brief/gradio_view.py's
+# own _DISPLAY_TIMEZONE comment documents: America/Chicago, DST-aware via
+# zoneinfo, "%Y-%m-%d %H:%M %Z" -- the same wall-clock convention every
+# other Trading Intelligence timestamp uses.
+_DISPLAY_TIMEZONE = ZoneInfo("America/Chicago")
+_RENDERED_AT_PREFIX = "Rendered at "
+
+
+def _format_rendered_at_html(moment: datetime) -> str:
+    """Render-clock stamp for the whole screen -- when this render ran,
+    not a claim about any underlying data's freshness. Reuses the
+    existing .pl-dli-freshness class's small/muted-caption styling
+    (theme.py -- not touched by this change) rather than adding a new CSS
+    rule: a pure style-hook reuse (small font-size, secondary text color,
+    caption-appropriate margin), not a claim that this line is part of
+    Decision Ledger Inspection."""
+    stamp = moment.astimezone(_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
+    return f'<div class="pl-dli-freshness">{html.escape(_RENDERED_AT_PREFIX + stamp)}</div>'
+
+
 class PerformanceLearningUI:
     def __init__(
         self,
@@ -416,13 +556,21 @@ class PerformanceLearningUI:
             gr.HTML(build_shell_nav_html("Performance & Learning"), elem_classes=["aara-shell-nav"])
 
             gr.HTML(_PAGE_HEADER_HTML)
+            # P0-2: same shared Refresh control every other screen already
+            # uses -- disable -> _render -> enable, wired identically to
+            # demo.load() below (see ui/portfolio_intelligence/gradio_view.py's
+            # own Refresh chain, mirrored here byte-for-byte).
+            refresh_button = gr.Button(
+                "↻ Refresh", size="sm", scale=0, elem_classes=["aara-refresh-button"],
+            )
+            rendered_at_output = gr.HTML(_format_rendered_at_html(self._now()))
 
             # --- Prominent Sample-Size Banner ---
             # Near the top, before any individual section -- so a reader
             # sees the product's current evidence maturity once, up front,
             # rather than only inside the Model Confidence Calibration
             # section further down.
-            gr.HTML(
+            evidence_maturity_output = gr.HTML(
                 self._format_evidence_maturity_html(screen),
                 elem_classes=["pl-evidence-maturity"],
             )
@@ -432,31 +580,31 @@ class PerformanceLearningUI:
 
             populated = screen.outcome_history_available and not screen.outcome_history_is_empty
 
-            gr.HTML(
+            outcome_summary_output = gr.HTML(
                 self._format_summary_html(screen.summary),
                 visible=populated and screen.summary is not None,
             )
-            gr.HTML(
+            outcome_win_rate_output = gr.HTML(
                 self._format_summary_html(screen.win_rate_summary),
                 visible=populated and screen.win_rate_summary is not None,
             )
-            gr.HTML(
+            outcome_loss_review_output = gr.HTML(
                 self._format_loss_review_html(screen),
                 visible=populated and screen.loss_review_summary is not None,
                 elem_classes=["pl-loss-review"],
             )
-            gr.HTML(
+            outcome_unavailable_output = gr.HTML(
                 self._format_outcome_unavailable_html(screen),
                 visible=not screen.outcome_history_available,
             )
-            gr.HTML(
+            outcome_empty_output = gr.HTML(
                 self._format_outcome_empty_html(screen),
                 visible=screen.outcome_history_available and screen.outcome_history_is_empty,
             )
-            gr.Dataframe(
+            outcome_table = gr.Dataframe(
                 headers=_OUTCOME_HEADERS,
                 value=[_outcome_row_cells(row) for row in screen.outcome_rows],
-                datatype=["str"] * len(_OUTCOME_HEADERS),
+                datatype=_OUTCOME_DATATYPES,
                 interactive=False,
                 label="Outcome History",
                 show_label=False,
@@ -480,15 +628,45 @@ class PerformanceLearningUI:
             gr.HTML(
                 f'<div class="pl-section-label">{html.escape(REGIME_OUTCOMES_TITLE)}</div>'
             )
-            gr.HTML(
+            # Sprint 1 (visualization convention): chart ABOVE the existing
+            # table, visible under EXACTLY `reg_table` -- the SAME condition
+            # the table below already uses. No new threshold: the regime
+            # section has never had a 30-outcome floor and this chart does
+            # not introduce one (see CRITICAL REGIME GATE in the sprint
+            # spec / test_regime_chart_visible_when_populated_even_far_
+            # below_30_outcomes).
+            with gr.Column(
+                elem_classes=["aara-card", "pl-regime-chart-card"], visible=reg_table,
+            ) as regime_chart_card:
+                gr.HTML(
+                    chart_header_html(_REGIME_CHART_TITLE, _REGIME_CHART_DESCRIPTION),
+                    visible=reg_table,
+                )
+                regime_chart = gr.BarPlot(
+                    value=win_loss_long_dataframe(
+                        (row.regime, row.wins, row.losses)
+                        for row in screen.regime_outcome_rows
+                    ),
+                    x="category",
+                    y="count",
+                    color="outcome",
+                    x_title="Entry regime",
+                    y_title="Outcomes (n)",
+                    color_map=WIN_LOSS_COLOR_MAP,
+                    sort=[row.regime for row in screen.regime_outcome_rows],
+                    height=_CHART_HEIGHT,
+                    visible=reg_table,
+                    elem_classes=["pl-regime-chart"],
+                )
+            regime_unavailable_output = gr.HTML(
                 self._format_regime_outcomes_unavailable_html(screen),
                 visible=reg_unavailable,
             )
-            gr.HTML(
+            regime_empty_output = gr.HTML(
                 self._format_regime_outcomes_empty_html(screen),
                 visible=reg_empty,
             )
-            gr.HTML(
+            regime_table_output = gr.HTML(
                 self._format_regime_outcomes_table_html(screen),
                 visible=reg_table,
                 elem_classes=["pl-regime-outcomes"],
@@ -514,28 +692,72 @@ class PerformanceLearningUI:
                 screen.calibration_available and screen.calibration_has_enough_data
             )
             gr.HTML(self._format_section_label_html(screen.model_confidence_calibration))
-            gr.HTML(
+            # Sprint 1 (visualization convention): chart ABOVE the existing
+            # table, visible under EXACTLY `cal_table` -- the SAME condition
+            # the table below already uses. CALIBRATION_MIN_OUTCOMES /
+            # screen.calibration_has_enough_data stays the one authoritative
+            # gate; no separate chart-only threshold is introduced.
+            with gr.Column(
+                elem_classes=["aara-card", "pl-calibration-chart-card"], visible=cal_table,
+            ) as calibration_chart_card:
+                gr.HTML(
+                    chart_header_html(
+                        CALIBRATION_CONTENT_HEADING, _CALIBRATION_CHART_DESCRIPTION
+                    ),
+                    visible=cal_table,
+                )
+                calibration_chart = gr.BarPlot(
+                    value=win_loss_long_dataframe(
+                        (band.label, band.wins, band.losses)
+                        for band in screen.calibration_bands
+                    ),
+                    x="category",
+                    y="count",
+                    color="outcome",
+                    x_title="Ensemble score band",
+                    y_title="Outcomes (n)",
+                    color_map=WIN_LOSS_COLOR_MAP,
+                    sort=[band.label for band in screen.calibration_bands],
+                    height=_CHART_HEIGHT,
+                    visible=cal_table,
+                    elem_classes=["pl-calibration-chart"],
+                )
+            calibration_unavailable_output = gr.HTML(
                 self._format_calibration_unavailable_html(screen),
                 visible=cal_unavailable,
             )
-            gr.HTML(
+            calibration_empty_output = gr.HTML(
                 self._format_calibration_empty_html(screen),
                 visible=cal_empty,
             )
-            gr.HTML(
+            calibration_small_n_output = gr.HTML(
                 self._format_calibration_small_n_html(screen),
                 visible=cal_small_n,
             )
-            gr.HTML(
+            calibration_table_output = gr.HTML(
                 self._format_calibration_table_html(screen),
                 visible=cal_table,
                 elem_classes=["pl-calibration"],
             )
 
             # --- Decision Ledger Inspection (Wave 3C, ADR-064) ---
-            # Additive: rendered once from the already-materialized Wave 3B
-            # CandidateDecisionInspection on the screen. No provider call
-            # here, no demo.load, no Refresh. Decision-time only.
+            # Additive: rendered once, here at build() time, from the
+            # already-materialized Wave 3B CandidateDecisionInspection on
+            # `self._screen`. NARROW P0-2 CORRECTION: this section is
+            # deliberately EXCLUDED from the Refresh/_render() dynamic-
+            # output contract below -- ADR-064 §2.12 is explicit and
+            # unqualified: "There is no Refresh button. The surface is
+            # snapshot-bound and renders once per process from the fetched
+            # snapshot... The snapshot's contents are never compared to
+            # 'today' or presented as live." These four components
+            # (freshness line, pipeline chart card/chart, ledger body) are
+            # therefore plain, unassigned, build()-time-only components --
+            # exactly as they rendered before P0-2 -- never captured into
+            # `outputs`, never returned by _render(), never touched by the
+            # Refresh button or demo.load() below. Its own freshness line
+            # (_ledger_freshness_html) continues to show the SNAPSHOT's own
+            # mtime/data-through bound, verbatim, unrelated to the page-
+            # level render clock the refreshable sections now show.
             gr.HTML(
                 f'<div class="pl-section-label">'
                 f'{html.escape(DECISION_LEDGER_INSPECTION_TITLE)}</div>'
@@ -548,9 +770,209 @@ class PerformanceLearningUI:
                     and screen.ledger_inspection is not None
                 ),
             )
+            # Sprint 4: chart ABOVE the existing funnel text panel/candidate
+            # cards, visible under EXACTLY `screen.ledger_funnel_available`
+            # -- the SAME condition the funnel panel below already uses
+            # (_ledger_body_html only builds `head` when this is True). No
+            # new threshold, no second read.
+            with gr.Column(
+                elem_classes=["aara-card", "pl-pipeline-chart-card"],
+                visible=screen.ledger_funnel_available,
+            ):
+                gr.HTML(
+                    chart_header_html(_PIPELINE_CHART_TITLE, _PIPELINE_CHART_DESCRIPTION),
+                    visible=screen.ledger_funnel_available,
+                )
+                gr.BarPlot(
+                    value=_pipeline_chart_dataframe(
+                        screen.ledger_funnel_summary
+                        if screen.ledger_funnel_available else None
+                    ),
+                    x="stage",
+                    y="count",
+                    color="series",
+                    x_title="Stage",
+                    y_title="Candidates (n)",
+                    color_map=_PIPELINE_COLOR_MAP,
+                    sort=list(_PIPELINE_STAGE_LABELS),
+                    height=_CHART_HEIGHT,
+                    visible=screen.ledger_funnel_available,
+                    elem_classes=["pl-pipeline-chart"],
+                )
             gr.HTML(_ledger_body_html(screen), elem_classes=["pl-dli"])
 
+            # P0-2 (narrowed): append-only outputs list covering only the
+            # REFRESHABLE sections -- rendered_at, Evidence Maturity,
+            # Outcome History, Regime, Calibration. The Decision Ledger
+            # Inspection section (4 components, see above) is deliberately
+            # absent from this list -- ADR-064 §2.12 compliance. 19 total.
+            # rendered_at_output is first, matching every sibling screen's
+            # own Refresh convention (ui/morning_brief/gradio_view.py,
+            # ui/risk_intelligence/gradio_view.py, ui/portfolio_intelligence/
+            # gradio_view.py).
+            outputs = [
+                rendered_at_output,
+                evidence_maturity_output,
+                outcome_summary_output, outcome_win_rate_output,
+                outcome_loss_review_output,
+                outcome_unavailable_output, outcome_empty_output, outcome_table,
+                regime_chart_card, regime_chart,
+                regime_unavailable_output, regime_empty_output, regime_table_output,
+                calibration_chart_card, calibration_chart,
+                calibration_unavailable_output, calibration_empty_output,
+                calibration_small_n_output, calibration_table_output,
+            ]
+
+            # Same disable -> render -> enable double-submit guard chain as
+            # every other screen's Refresh -- a second click while a render
+            # is in flight cannot dispatch a second concurrent fetch.
+            # _render is wired identically to demo.load() (same fn, same
+            # outputs), only wrapped in the .then() chain here.
+            refresh_button.click(
+                fn=self._disable_refresh_button, inputs=None, outputs=[refresh_button],
+            ).then(
+                fn=self._render, inputs=None, outputs=outputs,
+            ).then(
+                fn=self._enable_refresh_button, inputs=None, outputs=[refresh_button],
+            )
+            demo.load(fn=self._render, inputs=None, outputs=outputs)
+
         return demo
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now(timezone.utc)
+
+    @staticmethod
+    def _disable_refresh_button() -> Dict[str, Any]:
+        """First link in the Refresh double-submit guard chain (see
+        build()) -- disables the button the instant it is clicked, before
+        _render runs. Mirrors every other screen's own helper of the same
+        name (e.g. ui/portfolio_intelligence/gradio_view.py)."""
+        return gr.update(interactive=False)
+
+    @staticmethod
+    def _enable_refresh_button() -> Dict[str, Any]:
+        """Last link in the Refresh double-submit guard chain (see
+        build()) -- re-enables the button once _render has returned,
+        success or not."""
+        return gr.update(interactive=True)
+
+    def _render(self) -> Tuple[Dict[str, Any], ...]:
+        """Re-fetch through the provider and return one Gradio update per
+        REFRESHABLE dynamic output, in build()'s `outputs` order. Called
+        by demo.load() on page load and by the Refresh chain. Reuses every
+        existing formatting helper verbatim over the freshly-fetched
+        `screen` -- no new rendering logic, no fabricated fallback: a
+        provider that now returns an all-unavailable screen collapses
+        every section back to its own explicit unavailable state, exactly
+        as a fresh build() would.
+
+        NARROW P0-2 CORRECTION: the Decision Ledger Inspection section
+        (freshness line, pipeline chart card/chart, ledger body) is
+        deliberately NOT among the outputs this method returns -- ADR-064
+        §2.12 requires that surface to render exactly once per process,
+        snapshot-bound, never presented as live. Those four components
+        stay build()-time-only, constructed from `self._screen` (the
+        original single-invocation snapshot), untouched by every Refresh
+        click and by demo.load() alike. This method therefore never
+        re-reads the Trust Ledger snapshot and never regenerates the
+        ledger's own filter/candidate HTML."""
+        screen = self._screen_provider()
+
+        populated = screen.outcome_history_available and not screen.outcome_history_is_empty
+        reg_unavailable = not screen.regime_outcomes_available
+        reg_empty = (
+            screen.regime_outcomes_available and screen.regime_outcomes_is_empty
+        )
+        reg_table = (
+            screen.regime_outcomes_available and not screen.regime_outcomes_is_empty
+        )
+        cal_unavailable = not screen.calibration_available
+        cal_empty = screen.calibration_available and screen.calibration_is_empty
+        cal_small_n = (
+            screen.calibration_available
+            and not screen.calibration_is_empty
+            and not screen.calibration_has_enough_data
+        )
+        cal_table = (
+            screen.calibration_available and screen.calibration_has_enough_data
+        )
+
+        return (
+            gr.update(value=_format_rendered_at_html(self._now())),
+            gr.update(value=self._format_evidence_maturity_html(screen)),
+            gr.update(
+                value=self._format_summary_html(screen.summary),
+                visible=populated and screen.summary is not None,
+            ),
+            gr.update(
+                value=self._format_summary_html(screen.win_rate_summary),
+                visible=populated and screen.win_rate_summary is not None,
+            ),
+            gr.update(
+                value=self._format_loss_review_html(screen),
+                visible=populated and screen.loss_review_summary is not None,
+            ),
+            gr.update(
+                value=self._format_outcome_unavailable_html(screen),
+                visible=not screen.outcome_history_available,
+            ),
+            gr.update(
+                value=self._format_outcome_empty_html(screen),
+                visible=screen.outcome_history_available and screen.outcome_history_is_empty,
+            ),
+            gr.update(
+                value=[_outcome_row_cells(row) for row in screen.outcome_rows],
+                visible=populated,
+            ),
+            gr.update(visible=reg_table),
+            gr.update(
+                value=win_loss_long_dataframe(
+                    (row.regime, row.wins, row.losses)
+                    for row in screen.regime_outcome_rows
+                ),
+                sort=[row.regime for row in screen.regime_outcome_rows],
+                visible=reg_table,
+            ),
+            gr.update(
+                value=self._format_regime_outcomes_unavailable_html(screen),
+                visible=reg_unavailable,
+            ),
+            gr.update(
+                value=self._format_regime_outcomes_empty_html(screen),
+                visible=reg_empty,
+            ),
+            gr.update(
+                value=self._format_regime_outcomes_table_html(screen),
+                visible=reg_table,
+            ),
+            gr.update(visible=cal_table),
+            gr.update(
+                value=win_loss_long_dataframe(
+                    (band.label, band.wins, band.losses)
+                    for band in screen.calibration_bands
+                ),
+                sort=[band.label for band in screen.calibration_bands],
+                visible=cal_table,
+            ),
+            gr.update(
+                value=self._format_calibration_unavailable_html(screen),
+                visible=cal_unavailable,
+            ),
+            gr.update(
+                value=self._format_calibration_empty_html(screen),
+                visible=cal_empty,
+            ),
+            gr.update(
+                value=self._format_calibration_small_n_html(screen),
+                visible=cal_small_n,
+            ),
+            gr.update(
+                value=self._format_calibration_table_html(screen),
+                visible=cal_table,
+            ),
+        )
 
     @staticmethod
     def _format_section_label_html(section: PerformanceLearningSection) -> str:

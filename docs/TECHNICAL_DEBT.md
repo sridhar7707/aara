@@ -1,6 +1,6 @@
 # TradeGenius AI — Technical Debt
 
-Last updated: 2026-07-29
+Last updated: 2026-09-18
 
 Items are rated by effort (S/M/L/XL) and urgency (High/Medium/Low).
 High-urgency items should be resolved before any real-money deployment.
@@ -15,12 +15,14 @@ High-urgency items should be resolved before any real-money deployment.
 | TD-005 | `bot/strategy/rl_agent.py` PPO model rarely invoked | M | Low | RL agent used for position sizing but Kelly criterion is primary sizer. Unclear if RL adds value — needs ablation study |
 | TD-006 | No database migration tooling | M | Medium | Schema changes require manual SQL. If trades.db schema evolves, existing data needs migration script. Consider Alembic or manual versioned migrations |
 | TD-007 | `backtest/engine.py` not connected to live parameter changes | M | Medium | Backtest uses hardcoded params; should read from `config.py` so a param change triggers a backtest validation |
-| TD-008 | `tests/measure_performance.py` needs periodic re-run | S | Low | NFR numbers in `docs/NFR.md` are point-in-time. Re-run quarterly or after any infrastructure change |
+| TD-014 | 4 failing tests in `applications/trading_intelligence/ui/tests/test_performance_learning_*.py` | S | Medium | In-progress, uncommitted Performance Learning decision-ledger view refactor (1,557 lines across `gradio_view.py` + its tests). Verified 2026-09-18: these are the only 4 failures in a 4,538-test repo-wide run — finish or revert the refactor before treating the suite as green |
 
 ## Resolved Debt
 
 | ID | Item | Resolved | How |
 |----|------|----------|-----|
+| TD-008 | `tests/measure_performance.py` needs periodic re-run | 2026-09-18 | Wasn't just staleness: the script only ever measured `pytest tests/`, never `sentinel_engine/` or `applications/` — those two now hold ~2/3 of the real suite. `NFR.md` said "535 passed" while the repo-wide count is 4,538. Fixed the script's test invocation |
+| TD-015 | `measure_performance.py --update` intermittently reported "13 errors" instead of the real "4 failed / 4485 passed / 49 skipped" | 2026-09-18 | Two compounding causes, both fixed: (1) the script measured dashboard render latency — which opens a single-writer DuckDB connection (`analytics.duckdb`) in-process — *before* spawning the pytest subprocess, so the subprocess's own attempt to open the same file collided with itself; reordered to run the test suite first. (2) an orphaned python.exe from an earlier diagnostic session (PID 11396) was still holding that same file open; killed it. `NFR.md` now regenerates clean and matches a direct interactive `pytest -q` run exactly |
 | TD-009 | `dashboard/app.py` was 3979 lines (god file) | 2026-06-14 | SPEC 52: split into 15 component modules; app.py now 322 lines |
 | TD-010 | `dashboard/components/history.py` was 694 lines | 2026-06-27 | Split: news → `news.py`, recommendation history → `recommendation_history.py` |
 | TD-011 | Silent exceptions (`except: pass`) in 5 bot files | 2026-06-14 | SPEC 51: all upgraded to `log_exception()` or `logger.debug()` |

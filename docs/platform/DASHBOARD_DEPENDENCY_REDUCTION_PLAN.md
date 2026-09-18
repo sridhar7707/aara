@@ -1,6 +1,8 @@
 # Dashboard Dependency Reduction Plan
 
-**Status:** Draft — options and sequencing risk documented, no decision made on
+**Status:** Authoritative, no option chosen (per `platform/AARA_ARCHITECTURE_AUTHORITY.md`'s
+document-roles table — self-label corrected 2026-09-18 from a stale "Draft," see
+`docs/DOCUMENT_CONSOLIDATION_PLAN.md`). Options and sequencing risk documented, no decision made on
 which approach to take, no implementation. See ADR-002: `dashboard/` is protected;
 this document proposes nothing be changed yet.
 

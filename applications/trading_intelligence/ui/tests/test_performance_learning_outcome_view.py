@@ -282,8 +282,28 @@ def test_no_illustrative_data_banner_in_any_state():
         assert "Illustrative Data" not in combined
 
 
-def test_no_refresh_button_and_no_load_event_added():
-    demo = PerformanceLearningUI(screen=_populated_screen([_closed_row()])).build()
+def _bound_render_functions(demo, ui):
+    return [
+        bf for bf in demo.fns.values()
+        if getattr(bf.fn, "__func__", None) is PerformanceLearningUI._render
+        and getattr(bf.fn, "__self__", None) is ui
+    ]
+
+
+def test_outcome_history_uses_the_one_shared_refresh_button_not_its_own():
+    """Outcome History participates in the screen-level shared Refresh /
+    demo.load() mechanism the P0-2 correction added (see gradio_view.py's
+    _render() docstring) -- unlike the Decision Ledger Inspection section,
+    which is deliberately excluded from it (ADR-064 SS2.12, see
+    test_performance_learning_decision_ledger_view.py). This test previously
+    asserted zero buttons/dependencies at all, which predates that shared
+    mechanism; it now checks there is exactly one button (shared, not a
+    second one of Outcome History's own) and that _render is bound to both
+    the load and the click chain, matching every sibling screen's convention
+    (e.g. ui/risk_intelligence/gradio_view.py)."""
+    ui = PerformanceLearningUI(screen=_populated_screen([_closed_row()]))
+    demo = ui.build()
     buttons = [b for b in demo.blocks.values() if isinstance(b, gr.Button)]
-    assert buttons == []
-    assert demo.config.get("dependencies", []) == []
+    assert len(buttons) == 1
+    # one _render binding for demo.load(), one for the Refresh .then() chain
+    assert len(_bound_render_functions(demo, ui)) == 2

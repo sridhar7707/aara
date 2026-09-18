@@ -1,5 +1,11 @@
 # Trading Intelligence ↔ Sentinel Ledger Integration Options
 
+> **See ADR-004** (`docs/decisions/ADR-004-sentinel-ledger-ownership-strategy.md`) for the actual
+> ownership-strategy decision this document's options feed — this document itself chooses no option.
+> Not the same decision as `TRADING_INTELLIGENCE_SENTINEL_READ_INTEGRATION_DESIGN.md` (that one is
+> about the read-path, not ownership) despite the near-identical filename — see
+> `docs/DOCUMENT_CONSOLIDATION_PLAN.md`.
+
 **Status:** Design comparison — no option chosen. No code changes accompany this
 document (`bot/`, `sentinel_engine/` both confirmed untouched via `git status`
 before and after).

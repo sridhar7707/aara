@@ -1,6 +1,7 @@
 # Trading Intelligence Boundary
 
-**Status:** Draft — target-state description, not an implementation plan.
+**Status:** Authoritative (per `platform/AARA_ARCHITECTURE_AUTHORITY.md`'s document-roles table —
+self-label corrected 2026-09-18 from a stale "Draft," see `docs/DOCUMENT_CONSOLIDATION_PLAN.md`).
 **Scope:** Documents boundaries only. No code moves, import changes, or
 refactors accompany this document (see ADR-002).
 
@@ -8,8 +9,10 @@ refactors accompany this document (see ADR-002).
 
 Define what "Aara Trading Intelligence" (Product #1, per `CODEBASE_MIGRATION_MATRIX.md`
 and `ADR-001`) owns versus what belongs to the Sentinel Intelligence Engine
-(`sentinel_engine/`), ahead of any future `applications/trading_intelligence/`
-extraction (Phase 2, still not started — see ADR-002).
+(`sentinel_engine/`). Note (2026-09-18): `applications/trading_intelligence/` now exists
+and is under active development (adapters, contracts, projections, services, a 6-screen UI) —
+the "not started" framing below describes this document's original (2026-08) context, not
+current state.
 
 ## 1. Sentinel Engine Responsibilities
 

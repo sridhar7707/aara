@@ -1,5 +1,9 @@
 # CI Sentinel Engine Test Integration Plan
 
+> **Superseded — implemented.** Verified 2026-09-18: `.github/workflows/ci.yml` line 63-64 runs
+> `pytest sentinel_engine/tests -v --tb=short` as its own CI step. The proposal below is now historical
+> record of *why*, not an open plan; see `docs/DOCUMENT_CONSOLIDATION_PLAN.md`.
+
 **Status:** Plan only — documentation. `.github/workflows/ci.yml` was not
 modified to produce this document, confirmed via `git status` before and
 after. No file was changed.

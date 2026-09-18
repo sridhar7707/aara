@@ -19,6 +19,8 @@ from applications.trading_intelligence.contracts.candidate_decision_inspection_c
 )
 from applications.trading_intelligence.ui.performance_learning.gradio_view import (
     PerformanceLearningUI,
+    _ledger_body_html,
+    _ledger_freshness_html,
 )
 from applications.trading_intelligence.ui.performance_learning.mock_data import build_mock_screen
 from applications.trading_intelligence.ui.performance_learning.screen import (
@@ -141,21 +143,51 @@ def test_freshness_is_rendered_from_supplied_values_only():
         [_candidate()], data_through="2026-08-31T00:00:00+00:00")))
     assert "2026-08-31T00:00:00+00:00" in blob        # data_through verbatim
     assert "2026-09-01" in blob                       # snapshot_mtime formatted
-    # the view never generates a "now" timestamp
+    # The ledger's OWN freshness/body formatting never generates a "now"
+    # timestamp -- checked against those two functions specifically, not the
+    # whole module, since PerformanceLearningUI.build() legitimately now
+    # uses datetime.now() (via self._now()) for the *other*, refreshable
+    # sections' render-clock line under the P0-2 correction (see
+    # gradio_view.py's _render() docstring). That render clock is unrelated
+    # to, and never substituted for, the ledger snapshot's own bound.
     import inspect
-    from applications.trading_intelligence.ui.performance_learning import gradio_view
-    src = inspect.getsource(gradio_view)
-    for token in ("datetime.now", "utcnow", "time.time", "fetched_at", "rendered_at"):
-        assert token not in src
+    for fn in (_ledger_freshness_html, _ledger_body_html):
+        src = inspect.getsource(fn)
+        for token in ("datetime.now", "utcnow", "time.time", "fetched_at", "rendered_at"):
+            assert token not in src
 
 
 def test_no_refresh_or_demoload_in_the_view():
-    import inspect
-    build_src = inspect.getsource(PerformanceLearningUI.build)
-    assert ".load(" not in build_src        # no demo.load(...) call
-    assert ".click(" not in build_src       # no event handler wiring
-    assert "gr.Button" not in build_src     # no Refresh button
-    assert "interactive=True" not in build_src
+    """ADR-064 SS2.12: the Decision Ledger Inspection section renders once,
+    build()-time-only, from the original construction-time snapshot -- immune
+    to the shared screen-level Refresh button / demo.load() that the P0-2
+    correction added for the *other* sections (Outcome History, Regime,
+    Calibration). Checked behaviorally against _render() -- the exact
+    function both Refresh and demo.load() call -- rather than by grepping
+    build()'s source, since that source now legitimately contains
+    .load()/.click()/gr.Button for those other sections."""
+    marker = "2026-08-31T00:00:00+00:00"
+    ui = PerformanceLearningUI(screen=_screen(ledger_inspection=_inspection(
+        [_candidate()], data_through=marker)))
+    demo = ui.build()
+    built_blob = "\n".join(
+        b.value for b in demo.blocks.values()
+        if isinstance(b, gr.HTML) and isinstance(getattr(b, "value", None), str)
+    )
+    assert marker in built_blob  # sanity: ledger content actually rendered
+
+    # Swap in a screen with a DIFFERENT ledger snapshot, then call the exact
+    # function Refresh/demo.load() invoke.
+    changed_marker = "2099-01-01T00:00:00+00:00"
+    ui._screen_provider = lambda: _screen(ledger_inspection=_inspection(
+        [_candidate()], data_through=changed_marker))
+    updates = ui._render()
+
+    assert isinstance(updates, tuple)
+    assert len(updates) == 19  # documented refreshable-output count (gradio_view.py L804-824)
+    assert all(isinstance(u, dict) for u in updates)
+    rendered_values = "\n".join(str(u.get("value", "")) for u in updates)
+    assert changed_marker not in rendered_values  # ledger snapshot untouched by refresh
 
 
 # --- candidate semantics --------------------------------------

@@ -1,3 +1,8 @@
+> **Superseded by:** `docs/implementation/CODEBASE_MIGRATION_MATRIX.md` (module mapping) and the
+> `docs/analysis/BOT_*.md` documents (dependency/extraction findings) — this is a Day-1 (2026-08-04)
+> planning snapshot, never updated. Kept for historical reference only; see
+> `docs/DOCUMENT_CONSOLIDATION_PLAN.md`.
+
 Project Overview
 This repository contains a modular algorithmic trading and autonomous portfolio management system (featuring the Sentinel architecture and governance framework). It incorporates live/paper execution interfaces, decision ledgers with hash-chain integrity, a robust analytics and backtesting engine, and a rich multi-component dashboard interface.
 

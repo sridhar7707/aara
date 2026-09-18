@@ -218,6 +218,30 @@ DESIGN_SYSTEM_CSS = """
    opt a single cell in directly. */
 .aara-num { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* Chart envelope (Performance & Learning Sprint 1): title -> one-sentence
+   description -> chart -> existing table -> existing disclaimer. The
+   chart itself sits in an .aara-card; these three rules style only the
+   text around it -- reused verbatim by any future screen's chart rather
+   than each screen re-declaring its own title/description/disclaimer
+   typography (see ui/chart_view.py, which emits these class names). */
+.aara-chart-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--aara-text);
+  margin: 0 0 2px 0;
+}
+.aara-chart-description {
+  font-size: 12px;
+  color: var(--aara-text-muted);
+  margin: 0 0 8px 0;
+}
+.aara-chart-disclaimer {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--aara-text-muted);
+  margin: 6px 0 0 0;
+}
+
 /* Centred reading container (audit finding D-09). The composed app already
    has a ~1280px `.gradio-container` cap; this narrower measure is available
    for Batch B3 to wrap long-form content columns. Not applied globally in

@@ -1,15 +1,15 @@
 {
-  "generated_at": "2026-06-30T03:08:00.998153+00:00",
-  "train_cutoff": "2026-05-31",
+  "generated_at": "2026-09-13T07:23:48.791088+00:00",
+  "train_cutoff": "2026-08-14",
   "training_symbols": 45,
-  "training_rows": 197865,
+  "training_rows": 200205,
   "date_range": {
     "from": "2008-01-03",
-    "to": "2026-05-29"
+    "to": "2026-08-13"
   },
-  "xgb_val_auc": 0.5462,
-  "lstm_val_loss": 0.6707,
-  "feature_count": 19,
+  "xgb_val_auc": 0.5559,
+  "lstm_val_loss": 0.6195,
+  "feature_count": 22,
   "feature_cols": [
     "rsi",
     "mfi",
@@ -26,10 +26,13 @@
     "ema_spread",
     "ret_5d",
     "ret_21d",
+    "ret_63d",
     "high_52w_pct",
-    "gap_overnight",
-    "rsi_divergence",
-    "macd_cross_up"
+    "rs_vs_spy_21d",
+    "rs_vs_spy_63d",
+    "adx_14",
+    "hv_ratio",
+    "up_day_ratio_20d"
   ],
-  "forward_periods": 5
+  "forward_periods": 21
 }

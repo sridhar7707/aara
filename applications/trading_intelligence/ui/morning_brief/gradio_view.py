@@ -262,6 +262,29 @@ def _format_snapshot_line_html(moment: Optional[datetime]) -> str:
     )
 
 
+def _format_chart_as_of(raw: str) -> str:
+    """Hardening (combined Sprint 5+6+7): presentation-only conversion of a
+    real portfolio_snapshots row's own raw ISO-8601 timestamp into the
+    SAME "%Y-%m-%d %H:%M %Z" America/Chicago wall-clock format every other
+    caption on this screen already uses -- the two chart caption call
+    sites below previously embedded the raw value verbatim (e.g.
+    "2026-09-01T19:00:13.558551+00:00"), a stray microsecond-precision UTC
+    string inconsistent with every other "as of" line on this same page.
+    Duplicates bootstrap.py's own `_format_section_as_of` logic rather
+    than importing it -- this package is self-contained (see this
+    module's own docstring) and does not cross-import bootstrap.py. A
+    naive value is treated as UTC (what the bot's trades.db writers
+    persist); an unparseable value is passed through unchanged rather
+    than dropped, matching `_format_section_as_of`'s own fallback."""
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return raw
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
+
+
 class MorningBriefUI:
     def __init__(
         self,
@@ -604,7 +627,7 @@ class MorningBriefUI:
         the unavailable/empty cases."""
         if not screen.portfolio_history_is_available or screen.portfolio_history_is_empty:
             return ""
-        most_recent_as_of = screen.portfolio_history[-1].as_of
+        most_recent_as_of = _format_chart_as_of(screen.portfolio_history[-1].as_of)
         return (
             '<div class="mb-subtitle">'
             f"{html.escape(_SECTION_AS_OF_PREFIX + most_recent_as_of)}"
@@ -790,7 +813,7 @@ class MorningBriefUI:
     def _drawdown_caption_html(screen: MorningBriefScreen) -> str:
         if not screen.drawdown_history_is_available or screen.drawdown_history_is_empty:
             return ""
-        most_recent_as_of = screen.drawdown_history[-1].as_of
+        most_recent_as_of = _format_chart_as_of(screen.drawdown_history[-1].as_of)
         return (
             '<div class="mb-subtitle">'
             f"{html.escape(_SECTION_AS_OF_PREFIX + most_recent_as_of)}"

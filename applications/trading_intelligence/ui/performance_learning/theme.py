@@ -203,6 +203,27 @@ CSS = """
 .pl-regime-label { text-align: left; color: var(--pl-color-text); }
 .pl-regime-num { text-align: right; color: var(--pl-color-text); }
 
+/* Sprint 1: visualization convention -- the calibration/regime bar
+   charts. Card border/background/padding/shadow come from the shared
+   .aara-card primitive (ui/design_system.py, only present when the
+   composed app's DESIGN_SYSTEM_CSS is loaded -- same standalone-vs-
+   composed tradeoff ui/risk_intelligence/theme.py's own state-badge
+   comment already documents); these two rules add only screen-local
+   vertical spacing around the card, matching .pl-cal-disclaimer's own
+   margin convention. */
+.pl-calibration-chart-card,
+.pl-regime-chart-card {
+  margin: 4px 0 10px 0;
+}
+
+/* Sprint 4: Decision pipeline chart card. Same treatment as the two rules
+   above -- border/background/padding/shadow come from the shared
+   .aara-card primitive; this rule adds only screen-local vertical spacing
+   around the card. */
+.pl-pipeline-chart-card {
+  margin: 4px 0 10px 0;
+}
+
 /* Wave 3C: Decision Ledger Inspection. Additive; reuses the --pl-color-*
    tokens (which alias --aara-*) -- no new palette literals. Block-level,
    wrapping layout so nothing clips at 900px; native <details> for

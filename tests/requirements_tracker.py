@@ -9,7 +9,7 @@ Usage:
   python tests/requirements_tracker.py              # scan + update REQUIREMENTS.md
   python tests/requirements_tracker.py --dry-run   # preview, no writes
   python tests/requirements_tracker.py --status    # compact overview
-  python tests/requirements_tracker.py --docs-check # verify all 12 docs/*.md exist
+  python tests/requirements_tracker.py --docs-check # verify all 16 docs/*.md exist
   python tests/requirements_tracker.py --bug "desc" [--severity high]
   python tests/requirements_tracker.py --fix BUG-001
   python tests/requirements_tracker.py --complete SPEC-4
@@ -370,12 +370,16 @@ _MANAGED_DOCS = [
     "RELEASES.md",
     "BACKUP_RECOVERY.md",
     "NFR.md",
+    "SECURITY.md",
+    "RUNBOOK.md",
+    "GLOSSARY.md",
+    "TEST_STRATEGY.md",
     "README.md",
 ]
 
 
 def cmd_docs_check() -> int:
-    """Verify all 12 managed docs exist, are non-empty, and README links are valid.
+    """Verify all 16 managed docs exist, are non-empty, and README links are valid.
 
     Returns 0 on success, 1 if any check fails.
     """
@@ -517,7 +521,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="TradeGenius requirements tracker")
     ap.add_argument("--dry-run",     action="store_true")
     ap.add_argument("--status",      action="store_true")
-    ap.add_argument("--docs-check",  action="store_true", help="Verify all 12 docs/*.md exist and README links are valid")
+    ap.add_argument("--docs-check",  action="store_true", help="Verify all 16 docs/*.md exist and README links are valid")
     ap.add_argument("--bug",         metavar="DESC")
     ap.add_argument("--severity",    default="medium", choices=["critical", "high", "medium", "low"])
     ap.add_argument("--fix",         metavar="BUG-ID")

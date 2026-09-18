@@ -70,9 +70,13 @@ vocabulary — "preserve, no active development" — not deleting it. Git histor
 preserves the content identically either way, so archiving costs nothing in
 data safety while removing dead weight from the active tree.
 
-**This ADR does not perform the archive.** Like ADR-005, this is a decision
-record, not an executed action — no file under `sentinel/`, `sentinel_engine/`,
-or elsewhere has been moved, renamed, or modified to produce it.
+**This ADR's decision was subsequently executed in commit `1fcc77b`** ("chore: archive legacy
+Sentinel scaffold", 2026-08-06) — a pure `git mv` of every file from `sentinel/` to
+`archive/sentinel_phase2a_scaffold/`, content and history preserved, no `sentinel_engine/` file
+touched. (Corrected 2026-09-18: this sentence previously said the ADR performed no action, written
+before that commit landed and never updated to match the header's "Archive Executed" status — see
+`docs/DOCUMENT_CONSOLIDATION_PLAN.md`. Verified directly: `sentinel/` no longer exists;
+`archive/sentinel_phase2a_scaffold/` holds its content.)
 
 ## Preservation of Vocabulary
 

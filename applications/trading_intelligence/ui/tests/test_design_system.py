@@ -115,6 +115,8 @@ _EXPECTED_PRIMITIVES = (
     ".aara-status-badge--normal", ".aara-status-badge--warning",
     ".aara-status-badge--defensive", ".aara-status-badge--neutral",
     ".aara-empty", ".aara-table--secondary", ".aara-num", ".aara-content",
+    ".aara-chart-title", ".aara-chart-description", ".aara-chart-disclaimer",
+    ".aara-page-title",
 )
 
 

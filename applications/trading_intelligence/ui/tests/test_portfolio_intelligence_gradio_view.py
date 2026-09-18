@@ -1,3 +1,4 @@
+import inspect
 from datetime import datetime, timedelta, timezone
 
 import gradio as gr
@@ -78,6 +79,15 @@ def _make_holding(**overrides):
     defaults = dict(symbol="ZZZZ", quantity=1.0, price=1.0, market_value=1.0, weight_pct=100.0)
     defaults.update(overrides)
     return PortfolioHolding(**defaults)
+
+
+def _make_alpaca_position(**overrides):
+    defaults = dict(
+        symbol="ZZZZ", quantity=1.0, avg_entry_price=1.0, current_price=1.0,
+        market_value=1.0, unrealized_pl=0.0, unrealized_plpc=0.0, side="long",
+    )
+    defaults.update(overrides)
+    return AlpacaPosition(**defaults)
 
 
 def _html_values(demo):
@@ -783,10 +793,24 @@ def test_drawdown_render_state_follows_the_selected_timeframe(monkeypatch):
     assert list(chart_df["drawdown_pct"]) == [0.0]
 
 
-def test_drawdown_render_state_uses_the_true_all_time_peak_not_a_window_local_one():
+def test_drawdown_render_state_uses_the_true_all_time_peak_not_a_window_local_one(monkeypatch):
     """The classic case this design exists to get right: a deep historical
     drawdown from an all-time peak, still correctly shown when the
-    selected window only covers the recovery, not the original peak."""
+    selected window only covers the recovery, not the original peak.
+
+    Hardening (combined Sprint 5+6+7): this test was missing the SAME
+    `monkeypatch.setattr(PortfolioIntelligenceUI, "_now", ...)` freeze its
+    sibling test above already uses -- without it, _drawdown_render_state
+    filters "1W" against the REAL wall clock while these fixture points
+    are built relative to the fixed _NOW constant, so the test silently
+    passed only for as long as real time stayed within a few days of
+    _NOW's hardcoded date and started failing once it drifted past that
+    window (observed failing as of 2026-09-17, two days past _NOW's
+    2026-09-15). A test-only fix -- production _filter_history_by_
+    timeframe/_drawdown_render_state were never wrong; they correctly use
+    the real clock in production, which is exactly why tests must freeze
+    it to get a deterministic fixture."""
+    monkeypatch.setattr(PortfolioIntelligenceUI, "_now", staticmethod(lambda: _NOW))
     points = (
         _point(400, 200.0),  # true all-time peak
         _point(200, 100.0),  # -50% from the true peak
@@ -1164,7 +1188,9 @@ def test_capital_not_configured_health_renders_a_not_configured_message():
     html_text, table_cells = _rendered_surfaces(PortfolioIntelligenceUI(screen=screen))
 
     assert "not configured for this environment" in html_text
-    assert "aara-integration-status" in html_text
+    # a real non-HEALTHY status is a provider failure, not an honest
+    # absence -- render_unavailable() renders it with the error class.
+    assert "aara-error-message" in html_text
     assert table_cells == []
 
 
@@ -1803,7 +1829,7 @@ def test_default_screen_renders_zero_visible_dataframes():
 # --- Render-time fetch: Refresh button, demo.load, "as of" indicator ----
 
 
-_OUTPUT_COUNT = 24  # see PortfolioIntelligenceUI.build()'s `outputs` list
+_OUTPUT_COUNT = 28  # see PortfolioIntelligenceUI.build()'s `outputs` list
 
 
 def _refresh_button(demo):
@@ -1931,7 +1957,9 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
         orders_trunc, orders_msg, orders_tbl, \
         reconciliation_summary, reconciliation_msg, reconciliation_tbl, \
         portfolio_summary, history_state, \
-        holding_allocation, drawdown_summary, drawdown_msg, drawdown_chart = updates
+        holding_allocation, drawdown_summary, drawdown_msg, drawdown_chart, \
+        allocation_chart_card, allocation_chart, \
+        pnl_chart_card, pnl_chart = updates
 
     assert _SNAPSHOT_UNAVAILABLE in snapshot["value"]
     assert disclosure["value"] == _UNAVAILABLE_DATA_HTML
@@ -1956,6 +1984,17 @@ def test_render_preserves_unavailable_states_with_no_mock_fallback():
     # Visual Dashboard Phase B: allocation-by-holding follows Holdings'
     # own unavailable state; drawdown follows the value chart's own.
     assert _HOLDINGS_UNAVAILABLE_MESSAGE in holding_allocation["value"]
+    # Sprint 2: the Allocation by Holding chart follows the SAME
+    # holdings_is_available/is_empty pair -- hidden, empty, never fabricated.
+    assert allocation_chart_card["visible"] is False
+    assert allocation_chart["visible"] is False
+    assert len(allocation_chart["value"]) == 0
+    # Sprint 3: the Unrealized P&L by Holding chart follows the SAME
+    # alpaca_is_available/alpaca_positions pair -- hidden, empty, never
+    # fabricated.
+    assert pnl_chart_card["visible"] is False
+    assert pnl_chart["visible"] is False
+    assert len(pnl_chart["value"]) == 0
     assert _DRAWDOWN_UNAVAILABLE_MESSAGE in drawdown_msg["value"]
     assert drawdown_chart["visible"] is False
     assert len(drawdown_chart["value"]) == 0
@@ -2049,3 +2088,658 @@ def test_no_screen_and_no_provider_uses_the_all_unavailable_screen():
     assert ui._screen.capital is None
     assert ui._screen.holdings is None
     assert ui._render()[2]["value"] == _UNAVAILABLE_DATA_HTML
+
+
+# --- Sprint 2: Allocation by Holding chart -------------------------------
+#
+# Visible under EXACTLY the same condition the existing allocation bars /
+# Holdings table already use (screen.holdings_is_available and not
+# screen.is_empty) -- no new threshold, no second read, no fabricated data.
+
+
+def _allocation_chart(demo):
+    charts = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.BarPlot) and "pi-allocation-chart" in (b.elem_classes or [])
+    ]
+    assert len(charts) == 1
+    return charts[0]
+
+
+def _allocation_chart_card(demo):
+    cards = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.Column)
+        and "aara-card" in (b.elem_classes or [])
+        and "pi-allocation-chart-card" in (b.elem_classes or [])
+    ]
+    assert len(cards) == 1
+    return cards[0]
+
+
+def test_allocation_chart_hidden_when_holdings_unavailable():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=_make_capital(), holdings=None))
+
+    demo = ui.build()
+
+    assert _allocation_chart(demo).visible is False
+    assert _allocation_chart_card(demo).visible is False
+
+
+def test_allocation_chart_hidden_when_holdings_empty():
+    ui = PortfolioIntelligenceUI(PortfolioScreen(capital=_make_capital(), holdings=()))
+
+    demo = ui.build()
+
+    assert _allocation_chart(demo).visible is False
+    assert _allocation_chart_card(demo).visible is False
+
+
+def test_allocation_chart_visible_when_holdings_populated():
+    holding = _make_holding(symbol="AAPL", weight_pct=42.0)
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=(holding,))
+    )
+
+    demo = ui.build()
+
+    assert _allocation_chart(demo).visible is True
+    assert _allocation_chart_card(demo).visible is True
+
+
+def test_allocation_chart_and_existing_bars_visibility_always_match():
+    """The chart's own visibility must never diverge from the existing
+    allocation bars' -- checked across every gate state, not just one."""
+    cases = [
+        PortfolioScreen(capital=_make_capital(), holdings=None),   # unavailable
+        PortfolioScreen(capital=_make_capital(), holdings=()),      # empty
+        PortfolioScreen(capital=_make_capital(), holdings=(_make_holding(),)),  # populated
+    ]
+    for screen in cases:
+        demo = PortfolioIntelligenceUI(screen=screen).build()
+        bars_visible = "pi-holding-allocation-list" in "\n".join(_html_values(demo))
+        assert _allocation_chart(demo).visible is bars_visible
+
+
+def test_allocation_chart_uses_the_existing_authoritative_weight_pct_values():
+    """No fabricated allocation data: the chart's dataframe must carry the
+    SAME symbol/weight_pct values PortfolioHolding already provides,
+    verbatim -- never a recomputed percentage."""
+    holdings = (
+        _make_holding(symbol="AAPL", weight_pct=33.3),
+        _make_holding(symbol="MSFT", weight_pct=66.7),
+    )
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=holdings)
+    )
+
+    demo = ui.build()
+
+    chart = _allocation_chart(demo)
+    symbol_col = chart.value["columns"].index("symbol")
+    weight_col = chart.value["columns"].index("weight_pct")
+    values = {row[symbol_col]: row[weight_col] for row in chart.value["data"]}
+    assert values == {"AAPL": 33.3, "MSFT": 66.7}
+
+
+def test_allocation_chart_preserves_the_existing_weight_descending_order():
+    """Same authoritative order as the existing allocation bars
+    (_format_holding_allocation_html): weight_pct descending, ties broken
+    alphabetically by symbol."""
+    holdings = (
+        _make_holding(symbol="ZETA", weight_pct=10.0),
+        _make_holding(symbol="ALPHA", weight_pct=50.0),
+        _make_holding(symbol="BETA", weight_pct=50.0),
+    )
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=holdings)
+    )
+
+    demo = ui.build()
+
+    chart = _allocation_chart(demo)
+    symbol_col = chart.value["columns"].index("symbol")
+    ordered_symbols = [row[symbol_col] for row in chart.value["data"]]
+    assert ordered_symbols == ["ALPHA", "BETA", "ZETA"]
+    assert chart.sort == ["ALPHA", "BETA", "ZETA"]
+
+
+def test_allocation_chart_title_and_description_render_verbatim_and_distinct_from_section_label():
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=(_make_holding(),))
+    )
+
+    demo = ui.build()
+
+    visible = "\n".join(v for v in _html_values(demo) if v)
+    assert "Current allocation by holding" in visible
+    assert (
+        "Share of current portfolio value represented by each holding."
+        in visible
+    )
+    # Distinct from the outer frozen section label -- never duplicated.
+    assert "Current allocation by holding" != "Allocation by Holding"
+    assert visible.count('<div class="pi-section-label">Allocation by Holding</div>') == 1
+
+
+def test_allocation_chart_height_is_220_not_320():
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=(_make_holding(),))
+    )
+
+    demo = ui.build()
+
+    assert _allocation_chart(demo).height == 220
+
+
+def test_allocation_chart_sits_inside_the_aara_card_treatment():
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=(_make_holding(),))
+    )
+
+    demo = ui.build()
+
+    card = _allocation_chart_card(demo)
+    assert "aara-card" in (card.elem_classes or [])
+
+
+def test_allocation_chart_does_not_introduce_a_new_disclaimer():
+    """No existing disclaimer for Allocation by Holding to preserve, so the
+    chart must not invent one either -- title + description only."""
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=(_make_holding(),))
+    )
+
+    demo = ui.build()
+
+    assert not any(
+        isinstance(b, gr.HTML)
+        and isinstance(getattr(b, "value", None), str)
+        and "aara-chart-disclaimer" in b.value
+        for b in demo.blocks.values()
+    )
+
+
+def test_allocation_chart_does_not_use_the_win_loss_color_map():
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=(_make_holding(),))
+    )
+
+    demo = ui.build()
+
+    chart = _allocation_chart(demo)
+    assert chart.color_map != {"Win": "#0B1F3A", "Loss": "#7A2E2E"}
+    assert set(chart.color_map.values()) == {"#0B1F3A"}
+
+
+def test_existing_allocation_bars_and_holdings_table_still_render_unchanged():
+    """The chart is additive -- the existing allocation bars and the
+    Holdings table itself must render exactly as before, untouched."""
+    holdings = (_make_holding(symbol="AAPL", weight_pct=100.0),)
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=holdings)
+    )
+
+    demo = ui.build()
+
+    visible = "\n".join(_html_values(demo))
+    assert "pi-holding-allocation-list" in visible
+    assert "AAPL" in visible
+    dataframes = _visible_dataframes(demo)
+    assert any("pi-holdings-table" in (d.elem_classes or []) for d in dataframes)
+
+
+def test_allocation_chart_comes_before_the_existing_allocation_bars_in_render_order():
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=(_make_holding(),))
+    )
+
+    demo = ui.build()
+
+    combined = "\n".join(_html_values(demo))
+    assert combined.index("Current allocation by holding") < combined.index(
+        "pi-holding-allocation-list"
+    )
+
+
+def test_allocation_chart_render_updates_use_the_appended_positional_indices():
+    """Append-only discipline (see build()'s outputs comment): the two new
+    outputs must land at the very end of _render()'s tuple, never inserted
+    in the middle -- every existing index used by other tests above must
+    stay stable."""
+    holdings = (_make_holding(symbol="AAPL", weight_pct=42.0),)
+    ui = PortfolioIntelligenceUI(
+        screen_provider=lambda: PortfolioScreen(capital=_make_capital(), holdings=holdings)
+    )
+
+    updates = ui._render()
+
+    assert len(updates) == 28
+    card_update, chart_update = updates[24], updates[25]
+    assert card_update["visible"] is True
+    assert chart_update["visible"] is True
+    assert list(chart_update["value"]["symbol"]) == ["AAPL"]
+    assert list(chart_update["value"]["weight_pct"]) == [42.0]
+
+
+def test_allocation_chart_hidden_via_render_when_holdings_becomes_unavailable():
+    ui = PortfolioIntelligenceUI(
+        screen_provider=lambda: PortfolioScreen(capital=_make_capital(), holdings=None)
+    )
+
+    updates = ui._render()
+
+    card_update, chart_update = updates[24], updates[25]
+    assert card_update["visible"] is False
+    assert chart_update["visible"] is False
+
+
+def test_timeframe_selector_change_outputs_unchanged_by_the_allocation_chart():
+    """Requirement: the existing timeframe selector's own wiring (6
+    portfolio-history/drawdown outputs) must be completely unaffected by
+    the new, unrelated Allocation by Holding chart."""
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), holdings=(_make_holding(),))
+    )
+    demo = ui.build()
+
+    radio_id = next(
+        id_ for id_, b in demo.blocks.items() if isinstance(b, gr.Radio)
+    )
+    change_dep = next(
+        dep for dep in demo.config["dependencies"]
+        if dep["targets"] == [(radio_id, "change")]
+    )
+    assert len(change_dep["outputs"]) == 6
+
+
+# --- Sprint 3: Unrealized P&L by Holding chart ----------------------------
+#
+# Visible under EXACTLY the same condition the existing Alpaca Paper
+# Positions table already uses (screen.alpaca_is_available and len(screen.
+# alpaca_positions) > 0) -- no new threshold, no second Alpaca read, no
+# fabricated data. Answers "how are my current holdings performing right
+# now?" -- a different question from Sprint 2's Allocation by Holding chart
+# ("what share of the portfolio does each holding represent?").
+
+
+def _pnl_chart(demo):
+    charts = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.BarPlot) and "pi-pnl-chart" in (b.elem_classes or [])
+    ]
+    assert len(charts) == 1
+    return charts[0]
+
+
+def _pnl_chart_card(demo):
+    cards = [
+        b for b in demo.blocks.values()
+        if isinstance(b, gr.Column)
+        and "aara-card" in (b.elem_classes or [])
+        and "pi-pnl-chart-card" in (b.elem_classes or [])
+    ]
+    assert len(cards) == 1
+    return cards[0]
+
+
+def test_pnl_chart_hidden_when_alpaca_unavailable():
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), alpaca_account=None)
+    )
+
+    demo = ui.build()
+
+    assert _pnl_chart(demo).visible is False
+    assert _pnl_chart_card(demo).visible is False
+
+
+def test_pnl_chart_hidden_when_positions_empty():
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(),
+        )
+    )
+
+    demo = ui.build()
+
+    assert _pnl_chart(demo).visible is False
+    assert _pnl_chart_card(demo).visible is False
+
+
+def test_pnl_chart_visible_when_positions_populated():
+    position = _make_alpaca_position(symbol="AAPL", unrealized_pl=42.0)
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(position,),
+        )
+    )
+
+    demo = ui.build()
+
+    assert _pnl_chart(demo).visible is True
+    assert _pnl_chart_card(demo).visible is True
+
+
+def test_pnl_chart_and_positions_table_visibility_always_match():
+    """The chart's own visibility must never diverge from the existing
+    Alpaca Paper Positions table's -- checked across every gate state."""
+    cases = [
+        PortfolioScreen(capital=_make_capital(), alpaca_account=None),  # unavailable
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(),
+        ),  # empty
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(_make_alpaca_position(),),
+        ),  # populated
+    ]
+    for screen in cases:
+        demo = PortfolioIntelligenceUI(screen=screen).build()
+        table_visible = any(
+            "pi-alpaca-positions-table" in (d.elem_classes or [])
+            for d in _visible_dataframes(demo)
+        )
+        assert _pnl_chart(demo).visible is table_visible
+
+
+def test_pnl_chart_uses_the_existing_unrealized_pl_values_directly():
+    """No fabricated or recomputed P&L: the chart's dataframe must carry
+    the SAME unrealized_pl AlpacaPosition already provides, verbatim.
+    avg_entry_price/current_price/quantity are chosen here so that a naive
+    recompute (quantity * (current_price - avg_entry_price)) would NOT
+    equal unrealized_pl -- proving the chart reads the field directly
+    rather than deriving it from price data. Covers positive, negative,
+    and zero P&L."""
+    positions = (
+        _make_alpaca_position(
+            symbol="AAPL", quantity=10.0, avg_entry_price=100.0,
+            current_price=110.0, unrealized_pl=-50.0,  # naive recompute would be +100.0
+        ),
+        _make_alpaca_position(
+            symbol="MSFT", quantity=5.0, avg_entry_price=200.0,
+            current_price=190.0, unrealized_pl=250.0,  # naive recompute would be -50.0
+        ),
+        _make_alpaca_position(
+            symbol="ZZZZ", quantity=3.0, avg_entry_price=50.0,
+            current_price=50.0, unrealized_pl=0.0,
+        ),
+    )
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=positions,
+        )
+    )
+
+    demo = ui.build()
+
+    chart = _pnl_chart(demo)
+    symbol_col = chart.value["columns"].index("symbol")
+    pl_col = chart.value["columns"].index("unrealized_pl")
+    values = {row[symbol_col]: row[pl_col] for row in chart.value["data"]}
+    assert values == {"AAPL": -50.0, "MSFT": 250.0, "ZZZZ": 0.0}
+
+
+def test_pnl_chart_dataframe_empty_when_positions_unavailable():
+    """No fabricated position data: an unavailable/empty Alpaca section
+    yields an empty, schema-correct dataframe, never a placeholder row."""
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(capital=_make_capital(), alpaca_account=None)
+    )
+
+    demo = ui.build()
+
+    assert list(_pnl_chart(demo).value["data"]) == []
+
+
+def test_pnl_chart_direction_buckets_gain_and_loss_by_sign():
+    """Positive and zero P&L bucket as Gain, negative as Loss -- the only
+    role `direction` plays is selecting the bar colour via the Gain/Loss
+    colour map; it is not a second copy of unrealized_pl."""
+    positions = (
+        _make_alpaca_position(symbol="WIN", unrealized_pl=10.0),
+        _make_alpaca_position(symbol="FLAT", unrealized_pl=0.0),
+        _make_alpaca_position(symbol="LOSE", unrealized_pl=-10.0),
+    )
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=positions,
+        )
+    )
+
+    demo = ui.build()
+
+    chart = _pnl_chart(demo)
+    symbol_col = chart.value["columns"].index("symbol")
+    direction_col = chart.value["columns"].index("direction")
+    values = {row[symbol_col]: row[direction_col] for row in chart.value["data"]}
+    assert values == {"WIN": "Gain", "FLAT": "Gain", "LOSE": "Loss"}
+
+
+def test_pnl_chart_title_and_description_render_verbatim_and_distinct_from_section_label():
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(_make_alpaca_position(),),
+        )
+    )
+
+    demo = ui.build()
+
+    visible = "\n".join(v for v in _html_values(demo) if v)
+    # chart_header_html HTML-escapes its input -- "&" renders as "&amp;".
+    assert "Unrealized P&amp;L by holding" in visible
+    assert (
+        "Current unrealized profit or loss for each open holding." in visible
+    )
+    # Distinct from the outer frozen section label -- never duplicated.
+    assert "Unrealized P&L by holding" != "Alpaca Paper Account"
+    assert visible.count(
+        '<div class="pi-section-label">Alpaca Paper Account '
+        '<span class="pi-alpaca-badge">ALPACA PAPER</span></div>'
+    ) == 1
+
+
+def test_pnl_chart_height_is_220_not_320():
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(_make_alpaca_position(),),
+        )
+    )
+
+    demo = ui.build()
+
+    assert _pnl_chart(demo).height == 220
+
+
+def test_pnl_chart_sits_inside_the_aara_card_treatment():
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(_make_alpaca_position(),),
+        )
+    )
+
+    demo = ui.build()
+
+    card = _pnl_chart_card(demo)
+    assert "aara-card" in (card.elem_classes or [])
+
+
+def test_pnl_chart_does_not_introduce_a_new_disclaimer():
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(_make_alpaca_position(),),
+        )
+    )
+
+    demo = ui.build()
+
+    assert not any(
+        isinstance(b, gr.HTML)
+        and isinstance(getattr(b, "value", None), str)
+        and "aara-chart-disclaimer" in b.value
+        for b in demo.blocks.values()
+    )
+
+
+def test_pnl_chart_does_not_use_the_win_loss_color_map():
+    """Deliberately distinct from chart_view.py's WIN_LOSS_COLOR_MAP
+    (historical outcome accuracy) -- this chart's colour map encodes a
+    live position's current gain/loss, a different semantic."""
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(_make_alpaca_position(),),
+        )
+    )
+
+    demo = ui.build()
+
+    chart = _pnl_chart(demo)
+    assert chart.color_map != {"Win": "#0B1F3A", "Loss": "#7A2E2E"}
+    assert chart.color_map == {"Gain": "#176B4D", "Loss": "#7A2E2E"}
+
+
+def test_existing_alpaca_positions_table_still_renders_unchanged():
+    """The chart is additive -- the existing Alpaca Paper Positions table
+    itself must render exactly as before, untouched."""
+    position = _make_alpaca_position(symbol="AAPL", unrealized_pl=100.0)
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(position,),
+        )
+    )
+
+    demo = ui.build()
+
+    dataframes = _visible_dataframes(demo)
+    positions_tables = [
+        d for d in dataframes if "pi-alpaca-positions-table" in (d.elem_classes or [])
+    ]
+    assert len(positions_tables) == 1
+    assert positions_tables[0].value["data"] == [
+        ["AAPL", "1", "$1.00", "$1.00", "$1.00", "$100.00", "0.00%", "long"],
+    ]
+
+
+def test_allocation_chart_still_present_alongside_pnl_chart():
+    """Regression: the unrelated Sprint 2 Allocation by Holding chart must
+    still exist and render once this feature is added."""
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), holdings=(_make_holding(),),
+            alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(_make_alpaca_position(),),
+        )
+    )
+
+    demo = ui.build()
+
+    assert _allocation_chart(demo).visible is True
+    assert _pnl_chart(demo).visible is True
+
+
+def test_pnl_chart_comes_after_account_summary_and_before_positions_table():
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(_make_alpaca_position(symbol="AAPL"),),
+        )
+    )
+
+    demo = ui.build()
+
+    combined = "\n".join(v for v in _html_values(demo) if v)
+    assert combined.index("$100,018.33") < combined.index("Unrealized P&amp;L by holding")
+
+
+def test_pnl_chart_render_updates_use_the_appended_positional_indices():
+    """Append-only discipline (see build()'s outputs comment): the two new
+    outputs must land at the very end of _render()'s tuple, after the
+    Sprint 2 allocation chart's own two, never inserted in the middle --
+    every existing index used by other tests must stay stable."""
+    position = _make_alpaca_position(symbol="AAPL", unrealized_pl=42.0)
+    ui = PortfolioIntelligenceUI(
+        screen_provider=lambda: PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(position,),
+        )
+    )
+
+    updates = ui._render()
+
+    assert len(updates) == 28
+    card_update, chart_update = updates[26], updates[27]
+    assert card_update["visible"] is True
+    assert chart_update["visible"] is True
+    assert list(chart_update["value"]["symbol"]) == ["AAPL"]
+    assert list(chart_update["value"]["unrealized_pl"]) == [42.0]
+
+
+def test_pnl_chart_hidden_via_render_when_alpaca_becomes_unavailable():
+    ui = PortfolioIntelligenceUI(
+        screen_provider=lambda: PortfolioScreen(capital=_make_capital(), alpaca_account=None)
+    )
+
+    updates = ui._render()
+
+    card_update, chart_update = updates[26], updates[27]
+    assert card_update["visible"] is False
+    assert chart_update["visible"] is False
+
+
+def test_timeframe_selector_change_outputs_unchanged_by_the_pnl_chart():
+    """Requirement: the existing timeframe selector's own wiring (6
+    portfolio-history/drawdown outputs) must be completely unaffected by
+    the new, unrelated Unrealized P&L by Holding chart."""
+    ui = PortfolioIntelligenceUI(
+        PortfolioScreen(
+            capital=_make_capital(), alpaca_account=_make_alpaca_account(),
+            alpaca_positions=(_make_alpaca_position(),),
+        )
+    )
+    demo = ui.build()
+
+    radio_id = next(
+        id_ for id_, b in demo.blocks.items() if isinstance(b, gr.Radio)
+    )
+    change_dep = next(
+        dep for dep in demo.config["dependencies"]
+        if dep["targets"] == [(radio_id, "change")]
+    )
+    assert len(change_dep["outputs"]) == 6
+
+
+def test_pnl_chart_introduces_no_new_data_source_import():
+    """The P&L chart must be driven purely by screen.alpaca_positions
+    already on PortfolioScreen -- no new adapter/service import, no new
+    Alpaca API call, no new network dependency wired into the UI module.
+    Inspects the actual `import`/`from ... import` statements (via ast),
+    not the full source text -- existing docstrings elsewhere in this
+    module legitimately mention adapters.alpaca_paper_source by name when
+    describing where the data ultimately comes from."""
+    import ast
+
+    import applications.trading_intelligence.ui.portfolio_intelligence.gradio_view as module
+
+    tree = ast.parse(inspect.getsource(module))
+    imported_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_names.add(node.module)
+
+    assert not any("alpaca_paper_source" in name for name in imported_names)
+    assert not any(
+        name in ("requests", "httpx", "urllib.request") for name in imported_names
+    )

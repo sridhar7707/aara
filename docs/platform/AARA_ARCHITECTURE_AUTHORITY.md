@@ -66,7 +66,51 @@ being used to make real calls (as `TRADING_INTELLIGENCE_BOUNDARY.md` and
 | `docs/platform/DASHBOARD_DEPENDENCY_REDUCTION_PLAN.md` | Authoritative: documents `dashboard/`'s coupling to `bot`/`database`/`scheduler` and un-decided reduction options. Promoted from `docs/architecture/`. No option chosen yet. |
 | `docs/analysis/BOT_RUNTIME_BASELINE.md`, `BOT_DEPENDENCY_MAP.md`, `BOT_EXTRACTION_CANDIDATES.md` | Authoritative findings (what was discovered, not a decision) — entry points, import coupling, per-module extraction risk. Includes the corrected finding that `scheduler/` is a second live trading-trigger path, not an unused/legacy module. |
 | `docs/platform/SENTINEL_ENGINE_DOMAIN_VOCABULARY.md` | Reference vocabulary only (not authoritative): preserves Sentinel Engine domain terminology and unresolved concepts. Does not authorize implementation, migration, package movement, or architecture decisions. Conflicts and decisions remain governed by ADRs. |
+| `docs/architecture/SENTINEL_ENGINE_PAPER_TRADING_BEHAVIORAL_CONTRACT_P0.md` | Non-binding working material (gitignored, per ADR-044): consolidates the Sentinel Engine's decision-formation capability into a paper-trading behavioral contract under the *current* Accepted governance model (ADR-047, ADR-048, ADR-049, ADR-050, `RiskManager.approve_buy()`). Introduces no new authority and is not Accepted; describes existing ratified behavior only. |
 | `docs/architecture/*` (remaining files) | Gitignored working drafts (Phase 2A Gradio/mock-data decision-intelligence UI spec — a different "Phase 2A" than this migration's, see Terminology below). Not binding on `sentinel_engine/` or product-identity decisions. |
+| `docs/platform/AARA_PLATFORM_ARCHITECTURE.md` | Long-term platform vision doc; its hierarchy diagram is the one ADR-007 cites as already-reconciled with this Authority doc (see ADR-007's Status Log). Aspirational product roster (CFO/Tax/Estate/Retirement) is not current scope until a PRD exists for each. |
+| `docs/platform/AARA_PLATFORM_SHELL_ARCHITECTURE.md` | Authoritative for platform shell responsibilities — foundational, cited by `AARA_PLATFORM_USER_EXPERIENCE.md` and 3 other docs in this family. |
+| `docs/products/AARA_PLATFORM_USER_EXPERIENCE.md` | Authoritative for platform shell UX and navigation, together with `AARA_PRODUCT_NAVIGATION_ARCHITECTURE.md` (which explicitly extends its §2). |
+| `docs/products/AARA_PRODUCT_NAVIGATION_ARCHITECTURE.md` | Extends `AARA_PLATFORM_USER_EXPERIENCE.md` §2 — read as one continuous document with it, not a competing doc. |
+| `docs/platform/AARA_NAVIGATION_MODEL_ARCHITECTURE.md` | Platform-level nav composition (Product > Workspace); shares an unresolved "visibility inheritance" question with the two Workspace Registration docs below — resolve once, reference from all three. |
+| `docs/platform/AARA_IDENTITY_AND_ACCESS_IMPLEMENTATION_PLAN.md` | Refines, does not contradict, ADR-003's identity/access model. |
+| `docs/platform/AARA_PRODUCT_REGISTRATION_ARCHITECTURE.md` | Companion/prerequisite to Workspace Registration, one granularity level up. |
+| `docs/platform/AARA_WORKSPACE_REGISTRATION_ARCHITECTURE.md` | Shares the open "visibility inheritance" question with Product Registration and Navigation Model above — same question, tracked in three places. |
+| `docs/platform/AARA_WORKSPACE_ACTIVATION_ARCHITECTURE.md` | Analyzes the same missing "workspace entry resolver" gap as Workspace Entry Architecture below — read as one continuous document with it. |
+| `docs/platform/AARA_WORKSPACE_ENTRY_ARCHITECTURE.md` | Names the missing workspace-entry-resolver component; Workspace Activation above adds the options analysis for the same gap. |
+| `docs/platform/SENTINEL_INTELLIGENCE_ENGINE_ARCHITECTURE.md` | Broadest-scope vision-tier doc for the engine; best "start here" entry point, though its literal package layout is superseded by ADR-001 (see `SENTINEL_ENGINE_BOUNDARY_AND_API_CONTRACTS.md` row above). |
+| `docs/platform/SENTINEL_ENGINE_SERVICE_ARCHITECTURE.md` | ~80% identical content to `SENTINEL_INTELLIGENCE_ENGINE_ARCHITECTURE.md`, written independently with no cross-references — merge candidate (see `docs/DOCUMENT_CONSOLIDATION_PLAN.md`); its unique API-contract and migration-map sections aren't covered elsewhere. |
+| `docs/platform/SENTINEL_ENGINE_RUNTIME_FLOW.md` | Canonical for runtime lifecycle — the same content is independently restated in Service Architecture and Intelligence Engine Architecture; this should be the only copy. |
+| `docs/platform/SENTINEL_ENGINE_GOVERNANCE_ARCHITECTURE.md` | Canonical for the governance layer (more depth than the master doc's summary section). |
+| `docs/platform/SENTINEL_ENGINE_MEMORY_ARCHITECTURE.md` | Canonical for the memory layer — same pattern as Governance Architecture. |
+| `docs/platform/SENTINEL_ENGINE_REASONING_ARCHITECTURE.md` | Canonical for the reasoning layer — same pattern. |
+| `docs/platform/SENTINEL_ENGINE_EVENT_ARCHITECTURE.md` | Vision-tier event philosophy — distinct scope from the grounded `TRADING_INTELLIGENCE_EVENT_MODEL.md` (not a duplicate of it), but restates this family's master doc's event philosophy. |
+| `docs/platform/SENTINEL_ENGINE_DEPLOYMENT_ARCHITECTURE.md` | Unique topic (deployment), no overlap found. |
+| `docs/platform/SENTINEL_ENGINE_SECURITY_AND_PRIVACY_ARCHITECTURE.md` | Aspirational multi-tenant/multi-product security model. Distinct in scope from `docs/SECURITY.md`, which covers the concrete bot/dashboard system actually credentialed today. |
+| `docs/platform/SENTINEL_ENGINE_AI_ORCHESTRATION_ARCHITECTURE.md` | Vision-tier; aspirational product roster (CFO/Tax/Estate/Retirement) not reflected in the real 2-product scope — needs review before being cited as current. |
+| `docs/platform/SENTINEL_ENGINE_DATA_MODEL.md` | Vision-tier; verify its 8 domain objects against the real implemented `sentinel_engine/` contracts (ADR-066 etc.) before treating as authoritative. |
+| `docs/platform/SENTINEL_ENGINE_PHASE1_DECISION_LIFECYCLE.md` | Only grounded, current-dated (2026-08-06) doc in this vision-tier set — an implementation contract against ADR-001's structure, not an implementation itself. |
+| `docs/platform/PHASE_0_ARCHITECTURE_VALIDATION_REPORT.md` | Historical validation record for the `sentinel/` → `sentinel_engine/` archival (ADR-001, ADR-008) — a point-in-time snapshot, not a living document. |
+| `docs/platform/TRADING_INTELLIGENCE_APPLICATION_ARCHITECTURE.md` | Package structure/dependency direction for `applications/trading_intelligence/`. |
+| `docs/platform/TRADING_INTELLIGENCE_READ_MODEL_CONTRACTS.md` | Cited as authority by 2 other docs in this family; contract design for read models against `sentinel_engine/` projections. |
+| `docs/platform/TRADING_INTELLIGENCE_SENTINEL_READ_INTEGRATION_DESIGN.md` | Its recommended Option A is confirmed already implemented in `applications/trading_intelligence/adapters/sentinel_projection_decision_source.py`. Not the same decision as `TRADING_INTELLIGENCE_SENTINEL_LEDGER_INTEGRATION_OPTIONS.md` above despite the near-identical name — that one is ownership, this one is read-path. |
+| `docs/platform/WEALTH_INTELLIGENCE_BOUNDARY.md` | Records the Wealth Intelligence ↔ `sentinel_engine` ownership boundary, including relocations already completed and ratified (ADR-025). |
+| `docs/products/AARA_TRADING_INTELLIGENCE_PRODUCT_ARCHITECTURE.md` | Canonical PRD-tier document for Trading Intelligence (Product #1) — vision/scope/6-screen workspace anchor. |
+| `docs/products/AARA_TRADING_INTELLIGENCE_MVP_SCOPE_DECISION.md` | Functions as a binding scope decision though filed among design docs — candidate for relocation into `docs/decisions/` as a numbered ADR (see `docs/DOCUMENT_CONSOLIDATION_PLAN.md`). |
+| `docs/products/AARA_TRADING_INTELLIGENCE_DECISION_CENTER_CAPABILITY_MODEL.md` | Canonical rollup synthesizing the 5 capability-design docs below — deliberate layering, not duplication. |
+| `docs/products/AARA_TRADING_INTELLIGENCE_DECISION_CENTER_DESIGN.md` | Foundational screen design for the Decision Center — cited as authority by the other 4 capability-design docs. |
+| `docs/products/AARA_TRADING_INTELLIGENCE_EVIDENCE_DESIGN.md` | One of the 5 capability-design docs synthesized by the Capability Model. |
+| `docs/products/AARA_TRADING_INTELLIGENCE_GOVERNANCE_INTELLIGENCE_DESIGN.md` | Same; explicitly defers ADR-004 ledger ownership. |
+| `docs/products/AARA_TRADING_INTELLIGENCE_RISK_INTELLIGENCE_DESIGN.md` | Same; note the "Risk Intelligence" naming collision with the UI Specification doc's screen of the same name — a glossary/naming fix, not a merge. |
+| `docs/products/AARA_TRADING_INTELLIGENCE_APPLICATION_COMPOSITION_DESIGN.md` | Composition/wiring detail; corrects two other docs found stale against real code. |
+| `docs/products/AARA_TRADING_INTELLIGENCE_DEMO_RUNTIME_DESIGN.md` | Most recently written in this family; extends the Composition Design's gap list. |
+| `docs/products/AARA_TRADING_INTELLIGENCE_MVP_EXPERIENCE_DESIGN.md` | Narrative/journey reference — MVP Scope Decision above is authoritative for the final scope; this doc restates it plus prose detail. |
+| `docs/products/AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md` | Establishes the 6-screen Trading Intelligence structure every downstream design doc builds on. |
+| `docs/products/AARA_TRADING_INTELLIGENCE_UI_IMPLEMENTATION_PLAN.md` | Frozen code-location decision (Option C), confirmed by real code in `applications/trading_intelligence/ui/`. |
+| `docs/products/AARA_TRADING_INTELLIGENCE_UNITS_1_3_DATA_PROVISIONING_SCOPE_DECISION.md` | Scope decision for production data provisioning, Units 1–3. |
+| `docs/products/AARA_WEALTH_INTELLIGENCE_PRODUCT_ARCHITECTURE.md` | Describes an aspirational product (Plaid aggregation, Wealth X-Ray/Map) with zero matching code — the shipped `applications/wealth_intelligence/` app is a minimal Decision-Center clone. Flagged for reconciliation, not authoritative as a current PRD until code catches up. |
+
+*(Table expanded 2026-09-18 to individually name the ~38 `docs/platform/` and `docs/products/` files this table previously left unadjudicated — see `docs/DOCUMENT_CONSOLIDATION_PLAN.md` Phase 1.)*
 
 ## Product model (per CODEBASE_MIGRATION_MATRIX.md)
 

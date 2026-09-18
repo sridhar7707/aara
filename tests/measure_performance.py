@@ -142,11 +142,16 @@ def measure_memory() -> dict:
 
 
 def measure_test_suite() -> dict:
-    """Time the full pytest run."""
+    """Time a full repo-wide pytest run. Deliberately no path args: passing
+    `tests/ sentinel_engine/ applications/` explicitly triggers pytest import-file
+    collisions (duplicate test-module basenames across those trees) that bare
+    discovery from rootdir does not hit. Previously scoped to `tests/` only, which
+    undercounted the suite by roughly two-thirds once the Sentinel Engine and
+    applications/ test trees grew past the legacy bot's own tests/ folder."""
     import subprocess
     t = time.perf_counter()
     r = subprocess.run(
-        [sys.executable, "-m", "pytest", "tests/", "-q", "--tb=no", "--no-header"],
+        [sys.executable, "-m", "pytest", "-q", "--tb=no", "--no-header"],
         capture_output=True, text=True, cwd=str(ROOT)
     )
     elapsed = _ms(t)
@@ -255,6 +260,14 @@ def main() -> None:
     print("Measuring...")
     results: dict = {}
 
+    # Test suite runs first, in its own subprocess, before any of the measurements
+    # below import dashboard/database modules into *this* process — those imports
+    # open a shared, single-writer DuckDB connection (analytics.duckdb) that would
+    # otherwise still be held open when the pytest subprocess tries to open the same
+    # file, producing spurious "file already open" collection errors.
+    print("  Test suite (this may take a few minutes)...")
+    results["test_suite"] = measure_test_suite()
+
     print("  DB queries...")
     results["db_queries"] = measure_db_queries()
 
@@ -266,9 +279,6 @@ def main() -> None:
 
     print("  Memory...")
     results["memory"] = measure_memory()
-
-    print("  Test suite (this may take ~40s)...")
-    results["test_suite"] = measure_test_suite()
 
     results["measured_at"] = datetime.datetime.now().isoformat()
 

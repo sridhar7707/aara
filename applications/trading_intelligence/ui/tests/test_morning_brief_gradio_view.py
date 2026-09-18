@@ -695,6 +695,10 @@ def test_portfolio_history_with_real_points_renders_the_chart_and_no_message():
 
 
 def test_portfolio_history_caption_shows_the_most_recent_point_as_of():
+    """Hardening (combined Sprint 5+6+7): the caption must use the SAME
+    human-readable "%Y-%m-%d %H:%M %Z" America/Chicago format every other
+    "as of" line on this screen already uses -- not the raw ISO-8601
+    string. 2026-09-13T12:00:00+00:00 (UTC) is 2026-09-13 07:00 CDT."""
     points = (
         PortfolioHistoryPoint(as_of="2026-09-01T12:00:00+00:00", portfolio_value=99000.0),
         PortfolioHistoryPoint(as_of="2026-09-13T12:00:00+00:00", portfolio_value=100500.0),
@@ -703,7 +707,8 @@ def test_portfolio_history_caption_shows_the_most_recent_point_as_of():
 
     combined = "\n".join(_html_values(MorningBriefUI(screen=screen).build()))
 
-    assert f"{_SECTION_AS_OF_PREFIX}2026-09-13T12:00:00+00:00" in combined
+    assert f"{_SECTION_AS_OF_PREFIX}2026-09-13 07:00 CDT" in combined
+    assert "2026-09-13T12:00:00+00:00" not in combined
 
 
 def test_portfolio_history_caption_is_absent_when_unavailable_or_empty():
@@ -937,6 +942,24 @@ def test_drawdown_chart_has_only_the_two_real_columns():
     chart = _drawdown_chart(MorningBriefUI(screen=screen).build())
 
     assert set(chart.value["columns"]) == {"as_of", "drawdown_pct"}
+
+
+def test_drawdown_caption_shows_the_most_recent_point_as_of_human_readable():
+    """Hardening (combined Sprint 5+6+7): mirrors the Portfolio Value
+    Trend chart's own caption fix -- the raw ISO-8601 timestamp must never
+    be shown verbatim; it must use the SAME human-readable "%Y-%m-%d %H:%M
+    %Z" America/Chicago format every other "as of" line on this screen
+    already uses. 2026-09-02T00:00:00+00:00 (UTC) is 2026-09-01 19:00 CDT."""
+    points = (
+        DrawdownPoint(as_of="2026-09-01T00:00:00+00:00", portfolio_value=100000.0, drawdown_pct=0.0),
+        DrawdownPoint(as_of="2026-09-02T00:00:00+00:00", portfolio_value=95000.0, drawdown_pct=5.0),
+    )
+    screen = replace(build_mock_screen(), drawdown_history=points)
+
+    combined = "\n".join(_html_values(MorningBriefUI(screen=screen).build()))
+
+    assert f"{_SECTION_AS_OF_PREFIX}2026-09-01 19:00 CDT" in combined
+    assert "2026-09-02T00:00:00+00:00" not in combined
 
 
 def test_drawdown_refresh_updates_the_chart():

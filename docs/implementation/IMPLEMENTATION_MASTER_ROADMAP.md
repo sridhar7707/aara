@@ -1,5 +1,10 @@
 ﻿# Implementation Master Roadmap
 
+> **Superseded by:** [`SENTINEL_EXTRACTION_PLAN.md`](SENTINEL_EXTRACTION_PLAN.md) — this is a Day-1
+> (2026-08-04) planning snapshot, never updated; it states the Sentinel Engine extraction as "NOT
+> STARTED" when it is now complete (Phases 0–7 and 2A) per the Extraction Plan's live status log.
+> Kept for historical reference only; see `docs/DOCUMENT_CONSOLIDATION_PLAN.md`.
+
 ## Purpose
 
 This document is the execution roadmap for converting the existing AI Trading System into the AARA Platform foundation through Sentinel Intelligence Engine extraction.

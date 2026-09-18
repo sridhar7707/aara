@@ -1,5 +1,6 @@
 .env
 .worktrees/
+.impeccable/
 __pycache__/
 *.py[cod]
 *.pyo

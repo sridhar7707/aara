@@ -2,6 +2,8 @@
 
 Persistent project instructions for Claude Code in this repository. Follow these rules in every session.
 
+- ALWAYS critique your answer before giving it — check it for flawed assumptions, gaps, or better alternatives before responding
+
 # AARA Project Working Rules
 
 ## Documentation Rules

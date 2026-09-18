@@ -1,6 +1,8 @@
 # Trading Intelligence Event Model
 
-**Status:** Design proposal — establishes the event contract, not an implementation.
+**Status:** Authoritative (per `platform/AARA_ARCHITECTURE_AUTHORITY.md`'s document-roles table —
+self-label corrected 2026-09-18 from a stale "Design proposal," see
+`docs/DOCUMENT_CONSOLIDATION_PLAN.md`). Establishes the event contract, not an implementation.
 **Scope:** Documentation only. No code changes, no adapters built, no `bot/`
 modifications, no `sentinel_engine/` modifications. Confirmed via `git status` on
 all protected paths before and after this document was written.

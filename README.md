@@ -1,279 +1,165 @@
-# 🤖 AI Trading Bot
+# AI Trading Bot / AARA — Sentinel Intelligence Platform
 
-A self-learning AI trading bot that targets index outperformance (beating the S&P 500) using Reinforcement Learning, trained on Stocks and ETFs via Alpaca (paper trading) with a fully autonomous execution pipeline.
+An autonomous paper-trading system (XGBoost + LSTM + PPO reinforcement-learning ensemble, governed by
+a 10-gate signal filter and a hard-coded risk manager) that runs on a fully free stack (GitHub
+Actions, HuggingFace Spaces, Alpaca paper trading). Built alongside it, on the same codebase: a
+governance-first Decision Intelligence platform (**Sentinel Intelligence Engine**) with 71 Architecture
+Decision Records, a 4,500+ test suite, and an explicit documentation hierarchy — because a system that
+graduates to real money needs an audit trail for *why* it does what it does, not just code that works.
 
-> **Status:** 🟡 Paper Trading Phase — not yet deployed with real money
-
----
-
-## 🎯 Goals
-
-- Beat the S&P 500 annual return (~10%)
-- Trade Stocks + ETFs autonomously
-- Start with paper trading, graduate to real money only after passing confidence checks
-- Run 100% free on GitHub Actions + Hugging Face + Alpaca
+> **Status:** Paper trading only — real-money execution is gated behind the Confidence Check in §5,
+> and has not been enabled. See `docs/decisions/` for the architectural decision history and
+> `docs/SECURITY.md` for what "going live" is defined to require.
 
 ---
 
-## 🏗️ Architecture
+## Screens
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     FULLY FREE STACK                        │
-├───────────────┬──────────────────┬──────────────────────────┤
-│ Hugging Face  │  GitHub Actions  │       Alpaca API         │
-│               │                  │                          │
-│ • RL Model    │ • Runs bot every │ • Paper trading          │
-│   storage     │   5 min (market  │ • Free market data       │
-│ • ZeroGPU     │   hours)         │ • Order execution        │
-│   training    │ • Sunday retrain │ • Portfolio tracking     │
-│ • Dashboard   │ • Keep-alive     │                          │
-│   (Gradio)    │   ping           │                          │
-└───────────────┴──────────────────┴──────────────────────────┘
-        ↓                                      ↓
-  Telegram Bot                        SQLite (trade log)
-  (free alerts)                       (committed to repo)
-```
+The Trading Intelligence Decision Center — six screens, each grounded in real data through the
+pipeline described in §3, not mock content.
 
-### Data Flow (Every 5 Minutes)
-```
-1. Fetch latest prices + indicators (Alpaca)
-2. Classify market regime (Trending / Ranging / Volatile)
-3. Feed observation to RL agent
-4. Risk manager approves or blocks action
-5. Execute order on Alpaca (paper)
-6. Log outcome to SQLite
-7. Send Telegram alert
-```
+| Morning Brief | Decision Center |
+|---|---|
+| ![Morning Brief](docs/screenshots/01_morning_brief_desktop.png) | ![Decision Center](docs/screenshots/02_decision_center_desktop.png) |
 
-### Weekly Retraining (Every Sunday 2am UTC)
-```
-1. Pull last 30 days of trade history
-2. Retrain RL agent on HuggingFace ZeroGPU
-3. Backtest new model vs old model
-4. Deploy new model only if it outperforms
-5. Send weekly performance report via Telegram
-```
+| Portfolio Intelligence | Risk Intelligence |
+|---|---|
+| ![Portfolio Intelligence](docs/screenshots/03_portfolio_intelligence_desktop.png) | ![Risk Intelligence](docs/screenshots/04_risk_intelligence_desktop.png) |
+
+| Performance Learning | Settings |
+|---|---|
+| ![Performance Learning](docs/screenshots/05_performance_learning_desktop.png) | ![Settings](docs/screenshots/06_settings_desktop.png) |
+
+Responsive down to mobile (Morning Brief and Decision Center shown; same treatment across all six):
+
+| Morning Brief (mobile) | Decision Center (mobile) |
+|---|---|
+| ![Morning Brief mobile](docs/screenshots/07_morning_brief_mobile.png) | ![Decision Center mobile](docs/screenshots/08_decision_center_mobile.png) |
 
 ---
 
-## 📁 Project Structure
+## 1. What's Actually Here
 
-```
-aara/
-│
-├── bot/                        # Core bot logic
-│   ├── execution/              # Order execution (Alpaca)
-│   │   ├── __init__.py
-│   │   └── alpaca_client.py    # Alpaca API wrapper
-│   ├── strategy/               # Trading strategies
-│   │   ├── __init__.py
-│   │   ├── rl_agent.py         # PPO Reinforcement Learning agent
-│   │   ├── regime_classifier.py# Market regime detection
-│   │   └── features.py         # Technical indicator engineering
-│   ├── risk/                   # Risk management (hard overrides)
-│   │   ├── __init__.py
-│   │   └── risk_manager.py     # Stop-loss, position sizing, PDT guard
-│   └── monitor/                # Alerting & health checks
-│       ├── __init__.py
-│       └── telegram_bot.py     # Telegram notification system
-│
-├── data/                       # Data storage
-│   ├── raw/                    # Raw OHLCV data from Alpaca
-│   ├── processed/              # Cleaned + feature-engineered data
-│   └── features/               # Computed indicators cache
-│
-├── models/                     # ML models
-│   ├── saved/                  # Trained model checkpoints
-│   └── training/               # Training scripts + configs
-│
-├── backtest/                   # Backtesting engine
-│   ├── __init__.py
-│   ├── engine.py               # Core backtesting loop
-│   └── metrics.py              # Sharpe, drawdown, win rate etc.
-│
-├── dashboard/                  # HuggingFace Spaces Gradio app
-│   ├── app.py                  # Main Gradio dashboard
-│   ├── templates/
-│   └── static/
-│
-├── scripts/                    # Utility scripts
-│   ├── download_data.py        # Historical data downloader
-│   ├── train_model.py          # Offline model training
-│   ├── confidence_check.py     # Go-live readiness checker
-│   ├── save_model_hf.py        # Push model to HuggingFace Hub
-│   └── load_model_hf.py        # Pull model from HuggingFace Hub
-│
-├── notebooks/                  # Jupyter notebooks for research
-│   ├── 01_data_exploration.ipynb
-│   ├── 02_feature_engineering.ipynb
-│   ├── 03_backtesting.ipynb
-│   └── 04_model_training.ipynb
-│
-├── .github/
-│   └── workflows/
-│       ├── trade.yml           # Trading bot (every 5 min, market hours)
-│       ├── retrain.yml         # Weekly model retraining
-│       └── keepalive.yml       # HuggingFace Space keep-alive ping
-│
-├── sentinel/                    # Sentinel Intelligence -- a separate,
-│                                # governance-first Decision Intelligence
-│                                # platform. Phase 2A architectural
-│                                # scaffolding only (no logic/persistence/
-│                                # execution yet). See sentinel/README.md.
-│
-├── trades.db                   # SQLite trade history
-├── config.py                   # Configuration (symbols, parameters)
-├── requirements.txt            # Python dependencies
-├── .env.example                # Environment variable template
-└── .gitignore
-```
+Two things share this repository, at different levels of maturity — stated plainly, not blurred:
 
----
-
-## ⚙️ Setup
-
-### 1. Clone the repo
-```bash
-git clone https://github.com/YOUR_USERNAME/aara.git
-cd aara
-```
-
-### 2. Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Set up environment variables
-```bash
-cp .env.example .env
-# Edit .env with your API keys
-```
-
-### 4. Get your API keys (all free)
-
-| Service | Purpose | Link |
+| Layer | What it is | Maturity |
 |---|---|---|
-| Alpaca | Paper trading + market data | [alpaca.markets](https://alpaca.markets) |
-| Telegram | Trade alerts | [@BotFather](https://t.me/botfather) |
-| HuggingFace | Model storage + dashboard | [huggingface.co](https://huggingface.co) |
+| **The trading bot** (`bot/`, `dashboard/`, `.github/workflows/`) | A working, scheduled (every 5 min, market hours) paper-trading system with a public Gradio dashboard. Frozen against casual modification by [ADR-002](docs/decisions/ADR-002-bot-runtime-protection.md). | Production (paper) |
+| **Sentinel Intelligence Engine** (`sentinel_engine/`) + **Trading Intelligence** (`applications/trading_intelligence/`) | A governance-first Decision Intelligence platform being built alongside the bot — `Decision`/`Evidence`/`Event` domain contracts, a 6-screen Decision Center UI (Morning Brief, Decision Center, Portfolio/Risk Intelligence, Performance Learning, Settings), and an ADR-driven architecture process. Read-only today: it observes and explains, it does not yet influence execution ([ADR-066 §6](docs/decisions/ADR-066-sentinel-decision-evidence-domain-vocabulary-ratification.md)). | Active development |
 
-### 5. Run backtests first
-```bash
-python scripts/download_data.py
-python scripts/train_model.py
-python backtest/engine.py
+Both are real code with real tests — this isn't a vision doc ahead of an empty package. `sentinel_engine/` alone is 72 production modules across domain, services, evidence, governance, ledger, projections, adapters, and composition layers.
+
+## 2. Documentation
+
+`docs/README.md` is the full index (20+ documents). The ones worth knowing about first:
+
+| Document | Why it matters |
+|---|---|
+| [`docs/DOCUMENT_INDEX.md`](docs/DOCUMENT_INDEX.md) | The documentation hierarchy itself — what's binding, what's a draft, and the reading order for finding the canonical source on any topic. |
+| [`docs/decisions/`](docs/decisions/) | 71 ADRs — every structural decision (package boundaries, ledger ownership, identity model) recorded with context, alternatives, and an explicit acceptance step. Not a changelog; a decision record. |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | Trust boundaries, per-credential blast radius, and a concrete checklist for what real-money execution requires before it's enabled. |
+| [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) | Why a stochastic system (ML predictions drift every retrain) can't be unit-tested the normal way, and what actually gates a model's promotion to production. |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | What's monitored, what each alert means, and the incident procedure for the risks in `RISK_REGISTER.md`. |
+| [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | One lookup table for the vocabulary spanning both layers (`regime`, `risk gate`, `Decision`, `Evidence`, `Trust Ledger`, `Capability API`, ...). |
+| [`docs/DOCUMENT_GOVERNANCE_MATRIX.md`](docs/DOCUMENT_GOVERNANCE_MATRIX.md) + [`docs/DOCUMENT_CONSOLIDATION_PLAN.md`](docs/DOCUMENT_CONSOLIDATION_PLAN.md) | A self-audit of the documentation tree itself (134 documents at last count) and a phased plan to fix what it found — duplicate content, disagreeing authority claims, stale status labels. Governance that includes auditing its own overhead, not just producing more of it. |
+
+## 3. Trading Bot Architecture
+
+Data flows strictly downward — upper layers don't reach into lower ones.
+
+```
+Layer 1 — Data Ingestion      bot/strategy/features.py, macro.py, sentiment.py (FinBERT + Reddit)
+Layer 2 — Regime Classification    bot/strategy/regime_classifier.py  (TRENDING_UP / RANGING / ...)
+Layer 3 — Signal Generation   xgb_predictor.py, lstm_predictor.py, rl_agent.py (PPO) → ensemble.py
+                               → signal_gate.py (10-gate entry filter)
+Layer 4 — Risk Management     bot/risk/risk_manager.py — daily/weekly loss limits, PDT guard,
+                               drawdown circuit breaker, Kelly position sizing, stop-loss
+Layer 5 — Execution           bot/execution/alpaca_client.py — limit orders, fill confirmation
+Layer 6 — Monitoring          bot/monitor/ — Telegram alerts, HuggingFace sync, dashboard data
 ```
 
-### 6. Start paper trading
-```bash
-python bot/main.py --mode paper
+```
+GitHub Actions (cron, every 5 min, market hours)
+    └─► bot/main.py → per-symbol cycle (signals → gates → risk → execute)
+            └─► sync_db.py → HuggingFace Dataset (trades.db)
+
+HuggingFace Spaces (dashboard/app.py, always-on)
+    └─► reads trades.db (read-only — no path back to Alpaca; see docs/SECURITY.md §1)
 ```
 
----
+Full detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-## 🔐 GitHub Secrets Required
+## 4. Hard-Coded Risk Rules (verified against `config.py`, not aspirational)
 
-Add these in your repo → Settings → Secrets → Actions:
+| Rule | Value | Enforced in |
+|---|---|---|
+| Max position size | 20% of portfolio | `MAX_POSITION_PCT`, `risk_manager.py` |
+| Stop-loss (flat fallback) | 4% | `STOP_LOSS_PCT` |
+| Daily loss limit | 5% (halts new trades) | `DAILY_LOSS_LIMIT_PCT` |
+| Max sector exposure | 30% of portfolio | `MAX_SECTOR_EXPOSURE_PCT` |
+| Max positions per sector | 2 | `MAX_SECTOR_POSITIONS` |
+| Max open positions | 8 | `MAX_POSITIONS` |
+| PDT day-trade guard | ≤ 3 per rolling 5 days | `PDT_MAX_DAY_TRADES` |
 
-| Secret | Description |
-|---|---|
-| `ALPACA_KEY` | Alpaca API key |
-| `ALPACA_SECRET` | Alpaca secret key |
-| `TELEGRAM_TOKEN` | Telegram bot token |
-| `TELEGRAM_CHAT_ID` | Your Telegram chat ID |
-| `HF_TOKEN` | HuggingFace write token |
-| `HF_REPO_ID` | HuggingFace model repo (e.g. username/ai-trading-bot) |
+Manual emergency stop: touch `data/HALT_TRADING` — see [`docs/RUNBOOK.md`](docs/RUNBOOK.md) §2.
 
----
+## 5. Confidence Check — Gate to Real Money
 
-## 📊 Confidence Check — Before Going Live
+Real-money execution does not turn on by developer discretion — it's gated behind measured targets in
+[`docs/SUCCESS_METRICS.md`](docs/SUCCESS_METRICS.md), checked via:
 
-The bot will NOT use real money until it passes ALL of these:
-
-| Metric | Minimum |
-|---|---|
-| Paper trading duration | 60+ days |
-| Win rate | ≥ 52% |
-| Sharpe ratio | ≥ 1.0 |
-| Max drawdown | ≤ 15% |
-| vs S&P 500 | Outperforming |
-| Consecutive losing days | ≤ 4 |
-
-Run the check anytime:
 ```bash
 python scripts/confidence_check.py
 ```
 
----
-
-## 🛡️ Risk Management Rules (Hard-Coded, Non-Negotiable)
-
-- **Max position size:** 20% of portfolio per trade
-- **Stop-loss:** Auto-sell if position drops 4%
-- **Daily loss limit:** Bot halts if daily P&L hits -5%
-- **PDT guard:** Tracks day trades, halts before hitting the 3-trade limit (for sub-$25K accounts)
-- **Sector concentration:** Max 2 stocks per sector
-
----
-
-## 📈 Trading Strategy
-
-### Market Regime Detection
-The bot first classifies the current market condition:
-
-| Regime | Strategy |
+| Metric | Target |
 |---|---|
-| Trending UP | Momentum — ride winners |
-| Trending DOWN | Defensive — reduce exposure |
-| Ranging | Mean reversion — buy dips, sell rips |
-| High Volatility | Reduce position sizes, tighten stops |
+| Win rate | ≥ 60% |
+| Sharpe ratio | ≥ 1.0 |
+| Max drawdown | ≤ 12% |
+| Return vs. S&P 500 | Beat by ≥ 5pp |
+| AI recommendation follow rate | ≥ 70% |
 
-### RL Agent (PPO)
-- **Algorithm:** Proximal Policy Optimization (PPO) via Stable Baselines3
-- **Observation space:** Price features + technical indicators + portfolio state + regime label
-- **Action space:** Buy / Sell / Hold (with fractional share support)
-- **Reward function:** Risk-adjusted returns (Sharpe ratio) — not raw profit
-- **Retraining:** Every Sunday on HuggingFace ZeroGPU
+The plan beyond this gate is Alpaca paper trading now, graduating to a funded Robinhood account for
+real-money execution — not Alpaca live. See `docs/SECURITY.md` §5 for what that transition requires
+before it happens.
 
----
+## 6. Setup
 
-## 📱 Telegram Alerts
+```bash
+git clone <this-repo>
+pip install -r requirements.txt
+cp .env.example .env   # fill in the keys below
+python backtest/engine.py
+python bot/main.py --mode paper
+```
 
-The bot sends alerts for:
-- ✅ Every trade executed (buy/sell/hold)
-- 📊 Daily P&L summary at 4:05pm EST
-- ⚠️ Stop-loss triggers
-- 🚨 Daily loss limit reached (bot halted)
-- 🔴 Bot offline / health check failures
-- 🚀 Confidence check passed (ready for real money)
-- 📈 Weekly performance report vs S&P 500
+Required secrets (full inventory with outage handling: [`docs/EXTERNAL_SERVICES.md`](docs/EXTERNAL_SERVICES.md)):
 
----
+| Secret | Purpose |
+|---|---|
+| `ALPACA_KEY`, `ALPACA_SECRET` | Paper trading + market data |
+| `FRED_API_KEY` | Macro signals (VIX, T-bill) |
+| `NEWSAPI_KEY` | FinBERT sentiment input |
+| `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT` | WSB sentiment weighting |
+| `FINNHUB_API_KEY` | Screener analyst signals |
+| `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID` | Trade/risk alerts |
+| `HF_TOKEN`, `HF_DB_REPO_ID` | Trade-history push (bot) — the dashboard's own pull uses `HF_REPO_ID`; these are two different variables for two different directions, see `docs/EXTERNAL_SERVICES.md` |
 
-## 🗓️ Build Roadmap
+## 7. Verifying This Repo's Claims Yourself
 
-- [ ] **Phase 1** — Data pipeline (Alpaca OHLCV + indicators)
-- [ ] **Phase 2** — Backtesting engine
-- [ ] **Phase 3** — Market regime classifier
-- [ ] **Phase 4** — RL agent (PPO) — train locally
-- [ ] **Phase 5** — Risk manager
-- [ ] **Phase 6** — Alpaca paper trading execution
-- [ ] **Phase 7** — Telegram alerts
-- [ ] **Phase 8** — GitHub Actions scheduling
-- [ ] **Phase 9** — HuggingFace model storage + ZeroGPU retraining
-- [ ] **Phase 10** — Gradio dashboard on HF Spaces
-- [ ] **Phase 11** — UptimeRobot keep-alive for HF Space
-- [ ] **Phase 12** — Confidence check → graduate to real money
+```bash
+pytest -q                                        # 4,538 tests repo-wide (tests/ + sentinel_engine/ + applications/)
+python tests/ui_tester.py                        # design-system compliance, target 0 FAIL 0 WARN
+python tests/requirements_tracker.py --status    # feature completion tracker
+python tests/requirements_tracker.py --docs-check  # verifies every managed doc exists and README links resolve
+```
 
----
+## 8. Disclaimer
 
-## ⚠️ Disclaimer
+Educational project. Algorithmic trading carries real financial risk. Paper trading extensively
+before risking capital; nothing here is financial advice.
 
-This project is for **educational purposes only**. Algorithmic trading involves significant financial risk. Past performance does not guarantee future results. Always paper trade extensively before risking real capital. The authors are not financial advisors.
+## License
 
----
-
-## 📄 License
-
-MIT License — see [LICENSE](LICENSE)
+MIT — see [LICENSE](LICENSE)

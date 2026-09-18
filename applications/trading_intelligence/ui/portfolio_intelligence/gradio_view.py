@@ -53,6 +53,7 @@ from zoneinfo import ZoneInfo
 import gradio as gr
 import pandas as pd
 
+from applications.trading_intelligence.ui.chart_view import chart_header_html
 from applications.trading_intelligence.ui.integration_health_view import (
     CSS as _INTEGRATION_HEALTH_CSS,
     render_unavailable,
@@ -81,6 +82,55 @@ _gr_major = int(gr.__version__.split(".")[0])
 _DATAFRAME_HEIGHT_KWARG = "height" if _gr_major < 5 else "max_height"
 
 _HOLDINGS_HEADERS = ["Symbol", "Quantity", "Price", "Market Value", "Weight %"]
+
+# Sprint 2: Allocation by Holding chart -- a categorical/comparative visual
+# companion to the existing allocation bars (_format_holding_allocation_html),
+# sourced from the SAME already-fetched screen.holdings, never a second
+# read or a recomputed percentage. Secondary chart, not the page's hero
+# (that's Portfolio Value Trend) -- 220px, matching ui/performance_learning/
+# gradio_view.py's own Sprint 1 secondary-chart convention.
+_ALLOCATION_CHART_HEIGHT = 220
+_ALLOCATION_CHART_TITLE = "Current allocation by holding"
+_ALLOCATION_CHART_DESCRIPTION = (
+    "Share of current portfolio value represented by each holding."
+)
+# gr.BarPlot only takes a fill colour via a `color=` categorical column +
+# `color_map` (there is no plain solid-fill literal) -- a single-series
+# chart still needs one to avoid Vega's own default (unbranded) theme
+# colour. `_ALLOCATION_SERIES_LABEL` is the one constant value that column
+# holds for every row; #0B1F3A is the SAME --aara-navy literal design_
+# system.py already declares and ui/chart_view.py's WIN_LOSS_COLOR_MAP
+# already reuses for "Win" -- not a new palette entry.
+_ALLOCATION_SERIES_LABEL = "Holding"
+_ALLOCATION_COLOR_MAP = {_ALLOCATION_SERIES_LABEL: "#0B1F3A"}
+
+# Sprint 3: Unrealized P&L by Holding chart -- a categorical/comparative
+# visual answering "how are my current holdings performing right now?", a
+# different question from Allocation by Holding above ("what share of the
+# portfolio does each holding represent?"). Sourced from the SAME already-
+# fetched screen.alpaca_positions the Alpaca Paper Positions table below
+# already renders -- never a second Alpaca API call, never a recomputed
+# unrealized_pl.
+_PNL_CHART_HEIGHT = 220
+_PNL_CHART_TITLE = "Unrealized P&L by holding"
+_PNL_CHART_DESCRIPTION = "Current unrealized profit or loss for each open holding."
+# Gain/Loss colour: reuses the product's two EXISTING semantic tokens
+# (ui/design_system.py) rather than inventing a red/green pair --
+# --aara-emerald (#176B4D), already the product's "positive" colour (see
+# ui/decision_center/theme.py's approval-verdict vocabulary), and
+# --aara-negative-fg (#7A2E2E), the product's one restrained "loss" colour.
+# Deliberately NOT WIN_LOSS_COLOR_MAP (ui/chart_view.py) -- that map's
+# "Win"/navy encodes historical outcome accuracy, a different semantic from
+# a live position's current unrealized gain/loss, and chart_view.py's own
+# docstring reserves it for the win/loss-by-category shape specifically.
+# gr.BarPlot's color_map takes literal SVG colour values (it renders its
+# own chart, not app DOM CSS), so these are the same hex literals design_
+# system.py declares, not a CSS var() reference. Zero P&L buckets as
+# "Gain" (>= 0) -- a zero-height bar's colour is not visually meaningful,
+# so only a two-way sign split is needed.
+_PNL_GAIN_LABEL = "Gain"
+_PNL_LOSS_LABEL = "Loss"
+_PNL_COLOR_MAP = {_PNL_GAIN_LABEL: "#176B4D", _PNL_LOSS_LABEL: "#7A2E2E"}
 
 _ALPACA_POSITIONS_HEADERS = [
     "Symbol", "Quantity", "Avg Entry", "Current Price", "Market Value",
@@ -518,6 +568,38 @@ class PortfolioIntelligenceUI:
             )
 
             gr.HTML('<div class="pi-section-label">Allocation by Holding</div>')
+            # Sprint 2: chart ABOVE the existing allocation bars, visible
+            # under EXACTLY `holdings_visible` -- the SAME condition the
+            # Holdings table above already uses (screen.holdings_is_available
+            # and not screen.is_empty). No new threshold, no second read.
+            with gr.Column(
+                elem_classes=["aara-card", "pi-allocation-chart-card"],
+                visible=holdings_visible,
+            ) as allocation_chart_card:
+                gr.HTML(
+                    chart_header_html(_ALLOCATION_CHART_TITLE, _ALLOCATION_CHART_DESCRIPTION),
+                    visible=holdings_visible,
+                )
+                # gr.BarPlot's `y` column must be numeric (per its own
+                # signature docs) -- a plain x/y swap for a horizontal
+                # layout is not cleanly supported by this component, so
+                # this uses the same proven vertical-bar shape ui/
+                # performance_learning/gradio_view.py's Sprint 1 charts
+                # already use (categorical x, numeric y, `sort` pinning
+                # the x-axis category order).
+                allocation_chart = gr.BarPlot(
+                    value=self._format_holding_allocation_dataframe(initial.holdings or ()),
+                    x="symbol",
+                    y="weight_pct",
+                    color="series",
+                    x_title="Holding",
+                    y_title="Allocation (%)",
+                    color_map=_ALLOCATION_COLOR_MAP,
+                    sort=[h.symbol for h in self._ordered_holdings(initial.holdings or ())],
+                    height=_ALLOCATION_CHART_HEIGHT,
+                    visible=holdings_visible,
+                    elem_classes=["pi-allocation-chart"],
+                )
             holding_allocation_output = gr.HTML(self._holding_allocation_state(initial)[0])
 
             gr.HTML('<div class="pi-section-label">Portfolio Value Over Time</div>')
@@ -583,13 +665,45 @@ class PortfolioIntelligenceUI:
                 f'<span class="pi-alpaca-badge">{html.escape(_ALPACA_PAPER_BADGE_TEXT)}</span></div>'
             )
             alpaca_account_output = gr.HTML(self._alpaca_account_state(initial)[0])
+
+            # Sprint 3: chart ABOVE the detailed Alpaca position table,
+            # visible under EXACTLY `positions_visible` -- the SAME
+            # condition the table below already uses (screen.
+            # alpaca_is_available and len(alpaca_positions) > 0). No new
+            # threshold, no second read: `positions_rows`/`positions_visible`
+            # is the SAME call the table below already made, just hoisted
+            # above this new card so both can share its result.
+            positions_rows, positions_visible = self._alpaca_positions_table_state(initial)
+            with gr.Column(
+                elem_classes=["aara-card", "pi-pnl-chart-card"],
+                visible=positions_visible,
+            ) as pnl_chart_card:
+                gr.HTML(
+                    chart_header_html(_PNL_CHART_TITLE, _PNL_CHART_DESCRIPTION),
+                    visible=positions_visible,
+                )
+                pnl_chart = gr.BarPlot(
+                    value=self._format_alpaca_positions_pnl_dataframe(
+                        initial.alpaca_positions
+                    ),
+                    x="symbol",
+                    y="unrealized_pl",
+                    color="direction",
+                    x_title="Holding",
+                    y_title="Unrealized P&L ($)",
+                    color_map=_PNL_COLOR_MAP,
+                    sort=[p.symbol for p in initial.alpaca_positions],
+                    height=_PNL_CHART_HEIGHT,
+                    visible=positions_visible,
+                    elem_classes=["pi-pnl-chart"],
+                )
+
             positions_message_value, positions_message_visible = (
                 self._alpaca_positions_message_state(initial)
             )
             alpaca_positions_message_output = gr.HTML(
                 positions_message_value, visible=positions_message_visible,
             )
-            positions_rows, positions_visible = self._alpaca_positions_table_state(initial)
             alpaca_positions_table = gr.Dataframe(
                 headers=_ALPACA_POSITIONS_HEADERS,
                 value=positions_rows,
@@ -696,6 +810,16 @@ class PortfolioIntelligenceUI:
                 # involvement) and the drawdown chart's own three outputs.
                 holding_allocation_output,
                 drawdown_summary_output, drawdown_message_output, drawdown_chart,
+                # Sprint 2: same append-only discipline -- the Allocation by
+                # Holding chart card and the chart itself, both appended at
+                # the very end so every existing index above stays stable.
+                allocation_chart_card, allocation_chart,
+                # Sprint 3: same append-only discipline -- the Unrealized
+                # P&L by Holding chart card and the chart itself, appended
+                # after the Sprint 2 pair so every existing index above
+                # (including allocation_chart_card/allocation_chart) stays
+                # stable.
+                pnl_chart_card, pnl_chart,
             ]
 
             # Same disable -> render -> enable double-submit guard chain as
@@ -809,6 +933,29 @@ class PortfolioIntelligenceUI:
             gr.update(value=drawdown_summary_value),
             gr.update(value=drawdown_message_value, visible=drawdown_message_visible),
             gr.update(value=drawdown_dataframe, visible=drawdown_visible),
+            # Sprint 2: same append-only discipline -- Allocation by Holding
+            # chart, gated on the SAME holdings_is_available/is_empty pair
+            # the Holdings table above already reads from this render's
+            # screen (_table_update(self._holdings_table_state(screen))),
+            # never a second read.
+            gr.update(visible=screen.holdings_is_available and not screen.is_empty),
+            gr.update(
+                value=self._format_holding_allocation_dataframe(screen.holdings or ()),
+                visible=screen.holdings_is_available and not screen.is_empty,
+            ),
+            # Sprint 3: same append-only discipline -- Unrealized P&L by
+            # Holding chart, gated on the SAME alpaca_is_available/
+            # alpaca_positions pair the Alpaca Paper Positions table above
+            # already reads from this render's screen
+            # (_table_update(self._alpaca_positions_table_state(screen))),
+            # never a second read.
+            gr.update(
+                visible=screen.alpaca_is_available and len(screen.alpaca_positions) > 0
+            ),
+            gr.update(
+                value=self._format_alpaca_positions_pnl_dataframe(screen.alpaca_positions),
+                visible=screen.alpaca_is_available and len(screen.alpaca_positions) > 0,
+            ),
         )
 
     def _on_timeframe_change(
@@ -1428,19 +1575,29 @@ class PortfolioIntelligenceUI:
         ]
 
     @staticmethod
+    def _ordered_holdings(
+        holdings: Tuple[PortfolioHolding, ...],
+    ) -> Tuple[PortfolioHolding, ...]:
+        """The one authoritative display order for allocation-by-holding,
+        shared by the existing allocation bars (_format_holding_allocation_
+        html) and the Sprint 2 chart (_format_holding_allocation_dataframe)
+        so the two can never drift apart: weight_pct descending (the most
+        useful reading order for "what am I most exposed to"), ties broken
+        alphabetically by symbol so the same inputs always render the same
+        order."""
+        return tuple(sorted(holdings, key=lambda h: (-h.weight_pct, h.symbol)))
+
+    @staticmethod
     def _format_holding_allocation_html(holdings: Tuple[PortfolioHolding, ...]) -> str:
         """Visual Dashboard Phase B: one bar per holding -- symbol +
         allocation percentage. weight_pct is already the authoritative,
         live-priced figure PortfolioHolding carries (see bootstrap.py's
         _build_portfolio_holdings, which computes it as this holding's
         share of total holdings market value) -- reused verbatim here,
-        never recomputed, never a new valuation. Deterministic order:
-        weight_pct descending (the most useful reading order for "what am
-        I most exposed to"), ties broken alphabetically by symbol so the
-        same inputs always render the same order. One decimal place only
+        never recomputed, never a new valuation. One decimal place only
         -- matches the Holdings table's own Weight % column -- avoids
         implying false precision."""
-        ordered = sorted(holdings, key=lambda h: (-h.weight_pct, h.symbol))
+        ordered = PortfolioIntelligenceUI._ordered_holdings(holdings)
         rows = "".join(
             '<div class="pi-holding-allocation-row">'
             f'<span class="pi-holding-allocation-symbol">{html.escape(holding.symbol)}</span>'
@@ -1452,6 +1609,53 @@ class PortfolioIntelligenceUI:
             for holding in ordered
         )
         return f'<div class="pi-holding-allocation-list">{rows}</div>'
+
+    @staticmethod
+    def _format_holding_allocation_dataframe(
+        holdings: Tuple[PortfolioHolding, ...],
+    ) -> pd.DataFrame:
+        """Sprint 2: the Allocation by Holding chart's dataframe -- two real
+        columns only, symbol and weight_pct, taken verbatim from the SAME
+        PortfolioHolding tuple the existing allocation bars above already
+        render (never a second read, never a recomputed percentage), in the
+        SAME authoritative order (_ordered_holdings) so the chart and the
+        bars below it always agree. An empty `holdings` tuple (unavailable
+        or genuinely zero open positions) yields an empty, schema-correct
+        DataFrame -- never a fabricated row."""
+        ordered = PortfolioIntelligenceUI._ordered_holdings(holdings)
+        return pd.DataFrame(
+            {
+                "symbol": [holding.symbol for holding in ordered],
+                "weight_pct": [holding.weight_pct for holding in ordered],
+                "series": [_ALLOCATION_SERIES_LABEL for _ in ordered],
+            }
+        )
+
+    @staticmethod
+    def _format_alpaca_positions_pnl_dataframe(
+        positions: Tuple[AlpacaPosition, ...],
+    ) -> pd.DataFrame:
+        """Sprint 3: the Unrealized P&L by Holding chart's dataframe --
+        symbol and unrealized_pl taken verbatim from the SAME already-
+        fetched AlpacaPosition tuple the existing Alpaca Paper Positions
+        table below already renders (never a second Alpaca read, never a
+        recomputed P&L figure), in the SAME order that table already uses
+        (positions as fetched -- no invented sort). `direction` is a purely
+        presentational sign bucket (>= 0 is "Gain", < 0 is "Loss") that
+        only selects the bar's colour via _PNL_COLOR_MAP; it carries no
+        meaning beyond that. An empty `positions` tuple (unavailable or
+        zero open Alpaca positions) yields an empty, schema-correct
+        DataFrame -- never a fabricated row."""
+        return pd.DataFrame(
+            {
+                "symbol": [position.symbol for position in positions],
+                "unrealized_pl": [position.unrealized_pl for position in positions],
+                "direction": [
+                    _PNL_GAIN_LABEL if position.unrealized_pl >= 0 else _PNL_LOSS_LABEL
+                    for position in positions
+                ],
+            }
+        )
 
     @staticmethod
     def _format_empty_message_html(screen: PortfolioScreen) -> str:
