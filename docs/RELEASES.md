@@ -1,6 +1,6 @@
 # TradeGenius AI — Release History
 
-Last updated: 2026-06-27
+Last updated: 2026-09-18
 
 Versions follow the requirements tracker version (`_ver(state)` in `requirements_tracker.py`).
 Each release corresponds to a batch of completed SPECs.
@@ -93,7 +93,11 @@ Each release corresponds to a batch of completed SPECs.
 
 ## Upcoming
 
-No planned releases. All 53 SPECs complete. Next work will be driven by:
+No planned releases **in this SPEC-based versioning scheme** — all 53 legacy-bot SPECs are complete.
+This does not mean the project is dormant: substantial active work continues on the separate
+Sentinel Engine / Trading Intelligence platform layer (`sentinel_engine/`, `applications/`), tracked
+via ADRs (`docs/decisions/`) rather than SPECs — see `docs/DOCUMENT_INDEX.md` for that tree's own
+tracking. For the legacy bot specifically, next work will be driven by:
 - Real-money deployment gate (win rate, drawdown targets — see `docs/SUCCESS_METRICS.md`)
 - Technical debt resolution (see `docs/TECHNICAL_DEBT.md`)
 - Post-paper-trading model retrain with real performance data

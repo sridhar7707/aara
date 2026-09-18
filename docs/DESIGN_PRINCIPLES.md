@@ -1,6 +1,6 @@
 # TradeGenius AI — Design Principles
 
-Last updated: 2026-06-27
+Last updated: 2026-09-18
 
 These principles were established during the architecture review (2026-06-14) and govern
 all future development decisions.
@@ -38,7 +38,9 @@ code, never directly from strategy or data layers.
 
 - Trading parameters: `config.py` only — no hardcoded constants elsewhere
 - Recommendation logic: `bot/core/recommendation_engine.py` — all dashboard panels call
-  the same 5 helper functions
+  the same 4 helper functions (`get_portfolio_action`, `get_position_sizing`,
+  `get_sell_analysis`, `get_recommendation_explanation`; count corrected 2026-09-18, was
+  recorded as 5)
 - Design tokens: `dashboard/design_system.py` — all colors, fonts, and spacing
 - Requirements state: `tests/req_snapshots/req_state.json` — REQUIREMENTS.md is derived
 

@@ -5,6 +5,11 @@ Documentation only. No application code, `dashboard/`, `bot/`, `scheduler/`,
 workflow, `database/`, or `ledger/` file was touched. No authentication,
 authorization, schema, or migration was created.
 
+**Note (2026-09-18):** citations below to `sentinel/frontend/...` describe files that existed when
+this document was written. `sentinel/` was since archived to `archive/sentinel_phase2a_scaffold/` per
+[ADR-008](../decisions/ADR-008-sentinel-scaffold-disposition.md) — content preserved unchanged there,
+just not at the path cited below. Treat those paths as historical, not current.
+
 **Authoritative inputs:** `AARA_PLATFORM_USER_EXPERIENCE.md`,
 `AARA_WEALTH_INTELLIGENCE_PRODUCT_ARCHITECTURE.md`, `AARA_ARCHITECTURE_AUTHORITY.md`,
 ADR-001 through ADR-004.

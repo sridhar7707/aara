@@ -5,6 +5,11 @@ modified. `applications/trading_intelligence/`, `sentinel_engine/`, `ledger/`,
 `bot/`, `dashboard/`, `scheduler/`, `.github/workflows/`, `database/`
 untouched, confirmed via `git status` before and after.
 
+**Note (2026-09-18):** citations below to `sentinel/frontend/...` describe files that existed when
+this document was written. `sentinel/` was since archived to `archive/sentinel_phase2a_scaffold/` per
+[ADR-008](../decisions/ADR-008-sentinel-scaffold-disposition.md) — content preserved unchanged there,
+just not at the path cited below. Treat those paths as historical, not current.
+
 **Authority:** `TRADING_INTELLIGENCE_EVENT_MODEL.md`, `TRADING_INTELLIGENCE_BOUNDARY.md`,
 `AARA_TRADING_INTELLIGENCE_DECISION_CENTER_DESIGN.md`. Where those documents
 already settled a question relevant to evidence, this document cites the

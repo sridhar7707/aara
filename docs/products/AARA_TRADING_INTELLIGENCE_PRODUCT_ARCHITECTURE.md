@@ -178,7 +178,8 @@ functionality:
 **Completed:**
 - Architecture — `sentinel_engine/` contracts (domain, events, evidence,
   governance, ledger interface, projections, repositories, services, adapters),
-  82 tests passing.
+  531 tests passing (was 82 when this was written; refreshed 2026-09-18, see
+  `docs/TEST_STRATEGY.md`).
 - Contracts — `Decision`, `Event`/`EventType`, `Evidence`, `Policy`/`Approval`,
   `decision_adapter`.
 - Documentation — this document plus every input listed at the top: boundary,

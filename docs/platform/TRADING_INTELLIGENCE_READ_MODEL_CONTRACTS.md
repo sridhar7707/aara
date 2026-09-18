@@ -145,8 +145,9 @@ Explicitly preserved, not touched by this document:
 The **Decision Read Contract** (Section 1) is the first candidate:
 
 - Zero missing-contract gap, unlike Risk (Section 3).
-- Its underlying `DecisionProjection` object is already built and tested (82
-  tests), unlike a hypothetical `RiskEvaluation`.
+- Its underlying `DecisionProjection` object is already built and tested (531
+  tests as of 2026-09-18, was 82 when this was written — see
+  `docs/TEST_STRATEGY.md`), unlike a hypothetical `RiskEvaluation`.
 - Its ownership and data lifecycle are already fully defined (Section 1).
 
 **But implementation does not begin from this conclusion.** It waits until a

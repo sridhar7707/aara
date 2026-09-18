@@ -15,6 +15,14 @@ Persistent project instructions for Claude Code in this repository. Follow these
 - Before creating a new document, check DOCUMENT_INDEX.md.
 - Keep documentation concise.
 - Avoid duplicate architecture/product documents.
+- Before claiming any doc is accurate/up to date, run `python tools/verify_docs.py --path <file or
+  docs/>` — it catches dead file references and stale "(N lines)" claims mechanically. It cannot
+  verify prose (test counts, config values, cache TTLs, cadence claims) — those still require reading
+  the actual source and cross-checking by hand. (Added 2026-09-18 after a resume review found
+  `docs/ARCHITECTURE.md` claiming 535 tests/8 tables/15 modules against a real 1,441/21/32 — a doc-vs-
+  code drift that had gone unnoticed for ~3 months. Root cause was claiming a doc was "verified" after
+  reading it for plausibility, not after checking it against the actual filesystem/config/workflow
+  files it described.)
 
 ## Architecture Rules
 

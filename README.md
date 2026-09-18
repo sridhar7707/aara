@@ -59,7 +59,7 @@ Both are real code with real tests — this isn't a vision doc ahead of an empty
 | [`docs/decisions/`](docs/decisions/) | 71 ADRs — every structural decision (package boundaries, ledger ownership, identity model) recorded with context, alternatives, and an explicit acceptance step. Not a changelog; a decision record. |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Trust boundaries, per-credential blast radius, and a concrete checklist for what real-money execution requires before it's enabled. |
 | [`docs/TEST_STRATEGY.md`](docs/TEST_STRATEGY.md) | Why a stochastic system (ML predictions drift every retrain) can't be unit-tested the normal way, and what actually gates a model's promotion to production. |
-| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | What's monitored, what each alert means, and the incident procedure for the risks in `RISK_REGISTER.md`. |
+| [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | What's monitored, what each alert means, and the incident procedure for the risks in `docs/RISK_REGISTER.md`. |
 | [`docs/GLOSSARY.md`](docs/GLOSSARY.md) | One lookup table for the vocabulary spanning both layers (`regime`, `risk gate`, `Decision`, `Evidence`, `Trust Ledger`, `Capability API`, ...). |
 | [`docs/DOCUMENT_GOVERNANCE_MATRIX.md`](docs/DOCUMENT_GOVERNANCE_MATRIX.md) + [`docs/DOCUMENT_CONSOLIDATION_PLAN.md`](docs/DOCUMENT_CONSOLIDATION_PLAN.md) | A self-audit of the documentation tree itself (134 documents at last count) and a phased plan to fix what it found — duplicate content, disagreeing authority claims, stale status labels. Governance that includes auditing its own overhead, not just producing more of it. |
 
@@ -93,7 +93,7 @@ Full detail: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 | Rule | Value | Enforced in |
 |---|---|---|
-| Max position size | 20% of portfolio | `MAX_POSITION_PCT`, `risk_manager.py` |
+| Max position size | 20% of portfolio | `MAX_POSITION_PCT`, `bot/risk/risk_manager.py` |
 | Stop-loss (flat fallback) | 4% | `STOP_LOSS_PCT` |
 | Daily loss limit | 5% (halts new trades) | `DAILY_LOSS_LIMIT_PCT` |
 | Max sector exposure | 30% of portfolio | `MAX_SECTOR_EXPOSURE_PCT` |
@@ -105,24 +105,28 @@ Manual emergency stop: touch `data/HALT_TRADING` — see [`docs/RUNBOOK.md`](doc
 
 ## 5. Confidence Check — Gate to Real Money
 
-Real-money execution does not turn on by developer discretion — it's gated behind measured targets in
-[`docs/SUCCESS_METRICS.md`](docs/SUCCESS_METRICS.md), checked via:
+Real-money execution does not turn on by developer discretion — it's gated behind a script-enforced
+check, verified against `scripts/confidence_check.py`'s actual `THRESHOLDS` constant (not the
+aspirational goals in `docs/GOALS.md`, which are deliberately higher — see `docs/SUCCESS_METRICS.md`
+for why both exist):
 
 ```bash
 python scripts/confidence_check.py
 ```
 
-| Metric | Target |
+| Metric | Enforced Threshold |
 |---|---|
-| Win rate | ≥ 60% |
+| Paper trading duration | ≥ 60 days |
+| Win rate | ≥ 52% |
 | Sharpe ratio | ≥ 1.0 |
-| Max drawdown | ≤ 12% |
-| Return vs. S&P 500 | Beat by ≥ 5pp |
-| AI recommendation follow rate | ≥ 70% |
+| Max drawdown | ≤ 15% |
+| Max consecutive losing days | ≤ 4 |
 
-The plan beyond this gate is Alpaca paper trading now, graduating to a funded Robinhood account for
-real-money execution — not Alpaca live. See `docs/SECURITY.md` §5 for what that transition requires
-before it happens.
+The project's aspirational target is a 60% win rate and ≤12% drawdown (`docs/GOALS.md`) — the gate
+above is intentionally more lenient than that goal; a 60%-win-rate gate was tried and choked trade
+volume in practice. The plan beyond this gate is Alpaca paper trading now, graduating to a funded
+Robinhood account for real-money execution — not Alpaca live. See `docs/SECURITY.md` §5 for what that
+transition requires before it happens.
 
 ## 6. Setup
 

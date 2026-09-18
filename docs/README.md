@@ -4,7 +4,8 @@ Last updated: 2026-09-18
 
 This file indexes the ~20 root-level `docs/*.md` files (the legacy single-bot documentation tier,
 June–July 2026). The AARA/Sentinel platform documentation tree — decisions, platform/product
-architecture, implementation plans, and analysis — is separate and much larger (~150 documents); see
+architecture, implementation plans, and analysis — is separate and much larger (193 documents,
+recounted 2026-09-18); see
 the section below for its entry point. `docs/DOCUMENT_INDEX.md` is the authoritative reading-order
 guide across *both* trees.
 
@@ -56,7 +57,9 @@ guide across *both* trees.
 
 ## AARA / Sentinel Platform Documentation
 
-The other documentation tree in this repo — not indexed above, ~150 documents. Start with
+The other documentation tree in this repo — not indexed above, 193 documents (recounted
+2026-09-18; grows independently of this file, re-run `find docs -name "*.md" | wc -l` minus this
+folder's own ~24 before quoting a count elsewhere). Start with
 [`DOCUMENT_INDEX.md`](DOCUMENT_INDEX.md); the folders below are its subject matter, not a
 replacement for reading it first.
 
@@ -79,5 +82,6 @@ python tests/requirements_tracker.py         # regenerate REQUIREMENTS.md
 python tests/requirements_tracker.py --docs-check  # verify all docs/*.md exist
 python tests/ui_tester.py                    # design system compliance (must be 0 FAIL 0 WARN)
 python tests/measure_performance.py --update # benchmark and update NFR.md
+python tools/verify_docs.py --path docs      # doc-vs-code drift: dead file refs + stale "(N lines)" claims
 python -c "from bot.monitor.sync_db import backup_database; backup_database()"  # backup DB
 ```

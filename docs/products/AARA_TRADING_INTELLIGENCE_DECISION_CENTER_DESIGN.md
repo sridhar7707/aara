@@ -6,6 +6,11 @@ service code was created or modified. `bot/`, `dashboard/`, `scheduler/`,
 `.github/workflows/`, `database/`, `ledger/`, `sentinel_engine/` untouched,
 confirmed via `git status` before and after.
 
+**Note (2026-09-18):** citations below to `sentinel/frontend/...` describe files that existed when
+this document was written. `sentinel/` was since archived to `archive/sentinel_phase2a_scaffold/` per
+[ADR-008](../decisions/ADR-008-sentinel-scaffold-disposition.md) — content preserved unchanged there,
+just not at the path cited below. Treat those paths as historical, not current.
+
 **Authority:** `AARA_TRADING_INTELLIGENCE_PRODUCT_ARCHITECTURE.md`,
 `AARA_TRADING_INTELLIGENCE_UI_SPECIFICATION.md`,
 `TRADING_INTELLIGENCE_SENTINEL_READ_INTEGRATION_DESIGN.md`,

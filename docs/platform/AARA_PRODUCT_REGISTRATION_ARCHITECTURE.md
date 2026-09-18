@@ -53,7 +53,7 @@ thing:
 - Business logic (`services/`, `adapters/` — product-internal).
 - Data (each product's own contracts/projections).
 
-This is unchanged from `AARA_TRADING_INTELLIGENCE_APPLICATION_ARCHITECTURE.md`'s
+This is unchanged from `TRADING_INTELLIGENCE_APPLICATION_ARCHITECTURE.md`'s
 ownership split and `AARA_PLATFORM_SHELL_ARCHITECTURE.md` Section 3 — this
 document applies it specifically to registration, not a new boundary.
 

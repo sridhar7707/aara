@@ -36,7 +36,8 @@ decision.
   Neither has any production caller today.
 - **`LedgerStore(ABC)`** — abstract `append`/`read_all`. No backend
   implementation exists anywhere in the codebase.
-- **Current absence of backend wiring:** all 82 `sentinel_engine` tests run
+- **Current absence of backend wiring:** all `sentinel_engine` tests (531 as of
+  2026-09-18, was 82 when this was written — see `docs/TEST_STRATEGY.md`) run
   against in-memory fakes. Zero real data flows through `sentinel_engine`
   today, in either direction.
 - **Also relevant:** `applications/trading_intelligence/` now has
@@ -222,7 +223,8 @@ experience, product-specific views.
 
 A concrete `SentinelProjectionDecisionSource` implementing `DecisionSource`
 (Option A), tested against an in-memory `ProjectionRepository` fake — exactly
-the pattern `sentinel_engine`'s own 82 tests and the prior
+the pattern `sentinel_engine`'s own tests (531 as of 2026-09-18, was 82 when
+this was written) and the prior
 `DecisionQueryService` tests already use.
 
 - **Read-only:** only calls `ProjectionRepository.get()`, never `.save()`.

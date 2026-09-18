@@ -1,6 +1,6 @@
 # TradeGenius AI — Risk Register
 
-Last updated: 2026-06-27
+Last updated: 2026-09-18
 
 Risks are rated by Likelihood (1–5) × Impact (1–5) = Score.
 Score ≥ 15 = High, 8–14 = Medium, < 8 = Low.
@@ -9,8 +9,8 @@ Score ≥ 15 = High, 8–14 = Medium, < 8 = Low.
 
 | ID | Risk | L | I | Score | Category | Mitigation | Owner |
 |----|------|---|---|-------|----------|------------|-------|
-| R-001 | Model overfits training data, degrades on live market | 3 | 5 | 15 | ML | Walk-forward backtesting; pre-market retraining monthly; win-rate dashboard | ksri77 |
-| R-002 | Alpaca API outage during market hours blocks all orders | 2 | 4 | 8 | Infra | Retry logic in `alpaca_client.py`; HALT_TRADING env override; Telegram alert on failure | ksri77 |
+| R-001 | Model overfits training data, degrades on live market | 3 | 5 | 15 | ML | Walk-forward backtesting; weekly retraining (`.github/workflows/retrain.yml`, Sundays 2am UTC — corrected 2026-09-18, was recorded as monthly); win-rate dashboard | ksri77 |
+| R-002 | Alpaca API outage during market hours blocks all orders | 2 | 4 | 8 | Infra | Retry logic in `alpaca_client.py`; `data/HALT_TRADING` file check (corrected 2026-09-18 — it's a file, not an env var; see `RUNBOOK.md` §2); Telegram alert on failure | ksri77 |
 | R-003 | GitHub Actions cron job misses market open | 2 | 3 | 6 | Infra | `workflow_dispatch` backup; 5-min loop means next cycle catches up | ksri77 |
 | R-004 | VIX spike triggers halt but positions still open | 3 | 3 | 9 | Risk | VIX ≥ 28 halts new buys; existing exits still run each cycle | ksri77 |
 | R-005 | PDT rule triggered on account < $25K | 2 | 4 | 8 | Regulatory | `PDT_MAX_DAY_TRADES=3` gate in `risk_manager.py`; tested in `test_risk_manager.py` | ksri77 |

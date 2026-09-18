@@ -1,6 +1,6 @@
 # TradeGenius AI — Project Goals
 
-Last updated: 2026-06-27
+Last updated: 2026-09-18
 
 ## Primary Goal
 
@@ -24,13 +24,16 @@ risk limits and providing full explainability for every decision.
 
 - **Not** high-frequency trading — trades held 3–25 days (swing style)
 - **Not** options, futures, or crypto — US equities and ETFs only
-- **Not** real-money deployment until win rate ≥ 60% sustained over 90 days of paper trading
+- **Not** real-money deployment until win rate ≥ 60% sustained over 60 days of paper trading
+  (matches `scripts/confidence_check.py`'s enforced `min_days: 60` — corrected 2026-09-18, was
+  recorded as 90 and contradicted `SUCCESS_METRICS.md`/the actual code)
 - **Not** a signal service — all decisions stay in the bot; no public signal publishing
 - **Not** fully autonomous real-money trading without human oversight
 
 ## Success Horizon
 
-Paper-trading phase: minimum 90 calendar days before evaluating real-money deployment.
+Paper-trading phase: minimum 60 calendar days before evaluating real-money deployment
+(`scripts/confidence_check.py`'s `min_days: 60`; corrected 2026-09-18, see Non-Goals above).
 Real-money gate: win rate ≥ 60%, no month with >5% loss, drawdown ≤ 8% (tighter than limit).
 
 ## Stakeholders

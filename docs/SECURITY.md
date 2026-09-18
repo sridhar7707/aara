@@ -57,7 +57,7 @@ Full config-key list and outage handling: `EXTERNAL_SERVICES.md`. Blast radius i
 
 - Never committed to source: `.env` is git-ignored; production secrets live only in GitHub Actions
   repository secrets and HuggingFace Space secrets.
-- No secret is logged. `bot/monitor/error_logger.py` and the Telegram alert path do not include raw
+- No secret is logged. `bot/core/error_logger.py` and the Telegram alert path do not include raw
   credential values in any message.
 - **No rotation policy exists today.** This is an accepted gap, not an oversight: rotate any key
   manually and immediately if compromise is suspected (revoke in the provider's dashboard, generate a

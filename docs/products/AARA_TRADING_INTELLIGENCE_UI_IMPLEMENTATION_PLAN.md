@@ -5,6 +5,12 @@ created. `bot/`, `dashboard/`, `scheduler/`, `.github/workflows/`, `database/`,
 `ledger/`, `sentinel_engine/` untouched, confirmed via `git status` before and
 after.
 
+**Note (2026-09-18):** citations below to `sentinel/frontend/...` describe files that existed when
+this document was written. `sentinel/` was since archived to `archive/sentinel_phase2a_scaffold/` per
+[ADR-008](../decisions/ADR-008-sentinel-scaffold-disposition.md) — content preserved unchanged there,
+just not at the path cited below. Treat those paths as historical, not current (this also resolves
+"Option B" below, in the sense that the path it names no longer exists in the active tree either way).
+
 **Authority:** ADR-002, `AARA_UI_UX_DESIGN_SYSTEM.md`,
 `AARA_PLATFORM_USER_EXPERIENCE.md`,
 `AARA_TRADING_INTELLIGENCE_DECISION_CENTER_DESIGN.md`,

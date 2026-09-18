@@ -19,8 +19,9 @@ current state.
 **`sentinel_engine` is the intelligence foundation, not the trading application.**
 It owns governance, evidence, decision-lifecycle contracts, and audit — it does not
 generate trading signals, place orders, or manage capital. Verified against current
-code (`sentinel_engine/`, 82 tests passing, zero real data flowing through any of
-it today):
+code (`sentinel_engine/`, 531 tests passing as of 2026-09-18 — was 82 when this
+document was written, see `docs/TEST_STRATEGY.md` — zero real data flowing through
+any of it today):
 
 | Capability | Module | What exists |
 |---|---|---|

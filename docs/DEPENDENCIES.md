@@ -1,6 +1,6 @@
 # TradeGenius AI — Dependencies
 
-Last updated: 2026-06-27
+Last updated: 2026-09-18
 
 Full pinned list in `requirements.txt` (bot + dashboard) and `requirements_space.txt`
 (HuggingFace Spaces subset). This file captures the intent and upgrade policy.
@@ -50,13 +50,19 @@ Full pinned list in `requirements.txt` (bot + dashboard) and `requirements_space
 | sqlalchemy | ≥ 2.0.0 | SQLite ORM helpers | Pin major |
 | python-dotenv | ≥ 1.0.0 | `.env` loading | Flexible |
 | requests | ≥ 2.31.0 | HTTP (Reddit, Finnhub) | Flexible |
+| praw | ≥ 7.7.0 | Reddit API client (WSB sentiment) | Flexible |
+| PyYAML | ≥ 6.0.0 | Config/workflow YAML parsing | Flexible |
+| pydantic | == 2.10.6 (Python < 3.10 only) | Pinned to avoid a Python-3.9-only schema-generation regression in pydantic ≥ 2.11 — see the Gradio note below | Do not bump without re-testing on 3.9 |
+| spaces | == 0.46.0 | HuggingFace Spaces ZeroGPU decorator | Pin exact (HF-managed) |
+
+Added 2026-09-18 (previously undocumented, verified present in `requirements.txt`): `praw`, `PyYAML`,
+`pydantic`, `spaces`. `pytest`/`pytest-mock` were already listed below.
 
 ## Development / Test Dependencies
 
 ```
-pytest ≥ 7.0
-pytest-cov
-pytest-asyncio (optional)
+pytest >= 7.4.0
+pytest-mock >= 3.12.0
 ```
 
 ## Python Version

@@ -23,9 +23,13 @@ Read directly from code for this comparison (not re-derived from memory):
   payload)` computes a genesis-seeded sequential hash per table; `verify_chain`/
   `verify_all_chains` walk the chain and report breaks (never auto-repair — "the
   correct response is to halt and investigate," per the module's own docstring).
-  8 tables are registered today: `candidate_evaluation_events`, `decision_events`,
-  `decision_outcome_events`, `risk_evaluation_events`, `approval_events`,
-  `deployment_manifest_events`, `constitution_enforcement_events`, `cost_models`.
+  10 tables are registered today (corrected 2026-09-18, was 8 when this was
+  written — verified against `ledger/ledger.py`'s `_LEDGER_TABLES` registry):
+  `candidate_evaluation_events`, `decision_events`, `decision_outcome_events`,
+  `risk_evaluation_events`, `approval_events`, `deployment_manifest_events`,
+  `constitution_enforcement_events`, `decision_confidence_events`,
+  `decision_action_source_events`, `cost_models`. The last two were added
+  since this document was written (see ADR-066).
   It also owns deployment-manifest lifecycle state
   (`CREATED→TESTING_STARTED→REVIEW_REQUESTED→APPROVED→PROMOTED→RETIRED`) and an
   `active_deployment_pointer`.
@@ -38,12 +42,13 @@ Read directly from code for this comparison (not re-derived from memory):
   `ledger.ledger.append_ledger_row`. Database file: `data/trust_ledger.db`.
 - **`sentinel_engine/ledger/`** — `LedgerStore(ABC)`: abstract `append`/`read_all`
   only. **No backend implementation exists.** `LedgerRepository` (concrete facade)
-  and `ProjectionRepository(ABC)` exist and are tested (82 tests), but nothing has
-  ever been instantiated against real data.
+  and `ProjectionRepository(ABC)` exist and are tested (531 tests as of
+  2026-09-18, was 82 when this was written — see `docs/TEST_STRATEGY.md`), but
+  nothing has ever been instantiated against real data.
 
 This means: today, "Sentinel becomes canonical" isn't a migration of an existing
 Sentinel ledger — it would be building one for the first time, against a live
-system that already has 8 tables' worth of hash-chained history and an active
+system that already has 10 tables' worth of hash-chained history and an active
 Phase 1A validation clock running on it.
 
 ---
@@ -101,7 +106,7 @@ outside this document's scope and would need its own future ADR under ADR-002's
 **Migration risk:** High. Requires `bot/` code changes (blocked by ADR-002 today),
 requires either a dual-write transition period or a hard cutover, and risks
 breaking continuity of the hash-chained audit trail the platform already has in
-production (8 tables, active history) if the cutover isn't carefully sequenced.
+production (10 tables, active history) if the cutover isn't carefully sequenced.
 Directly touches the live Phase 1A write path — the exact category of change
 ADR-002 exists to gate.
 

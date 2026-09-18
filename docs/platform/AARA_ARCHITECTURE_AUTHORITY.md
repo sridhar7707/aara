@@ -160,7 +160,7 @@ AARA Platform
 | Architecture reconciliation | COMPLETE |
 | Runtime boundary analysis | COMPLETE |
 | Production trading paths | PROTECTED (see ADR-002) |
-| `sentinel_engine/` contracts (domain, events, evidence, governance, ledger, projections, repositories, services, adapters) | COMPLETE — 82 tests passing |
+| `sentinel_engine/` contracts (domain, events, evidence, governance, ledger, projections, repositories, services, adapters) | COMPLETE — 531 tests passing (was 82 at Phase 0 completion; count refreshed 2026-09-18, see `docs/TEST_STRATEGY.md`) |
 | Phase 2A (Trading Intelligence boundary, event model, contract gap analysis, ledger integration options) | COMPLETE |
 | Ledger ownership decision (Option A/B/C) | DEFERRED — see ADR-004, gated on Phase 1A completion |
 | AARA identity/product-access model | REQUIREMENT RECORDED, IMPLEMENTATION DEFERRED — see ADR-003 |
