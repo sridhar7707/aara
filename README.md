@@ -1,6 +1,6 @@
-# AI Trading Bot / AARA — Sentinel Intelligence Platform
+# AARA — Sentinel Intelligence Platform
 
-An autonomous paper-trading system (XGBoost + LSTM + PPO reinforcement-learning ensemble, governed by
+An automated paper-trading system (XGBoost + LSTM + PPO reinforcement-learning ensemble, governed by
 a 10-gate signal filter and a hard-coded risk manager) that runs on a fully free stack (GitHub
 Actions, HuggingFace Spaces, Alpaca paper trading). Built alongside it, on the same codebase: a
 governance-first Decision Intelligence platform (**Sentinel Intelligence Engine**) with 71 Architecture
