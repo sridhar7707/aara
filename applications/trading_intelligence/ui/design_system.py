@@ -65,6 +65,18 @@ NORMAL / WARNING / DEFENSIVE semantic meaning is preserved exactly.
 # duplicate; consolidating them here does not change any rendered colour.
 DESIGN_SYSTEM_CSS = """
 :root {
+  /* Explicit light-only opt-out. Without this, some browsers' own forced-
+     dark-mode heuristics (e.g. Chrome's "Auto Dark Theme for web contents")
+     can selectively re-theme SVG/canvas-rendered content -- like a
+     gr.LinePlot's Vega-Lite chart -- to a dark background while leaving
+     ordinary DOM/CSS text alone, since this app has no dark theme of its
+     own to fall back to. Reported 2026-09-18: a live user saw a chart with
+     a black background sitting inside an otherwise all-light page on
+     macOS Chrome, while every other element rendered correctly -- exactly
+     the split-rendering signature of a browser forcing dark mode onto
+     content it doesn't recognize as dark-mode-aware, not an app bug in the
+     usual sense. This is the standard opt-out browsers check first. */
+  color-scheme: light;
   /* ---- Colour: surfaces & text ---- */
   --aara-bg: #F8F7F3;
   --aara-surface: #FFFFFF;
@@ -113,6 +125,25 @@ DESIGN_SYSTEM_CSS = """
 
   /* ---- Layout ---- */
   --aara-content-max: 1160px;
+}
+
+/* Defense in depth alongside :root's color-scheme: light, above, for every
+   gr.LinePlot/gr.BarPlot chart on every screen. color-scheme stops a
+   browser's OWN forced-dark-mode heuristics; it does nothing against a
+   third-party "dark mode everywhere"-style extension, which typically
+   ignores that signal and repaints based on its own heuristics instead.
+   .vega-embed is Vega-Embed's own stable, real wrapper class (the library
+   gr.LinePlot/gr.BarPlot renders through) -- not a hashed build class, not
+   guessed. Forcing its background (and its rendered svg/canvas) to the
+   card surface color directly, !important, gives the chart a real light
+   background an extension has to deliberately fight, not just leave alone
+   by default. Safe: Vega-Lite chart marks (bars, lines) paint through SVG
+   fill/stroke attributes, not the CSS background-color property, so this
+   cannot repaint the actual data -- only the canvas it's drawn on. */
+.vega-embed,
+.vega-embed svg,
+.vega-embed canvas {
+  background-color: var(--aara-surface) !important;
 }
 
 /* ==========================================================================

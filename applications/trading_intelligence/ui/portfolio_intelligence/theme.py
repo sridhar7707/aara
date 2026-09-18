@@ -16,6 +16,13 @@ are this screen's own (see `_HOLDINGS_HEADERS` / `_ALPACA_POSITIONS_HEADERS`
 
 CSS = """
 :root {
+  /* Standalone-render safety net -- see design_system.py's own :root for
+     why (a live macOS Chrome user saw a gr.LinePlot/BarPlot chart render
+     with a black background while the rest of the page stayed light -- a
+     browser forcing dark mode onto SVG content it doesn't recognize as
+     dark-mode-aware). This screen can also render alone, so it needs its
+     own copy of the opt-out. */
+  color-scheme: light;
   --pi-color-navy: var(--aara-navy, #0B1F3A);
   --pi-color-gold: var(--aara-gold, #C8A45D);
   --pi-color-background: var(--aara-bg, #F8F7F3);
@@ -24,6 +31,16 @@ CSS = """
   --pi-color-text-secondary: var(--aara-text-muted, #666666);
   --pi-color-border: var(--aara-border, #E2E8F0);
   --pi-color-negative: var(--aara-negative-fg, #7A2E2E);
+}
+
+/* Standalone-render safety net for design_system.py's own .vega-embed
+   rule -- see that file's comment for why. This screen renders
+   gr.LinePlot (Portfolio Value Trend, Drawdown) and gr.BarPlot
+   (Allocation by Holding, Unrealized P&L) charts. */
+.vega-embed,
+.vega-embed svg,
+.vega-embed canvas {
+  background-color: var(--pi-color-surface) !important;
 }
 
 .gradio-container {

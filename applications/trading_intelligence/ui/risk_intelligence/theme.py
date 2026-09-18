@@ -19,6 +19,13 @@ own text label so color is never the only signal.
 
 CSS = """
 :root {
+  /* Standalone-render safety net -- see design_system.py's own :root for
+     why (a live macOS Chrome user saw a gr.LinePlot/BarPlot chart render
+     with a black background while the rest of the page stayed light -- a
+     browser forcing dark mode onto SVG content it doesn't recognize as
+     dark-mode-aware). This screen can also render alone, so it needs its
+     own copy of the opt-out. */
+  color-scheme: light;
   --ri-color-navy: var(--aara-navy, #0B1F3A);
   --ri-color-gold: var(--aara-gold, #C8A45D);
   --ri-color-background: var(--aara-bg, #F8F7F3);
@@ -36,6 +43,15 @@ CSS = """
   --ri-space-12: 12px;
   --ri-space-16: 16px;
   --ri-space-24: 24px;
+}
+
+/* Standalone-render safety net for design_system.py's own .vega-embed
+   rule -- see that file's comment for why. This screen renders a
+   gr.LinePlot (Portfolio Drawdown) chart. */
+.vega-embed,
+.vega-embed svg,
+.vega-embed canvas {
+  background-color: var(--ri-color-surface) !important;
 }
 
 .gradio-container {

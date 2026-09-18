@@ -10,6 +10,15 @@ resolves through the shared token. Every `.mb-*` rule below is unchanged.
 
 CSS = """
 :root {
+  /* Standalone-render safety net: design_system.py's own :root already sets
+     this when composed into the full platform shell; this screen can also
+     render alone (see the standalone-vs-composed note elsewhere in this
+     file), so it needs its own copy. See design_system.py's comment on
+     this exact line for why -- a live macOS Chrome user saw this screen's
+     LinePlot chart render with a black background while the rest of the
+     page stayed light, the signature of a browser forcing dark mode onto
+     SVG content it doesn't recognize as dark-mode-aware. */
+  color-scheme: light;
   --mb-color-navy: var(--aara-navy, #0B1F3A);
   --mb-color-gold: var(--aara-gold, #C8A45D);
   --mb-color-background: var(--aara-bg, #F8F7F3);
@@ -18,6 +27,15 @@ CSS = """
   --mb-color-text-secondary: var(--aara-text-muted, #666666);
   --mb-color-border: var(--aara-border, #E2E8F0);
   --mb-color-negative: var(--aara-negative-fg, #7A2E2E);
+}
+
+/* Standalone-render safety net for design_system.py's own .vega-embed
+   rule -- see that file's comment for why. This screen renders two
+   gr.LinePlot charts (Portfolio Value Trend, Drawdown). */
+.vega-embed,
+.vega-embed svg,
+.vega-embed canvas {
+  background-color: var(--mb-color-surface) !important;
 }
 
 .gradio-container {

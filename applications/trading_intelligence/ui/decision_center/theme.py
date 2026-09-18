@@ -74,6 +74,13 @@ app's actual DOM (Playwright), not inferred from Gradio's source:
 
 CSS = """
 :root {
+  /* Standalone-render safety net -- see design_system.py's own :root for
+     why (a live macOS Chrome user saw a gr.LinePlot chart render with a
+     black background while the rest of the page stayed light -- a browser
+     forcing dark mode onto SVG content it doesn't recognize as
+     dark-mode-aware). This screen can also render alone, so it needs its
+     own copy of the opt-out. */
+  color-scheme: light;
   /* Design-system migration (Batch B2): the colour entries below alias the
      shared --aara-* tokens from ui/design_system.py (the single source of
      truth -- audit finding D-01). Each keeps its former hex as a
