@@ -1,6 +1,14 @@
 .env
 .worktrees/
 .impeccable/
+
+# Local-only, not meant to be pushed (kept out of Source Control view on request)
+PRODUCT.md
+.claude/agents/
+.claude/skills/
+# Held by ADR-066 for a future causal-lifecycle ADR — do not delete, do not commit
+# until that ADR lands (see docs/decisions/ADR-066-*.md, "Explicitly NOT ratified").
+sentinel_engine/tests/test_recommendation_governance_lifecycle.py
 __pycache__/
 *.py[cod]
 *.pyo

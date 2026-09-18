@@ -162,4 +162,5 @@ before risking capital; nothing here is financial advice.
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+All rights reserved — see [LICENSE](LICENSE). Shared publicly for portfolio and review purposes;
+viewing is welcome, but no reuse, redistribution, or commercial use is licensed.
