@@ -1,11 +1,14 @@
-# AARA — Sentinel Intelligence Platform
+# AARA Trading Intelligence
 
 An automated paper-trading system (XGBoost + LSTM + PPO reinforcement-learning ensemble, governed by
-a 10-gate signal filter and a hard-coded risk manager) that runs on a fully free stack (GitHub
-Actions, HuggingFace Spaces, Alpaca paper trading). Built alongside it, on the same codebase: a
-governance-first Decision Intelligence platform (**Sentinel Intelligence Engine**) with 71 Architecture
-Decision Records, a 4,500+ test suite, and an explicit documentation hierarchy — because a system that
-graduates to real money needs an audit trail for *why* it does what it does, not just code that works.
+a 10-gate signal filter and a hard-coded risk manager) — the first, most mature product on **AARA**, a
+multi-product intelligence platform. Per this repo's own architecture decisions (see
+[ADR-007](docs/decisions/ADR-007-aara-platform-hierarchy.md), [ADR-015](docs/decisions/ADR-015-sentinel-engine-core-boundary.md)),
+AARA's products — Trading Intelligence here, Wealth Intelligence earlier-stage — are built on one
+shared, product-agnostic core: the **Sentinel Intelligence Engine**. That core carries the governance
+weight: 71 Architecture Decision Records, a 4,500+ test suite, and an explicit documentation hierarchy
+— because a system that graduates to real money needs an audit trail for *why* it does what it does,
+not just code that works.
 
 > **Status:** Paper trading only — real-money execution is gated behind the Confidence Check in §5,
 > and has not been enabled. See `docs/decisions/` for the architectural decision history and
@@ -40,14 +43,24 @@ Responsive down to mobile (Morning Brief and Decision Center shown; same treatme
 
 ## 1. What's Actually Here
 
-Two things share this repository, at different levels of maturity — stated plainly, not blurred:
+The platform hierarchy this repo actually implements ([ADR-007](docs/decisions/ADR-007-aara-platform-hierarchy.md)):
+AARA Systems → **Sentinel Intelligence Engine** (the one shared core, per
+[ADR-015](docs/decisions/ADR-015-sentinel-engine-core-boundary.md)) → products. Three tiers, at
+different levels of maturity — stated plainly, not blurred:
 
 | Layer | What it is | Maturity |
 |---|---|---|
-| **The trading bot** (`bot/`, `dashboard/`, `.github/workflows/`) | A working, scheduled (every 5 min, market hours) paper-trading system with a public Gradio dashboard. Frozen against casual modification by [ADR-002](docs/decisions/ADR-002-bot-runtime-protection.md). | Production (paper) |
-| **Sentinel Intelligence Engine** (`sentinel_engine/`) + **Trading Intelligence** (`applications/trading_intelligence/`) | A governance-first Decision Intelligence platform being built alongside the bot — `Decision`/`Evidence`/`Event` domain contracts, a 6-screen Decision Center UI (Morning Brief, Decision Center, Portfolio/Risk Intelligence, Performance Learning, Settings), and an ADR-driven architecture process. Read-only today: it observes and explains, it does not yet influence execution ([ADR-066 §6](docs/decisions/ADR-066-sentinel-decision-evidence-domain-vocabulary-ratification.md)). | Active development |
+| **The trading bot** (`bot/`, `dashboard/`, `.github/workflows/`) | A working, scheduled (every 5 min, market hours) paper-trading system with a public Gradio dashboard. Predates the AARA platform layer; frozen against casual modification by [ADR-002](docs/decisions/ADR-002-bot-runtime-protection.md). | Production (paper) |
+| **Sentinel Intelligence Engine** (`sentinel_engine/`) | The reusable Decision Intelligence Core shared by every AARA product ([ADR-015](docs/decisions/ADR-015-sentinel-engine-core-boundary.md)) — `Decision`/`Evidence`/`Event` domain contracts, governance, ledger, projections. Product-neutral by rule: no product-branded code is supposed to live here, though a few modules are still mid-migration ([ADR-024](docs/decisions/ADR-024-wealth-intelligence-module-disposition-and-boundary-documentation.md)). Read-only today: it observes and explains, it does not yet influence execution ([ADR-066 §6](docs/decisions/ADR-066-sentinel-decision-evidence-domain-vocabulary-ratification.md)). | Active development |
+| **Trading Intelligence** (`applications/trading_intelligence/`) — Product #1 | A 6-screen Decision Center UI (Morning Brief, Decision Center, Portfolio/Risk Intelligence, Performance Learning, Settings) with its own independently-built read path — deliberately not just a thin consumer of the shared engine's queries ([ADR-015 §4](docs/decisions/ADR-015-sentinel-engine-core-boundary.md)). Its Decision Center alone carries 280 tests ([ADR-024](docs/decisions/ADR-024-wealth-intelligence-module-disposition-and-boundary-documentation.md)). | Most mature product |
+| **Wealth Intelligence** (`applications/wealth_intelligence/`) — Product #2 | Earlier-stage; several of its modules still live physically inside `sentinel_engine/` pending a documented relocation ([ADR-024](docs/decisions/ADR-024-wealth-intelligence-module-disposition-and-boundary-documentation.md)). | Early |
 
-Both are real code with real tests — this isn't a vision doc ahead of an empty package. `sentinel_engine/` alone is 72 production modules across domain, services, evidence, governance, ledger, projections, adapters, and composition layers.
+Future products named in the platform's own long-term scope (AARA CFO, Tax, Estate, and Retirement
+Intelligence — [ADR-003](docs/decisions/ADR-003-aara-identity-and-product-access.md)) are not built.
+
+Both the engine and Trading Intelligence are real code with real tests — this isn't a vision doc ahead
+of an empty package. `sentinel_engine/` alone is 72 production modules across domain, services,
+evidence, governance, ledger, projections, adapters, and composition layers.
 
 ## 2. Documentation
 

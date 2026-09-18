@@ -3,9 +3,11 @@
 Last updated: 2026-09-18
 
 This file indexes the ~20 root-level `docs/*.md` files (the legacy single-bot documentation tier,
-June–July 2026). The AARA/Sentinel platform documentation tree — decisions, platform/product
-architecture, implementation plans, and analysis — is separate and much larger (193 documents,
-recounted 2026-09-18); see
+June–July 2026). The AARA platform documentation tree (Sentinel Intelligence Engine as the shared
+core, per [ADR-015](decisions/ADR-015-sentinel-engine-core-boundary.md); Trading Intelligence and
+Wealth Intelligence as the products built on it) — decisions, platform/product architecture,
+implementation plans, and analysis — is separate and much larger (193 documents, recounted
+2026-09-18); see
 the section below for its entry point. `docs/DOCUMENT_INDEX.md` is the authoritative reading-order
 guide across *both* trees.
 
@@ -55,7 +57,7 @@ guide across *both* trees.
 | [sqlite_audit.txt](sqlite_audit.txt) | SQLite threading and locking audit |
 | [specs/](specs/) | Per-SPEC markdown files with implementation notes |
 
-## AARA / Sentinel Platform Documentation
+## AARA Platform Documentation
 
 The other documentation tree in this repo — not indexed above, 193 documents (recounted
 2026-09-18; grows independently of this file, re-run `find docs -name "*.md" | wc -l` minus this

@@ -34,7 +34,7 @@ These terms have a ratified, binding definition in ADR-066 and `docs/platform/SE
 | **Ledger / Trust Ledger** | The authoritative event record `bot/trust_ledger/` writes to and `sentinel_engine/` projections read from. Ownership is explicitly deferred, not yet decided. | ADR-004 |
 | **Projection** | A derived, read-only view rebuilt from the ledger's event record — never a second source of truth. | `AI_AGENT_GUIDELINES.md` §3 |
 | **Capability API** | The verb-based interface (`analyze` / `explain` / `remember` / `evaluate` / `recommend`) products call on the engine instead of reaching into its internals. | `SENTINEL_ENGINE_BOUNDARY_AND_API_CONTRACTS.md` |
-| **Sentinel Engine** | The shared, product-agnostic intelligence layer beneath both AARA products. Does not own customer data (see `SECURITY.md` §1's boundary diagram for the bot-layer equivalent). | ADR-001, `SENTINEL_ENGINE_DOMAIN_VOCABULARY.md` |
+| **Sentinel Engine** | The shared, product-agnostic intelligence layer beneath both AARA products — the platform's one core, not a peer of the products it serves. Does not own customer data (see `SECURITY.md` §1's boundary diagram for the bot-layer equivalent). | ADR-001, ADR-007, ADR-015, `SENTINEL_ENGINE_DOMAIN_VOCABULARY.md` |
 | **Recommendation** | The as-yet-unresolved causal link between a Decision and what `bot/` actually does — explicitly **not yet authorized**; a Decision today has no live effect on execution. | ADR-066 §6 |
 
 ## Governance Terms

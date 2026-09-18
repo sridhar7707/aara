@@ -5,8 +5,9 @@ Last updated: 2026-09-18
 Scope: the live bot/dashboard system (`bot/`, `dashboard/`, GitHub Actions, HuggingFace Spaces) —
 the thing that actually holds broker credentials and executes trades today. This is deliberately
 narrower than `docs/platform/SENTINEL_ENGINE_SECURITY_AND_PRIVACY_ARCHITECTURE.md`, which describes
-a future multi-tenant, multi-product security model for the not-yet-launched Sentinel/AARA platform
-layer. That document is aspirational; this one describes what is actually deployed and credentialed.
+a future multi-tenant, multi-product security model for the not-yet-launched AARA platform layer
+(Sentinel Intelligence Engine as its shared core, per ADR-015). That document is aspirational; this
+one describes what is actually deployed and credentialed.
 
 ## 1. Trust Boundaries
 

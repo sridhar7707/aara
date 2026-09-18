@@ -3,8 +3,10 @@
 Last updated: 2026-09-18
 
 Scope: the legacy single-bot/single-dashboard system (`bot/`, `dashboard/`, `database/`) only — see
-`docs/DOCUMENT_INDEX.md` for the separate Sentinel Engine / Trading Intelligence platform layer
-(`sentinel_engine/`, `applications/`), which this document does not cover.
+`docs/DOCUMENT_INDEX.md` for the separate AARA platform layer this document does not cover: the
+Sentinel Intelligence Engine (`sentinel_engine/`, the shared core per
+[ADR-015](decisions/ADR-015-sentinel-engine-core-boundary.md)) and the products built on it
+(`applications/trading_intelligence/`, `applications/wealth_intelligence/`).
 
 ## System Overview
 
