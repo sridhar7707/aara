@@ -134,12 +134,23 @@ CSS = """
    above each control already states the condition in words (see
    .st-session-only-notice above); this is the visual reinforcement,
    reusing this file's own --st-color-* aliases (which themselves resolve
-   through --aara-navy / --aara-text-muted) rather than a new color. */
+   through --aara-navy / --aara-text-muted) rather than a new color.
+
+   Corrected 2026-09-18: the original 0.55 opacity, stacked on top of the
+   label's own --st-color-text-secondary (already --aara-text-muted,
+   #666666), computed to ~2.2:1 contrast against the white card -- WCAG AA
+   requires 4.5:1 for text; "Dark"/"Off" were reported as genuinely
+   unreadable, not just de-emphasized. 0.85 keeps the same "clearly not
+   the active option" signal (still visibly dimmer than the ~13:1-contrast
+   enabled label) while landing at ~3.9:1 -- legible, and still above the
+   3:1 floor WCAG itself uses for large-scale/non-text UI distinctions,
+   even though disabled controls are technically exempt from the 4.5:1 text
+   minimum. */
 .st-preference-control input[type="radio"] {
   accent-color: var(--st-color-navy);
 }
 .st-preference-control label.disabled {
-  opacity: 0.55;
+  opacity: 0.85;
 }
 .st-preference-control label.disabled .ml-2 {
   color: var(--st-color-text-secondary);

@@ -241,8 +241,11 @@ def test_theme_reduces_opacity_and_mutes_text_for_disabled_preference_labels():
     Gradio leaves it at opacity: 1 by default. Reduced opacity plus a
     muted --st-color-text-secondary (--aara-text-muted alias) foreground
     give the intentionally-inert controls a real disabled affordance,
-    matching the "reduced opacity, muted foreground" ask."""
+    matching the "reduced opacity, muted foreground" ask. 0.85 (corrected
+    2026-09-18 from 0.55, which computed to ~2.2:1 contrast -- illegible,
+    not just de-emphasized) still reads as visibly dimmer than an active
+    label while landing at ~3.9:1, clearly readable."""
     assert ".st-preference-control label.disabled {" in CSS
-    assert "opacity: 0.55;" in CSS
+    assert "opacity: 0.85;" in CSS
     assert ".st-preference-control label.disabled .ml-2 {" in CSS
     assert "color: var(--st-color-text-secondary);" in CSS
