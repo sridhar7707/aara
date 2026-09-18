@@ -23,6 +23,14 @@ Persistent project instructions for Claude Code in this repository. Follow these
   code drift that had gone unnoticed for ~3 months. Root cause was claiming a doc was "verified" after
   reading it for plausibility, not after checking it against the actual filesystem/config/workflow
   files it described.)
+- After fixing anything that a tracking document describes (a `TECHNICAL_DEBT.md` row, a documented
+  bug, a known failing test), update that document's entry in the SAME piece of work — never as a
+  follow-up task. Run `python tools/verify_docs.py --check-debt --path docs/TECHNICAL_DEBT.md` to
+  check mechanically for `TECHNICAL_DEBT.md` specifically. (Added 2026-09-18: TD-014 described 4
+  failing tests; the tests were fixed and verified passing in the same session, but the row wasn't
+  updated because "fix the code" and "update the doc about the code" were treated as two separate
+  tasks. It sat in Active Debt for hours until a reviewer cited that exact row back. Same root cause
+  as the item above — a documentation claim that stopped being checked once the initial task felt done.)
 
 ## Architecture Rules
 

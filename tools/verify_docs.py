@@ -218,12 +218,76 @@ def check_file(path: Path) -> dict:
     }
 
 
+_TECH_DEBT_PATH = ROOT / "docs" / "TECHNICAL_DEBT.md"
+_TEST_PATH_IN_ROW = re.compile(r"`([A-Za-z0-9_./\-]*tests?/[A-Za-z0-9_./\-]*test_[A-Za-z0-9_./\-]+\.py)`")
+_FAIL_LANGUAGE = re.compile(r"\bfail(ing|s|ed)?\b", re.IGNORECASE)
+
+
+def check_active_debt_freshness() -> list[str]:
+    """Exists because of a real incident (2026-09-18): TD-014 in TECHNICAL_DEBT.md
+    described 4 failing tests. The tests got fixed and the fix was verified in the
+    same session -- but the TECHNICAL_DEBT.md row was never updated, because
+    "fix the tests" and "update the row describing the tests" were treated as two
+    separate tasks. It sat in Active Debt, describing a problem that no longer
+    existed, until a reviewer cited that exact row back at us.
+
+    This scans only the Active Debt table (never Resolved -- a resolved row is
+    allowed to describe a past failure). For any row that both names a real test
+    file and uses fail-language ("failing", "fails", "failed"), it actually runs
+    those tests. A row claiming failure whose named tests now pass is almost
+    certainly the same stale-debt-entry bug recurring, and is reported as such."""
+    if not _TECH_DEBT_PATH.exists():
+        return []
+    text = _TECH_DEBT_PATH.read_text(encoding="utf-8", errors="replace")
+    if "## Active Debt" not in text:
+        return []
+    active_section = text.split("## Active Debt", 1)[1].split("## Resolved Debt", 1)[0]
+
+    findings: list[str] = []
+    for line in active_section.splitlines():
+        if not line.strip().startswith("|") or not _FAIL_LANGUAGE.search(line):
+            continue
+        if re.search(r"\bflak(y|iness|es)?\b|\bintermitten(t|tly)\b", line, re.IGNORECASE):
+            continue  # self-describes as non-deterministic; one run can't confirm or deny it
+        test_paths = sorted(set(_TEST_PATH_IN_ROW.findall(line)))
+        resolved_paths = [p for p in (_resolve_candidate(p, ROOT) for p in test_paths) if p is not None]
+        if not resolved_paths:
+            continue
+        row_id = line.strip().split("|")[1].strip() if line.strip().startswith("|") else "?"
+        import subprocess
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", *[str(p) for p in resolved_paths], "-q", "--tb=no"],
+            capture_output=True, text=True, cwd=str(ROOT),
+        )
+        if result.returncode == 0:
+            summary = (result.stdout.strip().splitlines() or [""])[-1]
+            findings.append(
+                f"{row_id}: claims failing tests in {test_paths}, but they pass now ({summary}) "
+                f"-- this Active Debt row is likely stale, verify and move it to Resolved"
+            )
+    return findings
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--path", default="docs", help="File or directory to scan (default: docs/)")
     ap.add_argument("--json", action="store_true", help="Machine-readable output")
     ap.add_argument("--no-surface", action="store_true", help="Skip the numeric-claims surfacing list")
+    ap.add_argument("--check-debt", action="store_true",
+                     help="Also run tests named in TECHNICAL_DEBT.md's Active Debt rows that claim "
+                          "failures, and flag any that pass now (stale debt entry). Slower -- runs "
+                          "real pytest processes.")
     args = ap.parse_args()
+
+    if args.check_debt:
+        debt_findings = check_active_debt_freshness()
+        if debt_findings:
+            print("-- docs/TECHNICAL_DEBT.md (Active Debt freshness check) --")
+            for f in debt_findings:
+                print(f"  STALE DEBT ENTRY  {f}")
+            print()
+        else:
+            print("No Active Debt rows claiming test failures were contradicted by a real test run.\n")
 
     target = (ROOT / args.path).resolve()
     files = _iter_md_files(target)
