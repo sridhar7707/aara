@@ -1589,26 +1589,34 @@ class PortfolioIntelligenceUI:
 
     @staticmethod
     def _format_holding_allocation_html(holdings: Tuple[PortfolioHolding, ...]) -> str:
-        """Visual Dashboard Phase B: one bar per holding -- symbol +
-        allocation percentage. weight_pct is already the authoritative,
-        live-priced figure PortfolioHolding carries (see bootstrap.py's
-        _build_portfolio_holdings, which computes it as this holding's
-        share of total holdings market value) -- reused verbatim here,
-        never recomputed, never a new valuation. One decimal place only
-        -- matches the Holdings table's own Weight % column -- avoids
-        implying false precision."""
+        """Compact one-line-wrapped summary: symbol + allocation percentage
+        per holding, `·`-separated. weight_pct is already the
+        authoritative, live-priced figure PortfolioHolding carries (see
+        bootstrap.py's _build_portfolio_holdings, which computes it as this
+        holding's share of total holdings market value) -- reused verbatim
+        here, never recomputed, never a new valuation. One decimal place
+        only -- matches the Holdings table's own Weight % column -- avoids
+        implying false precision.
+
+        Corrected 2026-09-18: previously one full-width bordered row per
+        holding (symbol + a visual bar + the percentage), the same data the
+        Allocation by Holding chart directly above already shows visually --
+        reported as wasting vertical space on pure duplication. It wasn't
+        quite pure duplication (gr.BarPlot has no on-bar data-label option
+        wired up here, so this was the only place to read an exact value
+        like "17.3%" rather than eyeball a bar against the chart's y-axis)
+        -- kept that one real function (exact values) and dropped the
+        redundant one (a second bar, right under a chart already made of
+        bars)."""
         ordered = PortfolioIntelligenceUI._ordered_holdings(holdings)
-        rows = "".join(
-            '<div class="pi-holding-allocation-row">'
-            f'<span class="pi-holding-allocation-symbol">{html.escape(holding.symbol)}</span>'
-            '<div class="pi-holding-allocation-bar">'
-            f'<div class="fill" style="width:{max(0.0, min(100.0, holding.weight_pct)):.1f}%"></div>'
-            "</div>"
+        items = " &middot; ".join(
+            '<span class="pi-holding-allocation-item">'
+            f'<span class="pi-holding-allocation-symbol">{html.escape(holding.symbol)}</span> '
             f'<span class="pi-holding-allocation-pct">{holding.weight_pct:.1f}%</span>'
-            "</div>"
+            "</span>"
             for holding in ordered
         )
-        return f'<div class="pi-holding-allocation-list">{rows}</div>'
+        return f'<div class="pi-holding-allocation-list">{items}</div>'
 
     @staticmethod
     def _format_holding_allocation_dataframe(

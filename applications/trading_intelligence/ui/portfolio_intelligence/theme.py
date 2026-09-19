@@ -329,39 +329,31 @@ CSS = """
   margin: 4px 0 10px 0;
 }
 
-/* Visual Dashboard Phase B: allocation-by-holding bars -- same visual
-   language as .pi-allocation-bar above (navy fill on a bordered track),
-   one row per holding instead of two fixed segments. */
+/* Visual Dashboard Phase B: allocation-by-holding summary.
+   Corrected 2026-09-18: was one full-width bordered row per holding (a
+   second bar, directly under the Allocation by Holding chart above, which
+   is already made of bars) -- reported as wasting vertical space on
+   duplicated information. Now one wrapped line of "SYMBOL pct%" pairs --
+   still the only place to read an exact value the chart's bars don't
+   label, at a fraction of the height. */
 .pi-holding-allocation-list {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.pi-holding-allocation-row {
-  display: grid;
-  grid-template-columns: 64px 1fr 52px;
-  align-items: center;
-  gap: 10px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 6px;
   font-size: 12px;
+  line-height: 1.6;
+}
+.pi-holding-allocation-item {
+  white-space: nowrap;
 }
 .pi-holding-allocation-symbol {
   font-weight: 600;
   color: var(--pi-color-navy);
 }
-.pi-holding-allocation-bar {
-  height: 10px;
-  border-radius: 5px;
-  overflow: hidden;
-  border: 1px solid var(--pi-color-border);
-}
-.pi-holding-allocation-bar .fill {
-  background: var(--pi-color-navy);
-  height: 100%;
-}
 .pi-holding-allocation-pct {
   font-family: Monaco, "Courier New", monospace;
   font-variant-numeric: tabular-nums;
-  text-align: right;
   color: var(--pi-color-text);
 }
 """

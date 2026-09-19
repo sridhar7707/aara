@@ -988,13 +988,16 @@ def test_holding_allocation_unavailable_is_honest():
     assert any(_HOLDINGS_UNAVAILABLE_MESSAGE in v for v in _html_values(demo))
 
 
-def test_holding_allocation_bar_width_is_clamped_to_a_valid_percentage():
-    """Defensive clamp on the visual bar width only -- never on the
-    displayed text, which always states the real weight_pct verbatim."""
+def test_holding_allocation_renders_a_full_weight_holding():
+    """Corrected 2026-09-18: this compact text line has no per-item visual
+    bar to clamp (see _format_holding_allocation_html's own docstring) --
+    the only invariant left to check is that an edge-value weight_pct
+    (a single 100% holding) still renders as plain text, not malformed
+    markup."""
     holdings = (_make_holding(symbol="AAPL", weight_pct=100.0),)
     out = PortfolioIntelligenceUI._format_holding_allocation_html(holdings)
-    assert "width:100.0%" in out
     assert "100.0%" in out
+    assert "width:" not in out
 
 
 # --- Visual Dashboard Phase A: rendered chart/message/summary states -----
