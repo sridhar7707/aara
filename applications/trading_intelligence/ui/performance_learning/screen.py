@@ -1,10 +1,12 @@
 """Performance & Learning screen structure.
 
-Framework-independent dataclasses (no gradio import). Two of the three
-frozen IA areas -- Attribution Breakdown, Model Confidence Calibration --
-still have no wired data source and stay on a fixed, honest unavailable
-message (Wave 2A produces no attribution or calibration data and none is
-fabricated here).
+Framework-independent dataclasses (no gradio import). Of the three frozen
+IA areas, Attribution Breakdown still has no wired data source and stays
+on a fixed, honest unavailable message (no upstream source produces
+attribution data and none is fabricated here). Model Confidence
+Calibration is no longer in that state -- Sprint 4 wired it to a real,
+disclaimed read (see `CalibrationBand`/`CALIBRATION_MIN_OUTCOMES` below);
+this paragraph was stale on that point until corrected 2026-10-22.
 
 Wave 2B wires the first real source into the third area, **Outcome
 History**: the verified trades-only decision-outcome lineage produced by

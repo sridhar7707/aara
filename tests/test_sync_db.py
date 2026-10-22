@@ -1,3 +1,5 @@
+import os
+import stat
 from unittest.mock import patch
 from bot.monitor.sync_db import push_db, pull_db, push_ledger_db, pull_ledger_db
 
@@ -95,4 +97,31 @@ def test_push_db_and_push_ledger_db_use_different_repo_filenames(tmp_path):
 
     assert "trades.db" in uploaded
     assert "trust_ledger.db" in uploaded
-    assert uploaded[0] != uploaded[1]
+
+
+def test_pull_db_self_heals_an_already_readonly_destination(tmp_path):
+    """TD-018/TD-019 regression. The first TD-018 fix (shutil.copy ->
+    copyfile) only covers a destination being CREATED fresh -- it still
+    raises PermissionError trying to open an EXISTING read-only
+    destination for writing. That's exactly what let TD-018 recur in
+    production: trade.yml's cache restore-keys (a prefix match) kept
+    restoring the most recent prior run's already-read-only trades.db,
+    re-poisoning itself every run regardless of copy()/copyfile(). The
+    real fix chmods an existing destination writable before copying --
+    this test pre-creates a read-only destination (simulating a restored
+    poisoned cache entry) and asserts the sync still succeeds and leaves
+    the file writable, not just that it doesn't raise."""
+    dest = tmp_path / "trades.db"
+    dest.write_text("STALE POISONED CONTENT")
+    os.chmod(dest, stat.S_IREAD)
+
+    fresh_source = tmp_path / "fresh_from_hf.db"
+    fresh_source.write_text("fresh content")
+
+    with patch("bot.monitor.sync_db._get_cfg", return_value=(str(dest), "repo/id", "token")), \
+         patch("huggingface_hub.hf_hub_download", return_value=str(fresh_source)):
+        result = pull_db(force=True)
+
+    assert result is True
+    assert dest.read_text() == "fresh content"
+    assert os.access(dest, os.W_OK)

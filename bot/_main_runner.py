@@ -13,6 +13,15 @@ from pathlib import Path
 _singleton_socket: socket.socket | None = None
 _SINGLETON_PORT = 47219  # arbitrary unprivileged port, unique to this bot
 
+# TD-020: without this, a persistent bug (e.g. TD-018's readonly-database
+# failure, which crashed every single cycle for 36+ days undetected)
+# crash-loops for the full market session -- every cycle, every 5 min,
+# for hours -- instead of ever stopping itself. The existing 3-failure
+# Telegram escalation only alerts; it never halts. Higher than 3 so a
+# couple of genuinely transient failures (a flaky Alpaca API hiccup) don't
+# trip this, but low enough to stop burning hours of silent crash-looping.
+_MAX_CONSECUTIVE_FAILURES = 5
+
 import pandas as pd
 import yfinance as yf
 from loguru import logger
@@ -401,6 +410,18 @@ def run_loop(mode: str = "paper") -> None:
                     f"🔴 <b>3 consecutive cycle crashes</b> — likely Alpaca API outage. "
                     f"Bot is retrying every 5 min. Check status.alpaca.markets"
                 )
+            if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                logger.error(
+                    f"HALTING run_loop after {consecutive_failures} consecutive "
+                    f"cycle crashes — last error: {e}"
+                )
+                tg._send(
+                    f"🔴🛑 <b>HALTING for the rest of this session</b> — "
+                    f"{consecutive_failures} consecutive cycle crashes. Stopping "
+                    f"retries instead of crash-looping until market close. "
+                    f"Last error: {e}"
+                )
+                break
         for _ in range(10):
             if _shutdown:
                 break

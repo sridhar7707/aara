@@ -11,8 +11,9 @@ Decision Ledger Inspection result -- this view never touches Wave 2A/3A/3B
 sources directly and never re-derives anything.
 
 Wave 3C (ADR-064) adds one additive section, **Decision Ledger
-Inspection**, rendered after the two still-unavailable frozen IA areas.
-It shows the already-materialized Wave 3B `CandidateDecisionInspection`
+Inspection**, rendered after the still-unavailable Attribution Breakdown
+area and the two Sprint-4-wired areas below. It shows the
+already-materialized Wave 3B `CandidateDecisionInspection`
 (candidate -> evaluation state -> recorded decision(s) -> model evidence
 -> recorded gate/exit fact -> decision-time context) and an explicit
 end-of-decision-time-evidence boundary. It renders zero outcome / P&L /
@@ -31,12 +32,19 @@ created once, visibility toggled):
   3. HEALTHY, decisions present -> a factual summary line + a
      `gr.Dataframe` of one row per `DecisionOutcome`.
 
-Attribution Breakdown and Model Confidence Calibration remain unavailable
-in every state -- Wave 2A produces no attribution or calibration data and
-none is fabricated here.
+Attribution Breakdown remains unavailable in every state -- no upstream
+source produces attribution data and none is fabricated here. Model
+Confidence Calibration and the Realized-outcomes-by-entry-regime slice
+(both Sprint 4) ARE wired -- see their own sections below; this paragraph
+no longer describes them (corrected 2026-10-22, was stale since Sprint 4
+landed).
 
-No Refresh button and no `demo.load()` in this slice: the screen is
-rendered once at build time from the screen the provider returns.
+Has a Refresh button and `demo.load()`, same disable -> render -> enable
+chain as every other screen (P0-2) -- this paragraph was stale (corrected
+2026-10-22; written before P0-2 added Refresh to this screen). The one
+narrow exception is Decision Ledger Inspection (see its own section
+below): per ADR-064 SS2.12 that section renders once at build time only
+and is deliberately excluded from both Refresh and demo.load().
 
 Renders no "Illustrative Data" banner -- every value shown is real,
 sourced verbatim from Wave 2A; nothing is illustrative.
