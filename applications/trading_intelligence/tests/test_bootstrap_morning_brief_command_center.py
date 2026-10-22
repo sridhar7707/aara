@@ -86,7 +86,15 @@ def test_todays_change_negative_when_value_dropped():
 # --- _recent_morning_brief_drawdown_history (pure, reuses _compute_drawdown_history)
 
 
-def test_drawdown_history_reuses_the_same_math_risk_intelligence_uses():
+def test_drawdown_history_reuses_the_same_math_risk_intelligence_uses(monkeypatch):
+    # Both hardcoded points must stay inside _recent_morning_brief_drawdown_
+    # history's 30-day window regardless of when this test actually runs --
+    # same fixed-clock convention as test_drawdown_history_windows_to_the_
+    # recent_range below, whose own comment explains why (without it, this
+    # test passed by coincidence near 2026-09-02 and silently broke once
+    # enough real time passed, since `points` would then fall outside a
+    # window measured from the real wall clock).
+    monkeypatch.setattr(bootstrap, "_now_utc", lambda: _NOW)
     points = (
         _FakePoint("2026-09-01T00:00:00+00:00", 100000.0),
         _FakePoint("2026-09-02T00:00:00+00:00", 90000.0),

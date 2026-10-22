@@ -25,6 +25,7 @@ the Sprint 4 Item #1 "Historical outcome by ensemble score" table and the
 Item #4 "Realized outcomes by entry market regime" table. Neither is
 wired into `bootstrap.py`, so production behavior is unchanged.
 """
+from datetime import datetime, timezone
 from dataclasses import replace
 
 from applications.platform.integrations import IntegrationHealth
@@ -98,6 +99,11 @@ _CALIBRATION_PREVIEW_COUNTS = {
     "0.65-1.00": (6, 1),
 }
 _CALIBRATION_PREVIEW_PROVIDER = "mock_calibration_preview"
+# Fixed, not IntegrationHealth.healthy()'s default `_utc_now()` -- this
+# builder is documented as deterministic (two calls must compare equal,
+# see test_calibration_preview_is_deterministic), so checked_at must be a
+# constant, not a fresh wall-clock stamp each call.
+_CALIBRATION_PREVIEW_CHECKED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def build_calibration_preview_screen() -> PerformanceLearningScreen:
@@ -116,7 +122,9 @@ def build_calibration_preview_screen() -> PerformanceLearningScreen:
     )
     return replace(
         build_mock_screen(),
-        calibration_health=IntegrationHealth.healthy(_CALIBRATION_PREVIEW_PROVIDER),
+        calibration_health=IntegrationHealth.healthy(
+            _CALIBRATION_PREVIEW_PROVIDER, checked_at=_CALIBRATION_PREVIEW_CHECKED_AT,
+        ),
         calibration_bands=bands,
     )
 
@@ -132,6 +140,10 @@ _REGIME_PREVIEW_ROWS = (
     (REGIME_NOT_RECORDED_LABEL, 1, 2),
 )
 _REGIME_PREVIEW_PROVIDER = "mock_regime_outcome_preview"
+# Fixed, not IntegrationHealth.healthy()'s default `_utc_now()` -- same
+# determinism requirement as _CALIBRATION_PREVIEW_CHECKED_AT above (see
+# test_regime_outcome_preview_is_deterministic).
+_REGIME_PREVIEW_CHECKED_AT = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def build_regime_outcome_preview_screen() -> PerformanceLearningScreen:
@@ -147,6 +159,8 @@ def build_regime_outcome_preview_screen() -> PerformanceLearningScreen:
     )
     return replace(
         build_mock_screen(),
-        regime_outcome_health=IntegrationHealth.healthy(_REGIME_PREVIEW_PROVIDER),
+        regime_outcome_health=IntegrationHealth.healthy(
+            _REGIME_PREVIEW_PROVIDER, checked_at=_REGIME_PREVIEW_CHECKED_AT,
+        ),
         regime_outcome_rows=rows,
     )
