@@ -96,11 +96,19 @@ def test_lstm_predictor_flags_fallback_on_predict_exception(lstm_feature_df):
 
 def test_lstm_predictor_does_not_flag_fallback_for_a_genuine_neutral_prediction(lstm_feature_df):
     """A real, loaded model that happens to output logit=0 (sigmoid=0.5) is
-    a genuine prediction, not an unavailability -- must NOT be flagged."""
+    a genuine prediction, not an unavailability -- must NOT be flagged.
+
+    is_degraded is pinned False: this test's intent is a non-degraded model
+    that happens to output 0.5, not a degraded one -- without pinning it,
+    this test is silently coupled to whatever models/validation_report.json
+    says on disk right now (ADR-074 found this while adding is_degraded
+    handling to predict_proba(); it's a pre-existing test-isolation gap,
+    not something that changed)."""
     from bot.strategy.lstm_predictor import LSTMPredictor
     predictor = LSTMPredictor()
     predictor.model = lambda x: torch.tensor([[0.0]])
     predictor.scaler = None
+    predictor.is_degraded = False
     result = predictor.predict_proba(lstm_feature_df)
     assert result == 0.5
     assert predictor.last_prediction_is_fallback is False
@@ -109,11 +117,46 @@ def test_lstm_predictor_does_not_flag_fallback_for_a_genuine_neutral_prediction(
 def test_lstm_predictor_genuine_prediction_return_type_and_value_unchanged(lstm_feature_df):
     """Backward-compatibility proof for ensemble.py and every other caller:
     the new flag is purely additive -- predict_proba() still returns a bare
-    float, with the exact same value as before this change."""
+    float, with the exact same value as before this change.
+
+    is_degraded pinned False for the same reason as the test above."""
     from bot.strategy.lstm_predictor import LSTMPredictor
     predictor = LSTMPredictor()
     predictor.model = lambda x: torch.tensor([[2.0]])
     predictor.scaler = None
+    predictor.is_degraded = False
     result = predictor.predict_proba(lstm_feature_df)
     assert isinstance(result, float)
     assert abs(result - float(torch.sigmoid(torch.tensor(2.0)))) < 1e-9
+
+
+# --- ADR-074: a degraded model must not return a confident-looking value ---
+#
+# predict_proba() previously ignored is_degraded entirely -- a model whose
+# own validation loss says it carries no directional signal could still
+# return a confident sigmoid output (e.g. logit=2.0 -> ~0.88) if the raw
+# forward pass happened to produce one, letting a known-bad model influence
+# the live trading decision and every confidence display that reads it.
+
+def test_lstm_predictor_degraded_model_forces_fallback_even_with_confident_output(lstm_feature_df):
+    from bot.strategy.lstm_predictor import LSTMPredictor
+    predictor = LSTMPredictor()
+    predictor.model = lambda x: torch.tensor([[2.0]])  # would otherwise be a confident ~0.88
+    predictor.scaler = None
+    predictor.is_degraded = True
+    result = predictor.predict_proba(lstm_feature_df)
+    assert result == 0.5
+    assert predictor.last_prediction_is_fallback is True
+
+
+def test_lstm_predictor_not_degraded_preserves_existing_behavior(lstm_feature_df):
+    """Same mocked confident model, is_degraded explicitly False (the default) --
+    must behave exactly as before this fix, proving no regression."""
+    from bot.strategy.lstm_predictor import LSTMPredictor
+    predictor = LSTMPredictor()
+    predictor.model = lambda x: torch.tensor([[2.0]])
+    predictor.scaler = None
+    predictor.is_degraded = False
+    result = predictor.predict_proba(lstm_feature_df)
+    assert abs(result - float(torch.sigmoid(torch.tensor(2.0)))) < 1e-9
+    assert predictor.last_prediction_is_fallback is False

@@ -235,8 +235,13 @@ class LSTMPredictor:
         Sets last_prediction_is_fallback to distinguish "model unavailable /
         too little history / prediction failed" (fallback 0.5) from a
         genuine computed probability that happens to equal 0.5 -- the
-        return value itself is unchanged in either case."""
-        if self.model is None or len(df) < SEQ_LEN:
+        return value itself is unchanged in either case.
+
+        Also forces the fallback when is_degraded is True: a model whose own
+        validation loss says it carries no directional signal (ADR-074)
+        must not be allowed to return a confident-looking value just because
+        its raw sigmoid output happens to land away from 0.5 on some input."""
+        if self.model is None or self.is_degraded or len(df) < SEQ_LEN:
             self.last_prediction_is_fallback = True
             return 0.5
         try:
