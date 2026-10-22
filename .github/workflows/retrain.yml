@@ -97,7 +97,7 @@ jobs:
           HF_REPO_ID: ${{ secrets.HF_REPO_ID }}
         run: |
           python -c "
-          import os, shutil
+          import os, shutil, stat
           token = os.environ.get('HF_TOKEN', '')
           repo = os.environ.get('HF_REPO_ID', '')
           if not token or not repo:
@@ -106,7 +106,12 @@ jobs:
               from huggingface_hub import hf_hub_download
               cached = hf_hub_download(repo_id=repo, filename='trades.db', token=token, force_download=True)
               # copyfile(), not copy() -- copy() also copies the HF cache
-              # blob's read-only permission bits onto trades.db.
+              # blob's read-only permission bits onto trades.db. chmod
+              # writable first in case trades.db already exists and is
+              # already read-only (see trade.yml's own sync steps for why
+              # copyfile() alone isn't sufficient for an existing file).
+              if os.path.exists('trades.db'):
+                  os.chmod('trades.db', stat.S_IWRITE | stat.S_IREAD)
               shutil.copyfile(cached, 'trades.db')
               print('trades.db pulled from HuggingFace')
           "

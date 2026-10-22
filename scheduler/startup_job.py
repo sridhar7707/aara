@@ -57,7 +57,9 @@ def _step(result: StartupResult, name: str, fn) -> None:
 
 
 def _sync_db() -> None:
+    import os
     import shutil
+    import stat
     from config import HF_TOKEN, HF_DB_REPO_ID, TRADE_DB_PATH
     if not HF_TOKEN:
         logger.info("startup_job: HF_TOKEN not set — skipping db sync")
@@ -69,7 +71,14 @@ def _sync_db() -> None:
     )
     # copyfile(), not copy() -- copy() also copies the HF cache blob's
     # read-only permission bits onto TRADE_DB_PATH, which the bot then
-    # writes trades/signals into all day.
+    # writes trades/signals into all day. chmod writable first in case
+    # TRADE_DB_PATH already exists and is already read-only -- copyfile()
+    # alone still fails opening an existing read-only destination (found
+    # 2026-10-22: a stale actions/cache entry kept re-restoring an already
+    # read-only trades.db in trade.yml, reproducing this exact failure
+    # even after the copy()->copyfile() fix).
+    if os.path.exists(TRADE_DB_PATH):
+        os.chmod(TRADE_DB_PATH, stat.S_IWRITE | stat.S_IREAD)
     shutil.copyfile(cached, TRADE_DB_PATH)
     import sqlite3
     n = sqlite3.connect(TRADE_DB_PATH).execute("SELECT COUNT(*) FROM trades").fetchone()[0]

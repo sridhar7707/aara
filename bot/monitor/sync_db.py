@@ -14,6 +14,7 @@ Set HF_DB_REPO_ID in .env or environment to override.
 from __future__ import annotations
 import os
 import shutil
+import stat
 import traceback
 from pathlib import Path
 
@@ -197,7 +198,22 @@ def _download(db_path: str, repo_id: str, token: str, repo_filename: str,
             # storage), so copy() would leave `local` read-only too --
             # every write to it for the rest of the process then fails
             # with "attempt to write a readonly database". copyfile() only
-            # copies data, so `local` gets normal, writable permissions.
+            # copies data, so a freshly-created `local` gets normal,
+            # writable permissions.
+            #
+            # That alone isn't sufficient, though (found 2026-10-22, after
+            # the copyfile()-only fix still failed in production): if
+            # `local` already EXISTS and is already read-only -- e.g. a
+            # stale copy left over from a run before this fix existed --
+            # copyfile() still has to open() that existing file for
+            # writing, which fails with the exact same "attempt to write a
+            # readonly database" symptom regardless of copy()/copyfile().
+            # chmod writable first (governed by ownership, not the file's
+            # current mode, so this works even on an already-read-only
+            # file) to self-heal a poisoned destination on every run, not
+            # just a freshly-created one.
+            if local.exists():
+                local.chmod(stat.S_IWRITE | stat.S_IREAD)
             shutil.copyfile(cached, local)
             size_kb = local.stat().st_size / 1024
             logger.info(f"{label}: downloaded {repo_filename} ({size_kb:.0f} KB) from {repo_id}")

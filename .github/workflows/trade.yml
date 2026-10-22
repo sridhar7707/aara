@@ -82,7 +82,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python -c "
-          import os, shutil
+          import os, shutil, stat
           token = os.environ.get('HF_TOKEN', '')
           db_repo = 'ksri77/ai-trading-bot-db'
           if not token:
@@ -94,7 +94,16 @@ jobs:
                   # copyfile(), not copy() -- copy() also copies the HF cache
                   # blob's read-only permission bits onto trades.db, which
                   # then makes every write for the rest of this run fail with
-                  # 'attempt to write a readonly database'.
+                  # 'attempt to write a readonly database'. Not sufficient
+                  # alone (found 2026-10-22): the 'Restore trade database'
+                  # cache step above can restore an ALREADY read-only
+                  # trades.db from a past broken run (restore-keys matches
+                  # the most recent prior cache entry, which keeps
+                  # re-caching itself read-only run after run) -- copyfile()
+                  # still fails opening an existing read-only destination
+                  # for writing, so chmod it writable first every time.
+                  if os.path.exists('trades.db'):
+                      os.chmod('trades.db', stat.S_IWRITE | stat.S_IREAD)
                   shutil.copyfile(cached, 'trades.db')
                   import sqlite3
                   count = sqlite3.connect('trades.db').execute('SELECT COUNT(*) FROM trades').fetchone()[0]
@@ -112,7 +121,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python -c "
-          import os, shutil
+          import os, shutil, stat
           token = os.environ.get('HF_TOKEN', '')
           db_repo = 'ksri77/ai-trading-bot-db'
           os.makedirs('data', exist_ok=True)
@@ -123,7 +132,11 @@ jobs:
               try:
                   cached = hf_hub_download(repo_id=db_repo, filename='trust_ledger.db', repo_type='dataset', token=token, force_download=True)
                   # copyfile(), not copy() -- see the trades.db sync step
-                  # above for why copy() leaves this file unwritable.
+                  # above for why copy() leaves this file unwritable, and
+                  # why chmod-before-copy is also needed for an already
+                  # read-only destination restored from a stale cache entry.
+                  if os.path.exists('data/trust_ledger.db'):
+                      os.chmod('data/trust_ledger.db', stat.S_IWRITE | stat.S_IREAD)
                   shutil.copyfile(cached, 'data/trust_ledger.db')
                   size_kb = os.path.getsize('data/trust_ledger.db') / 1024
                   print(f'trust_ledger.db synced from {db_repo} — {size_kb:.0f} KB')
