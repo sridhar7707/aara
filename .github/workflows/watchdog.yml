@@ -65,3 +65,69 @@ jobs:
                   f"Dispatcher may be down. Check: {url}"
               )
           PYEOF
+
+      # Liveness (above) only proves the dispatcher process is up -- it does
+      # NOT prove the bot is actually writing data. That gap is exactly how
+      # a readonly-database bug crashed every trading cycle for 36 days
+      # (2026-09-17 to 2026-10-22) while this workflow kept reporting
+      # healthy the whole time, because /run/cron kept responding fine.
+      # This step instead checks the one thing that actually matters: did
+      # the HF dataset repo (trades.db/trust_ledger.db) receive a real push
+      # recently? `last_modified` only advances on a successful push_db()/
+      # push_ledger_db() upload, so a stuck value catches the write-path
+      # being broken even when the process around it looks fine.
+      - name: Check trades.db/trust_ledger.db are still being written
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_DB_REPO_ID: ${{ secrets.HF_DB_REPO_ID }}
+        run: |
+          pip install --quiet huggingface_hub
+          python3 - <<'PYEOF'
+          import os
+          from urllib import request, parse
+          from datetime import datetime, timezone
+
+          T_TOK   = os.environ.get("TELEGRAM_TOKEN", "")
+          T_CID   = os.environ.get("TELEGRAM_CHAT_ID", "")
+          HF_TOK  = os.environ.get("HF_TOKEN", "")
+          DB_REPO = os.environ.get("HF_DB_REPO_ID", "")
+          # Covers the real Fri-evening -> Mon-14:00-UTC gap (~66h) plus a
+          # 3-day holiday weekend (~90h) with margin -- never trips on a
+          # normal weekend, but catches a real multi-day outage within a
+          # few days instead of the 36 it took this time.
+          STALE_HOURS = 96
+
+          def telegram(text):
+              if not T_TOK or not T_CID:
+                  return
+              data = parse.urlencode({"chat_id": T_CID, "parse_mode": "HTML", "text": text}).encode()
+              try:
+                  request.urlopen(
+                      f"https://api.telegram.org/bot{T_TOK}/sendMessage", data=data, timeout=5
+                  )
+              except Exception:
+                  pass
+
+          if not HF_TOK or not DB_REPO:
+              print("HF_TOKEN/HF_DB_REPO_ID not set — skipping staleness check")
+              exit(0)
+
+          from huggingface_hub import HfApi
+          try:
+              info = HfApi(token=HF_TOK).repo_info(repo_id=DB_REPO, repo_type="dataset")
+              age_h = (datetime.now(timezone.utc) - info.last_modified).total_seconds() / 3600
+              if age_h > STALE_HOURS:
+                  print(f"STALE: {DB_REPO} last written {age_h:.1f}h ago (limit {STALE_HOURS}h)")
+                  telegram(
+                      f"🔴 <b>Watchdog alert</b> — {DB_REPO} hasn't been written to in "
+                      f"{age_h:.0f}h (limit {STALE_HOURS}h). The bot's dispatcher may be up "
+                      f"while every trading cycle fails to actually record data -- check the "
+                      f"'Trading Bot' workflow's own run logs, not just this watchdog."
+                  )
+              else:
+                  print(f"OK: {DB_REPO} last written {age_h:.1f}h ago")
+          except Exception as exc:
+              print(f"staleness check failed: {exc}")
+          PYEOF
