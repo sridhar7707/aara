@@ -105,7 +105,9 @@ jobs:
           else:
               from huggingface_hub import hf_hub_download
               cached = hf_hub_download(repo_id=repo, filename='trades.db', token=token, force_download=True)
-              shutil.copy(cached, 'trades.db')
+              # copyfile(), not copy() -- copy() also copies the HF cache
+              # blob's read-only permission bits onto trades.db.
+              shutil.copyfile(cached, 'trades.db')
               print('trades.db pulled from HuggingFace')
           "
 

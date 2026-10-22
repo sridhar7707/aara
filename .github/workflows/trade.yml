@@ -91,7 +91,11 @@ jobs:
               from huggingface_hub import hf_hub_download
               try:
                   cached = hf_hub_download(repo_id=db_repo, filename='trades.db', repo_type='dataset', token=token, force_download=True)
-                  shutil.copy(cached, 'trades.db')
+                  # copyfile(), not copy() -- copy() also copies the HF cache
+                  # blob's read-only permission bits onto trades.db, which
+                  # then makes every write for the rest of this run fail with
+                  # 'attempt to write a readonly database'.
+                  shutil.copyfile(cached, 'trades.db')
                   import sqlite3
                   count = sqlite3.connect('trades.db').execute('SELECT COUNT(*) FROM trades').fetchone()[0]
                   print(f'trades.db synced from {db_repo} — {count} records')
@@ -118,7 +122,9 @@ jobs:
               from huggingface_hub import hf_hub_download
               try:
                   cached = hf_hub_download(repo_id=db_repo, filename='trust_ledger.db', repo_type='dataset', token=token, force_download=True)
-                  shutil.copy(cached, 'data/trust_ledger.db')
+                  # copyfile(), not copy() -- see the trades.db sync step
+                  # above for why copy() leaves this file unwritable.
+                  shutil.copyfile(cached, 'data/trust_ledger.db')
                   size_kb = os.path.getsize('data/trust_ledger.db') / 1024
                   print(f'trust_ledger.db synced from {db_repo} — {size_kb:.0f} KB')
               except Exception as e:

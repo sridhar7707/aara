@@ -67,7 +67,10 @@ def _sync_db() -> None:
         repo_id=HF_DB_REPO_ID, filename="trades.db",
         repo_type="dataset", token=HF_TOKEN, force_download=True,
     )
-    shutil.copy(cached, TRADE_DB_PATH)
+    # copyfile(), not copy() -- copy() also copies the HF cache blob's
+    # read-only permission bits onto TRADE_DB_PATH, which the bot then
+    # writes trades/signals into all day.
+    shutil.copyfile(cached, TRADE_DB_PATH)
     import sqlite3
     n = sqlite3.connect(TRADE_DB_PATH).execute("SELECT COUNT(*) FROM trades").fetchone()[0]
     logger.info(f"startup_job: trades.db synced from {HF_DB_REPO_ID} ({n} records)")

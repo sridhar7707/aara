@@ -191,7 +191,14 @@ def _download(db_path: str, repo_id: str, token: str, repo_filename: str,
                 force_download=True,
             )
             local.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy(cached, local)
+            # shutil.copy() also copies the source's permission bits; the
+            # huggingface_hub cache blob `cached` points at is read-only
+            # (cache-protection behavior, surfaced by this repo's Xet
+            # storage), so copy() would leave `local` read-only too --
+            # every write to it for the rest of the process then fails
+            # with "attempt to write a readonly database". copyfile() only
+            # copies data, so `local` gets normal, writable permissions.
+            shutil.copyfile(cached, local)
             size_kb = local.stat().st_size / 1024
             logger.info(f"{label}: downloaded {repo_filename} ({size_kb:.0f} KB) from {repo_id}")
             result[0] = True
