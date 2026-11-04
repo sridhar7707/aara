@@ -175,10 +175,19 @@ def _maybe_record_day_trade(con: sqlite3.Connection, risk: RiskManager, symbol: 
 
 
 def _reconcile_positions(con: sqlite3.Connection, alpaca_positions: dict,
-                          portfolio_value: float = 0.0, client=None) -> None:
+                          portfolio_value: float = 0.0, client=None,
+                          pool: CapitalPool | None = None) -> None:
     """Sync position_state with Alpaca's live positions at startup. Removes
     stale DB entries (logging a SELL_RECONCILE trade so the dashboard sees a
-    matching close) and seeds entries for positions opened outside the bot."""
+    matching close) and seeds entries for positions opened outside the bot.
+
+    ADR-075: the SELL_RECONCILE branch now also credits the capital pool
+    via _pool_sell -- every other sell path in this file already did this;
+    this one didn't, which was the confirmed source of a ~$15.8K drift in
+    capital_pools.available_cash that silently suppressed real buy sizing
+    for weeks. `pool` is optional (None at any call site not yet passing
+    one) so this stays backward compatible -- the pool-update is simply
+    skipped, exactly as the other three call sites already do."""
     db_syms = {r[0] for r in con.execute("SELECT symbol FROM position_state").fetchall()}
     for sym in db_syms - set(alpaca_positions.keys()):
         logger.warning(f"Reconcile: {sym} in DB but not Alpaca — closing open trades record")
@@ -212,6 +221,8 @@ def _reconcile_positions(con: sqlite3.Connection, alpaca_positions: dict,
                                 notional, "reconcile", portfolio_value, pnl_pct,
                                 entry_price=entry_price, holding_days=holding_days)
             _journal_close(con, sym, _rec_id, "reconcile", pnl_pct, holding_days)
+            if pool:
+                _pool_sell(con, pool.id, entry_price * net_shares, notional, symbol=sym)
             logger.warning(
                 f"Reconcile: logged SELL_RECONCILE for {sym} "
                 f"({net_shares:.4f} shares @ ${sell_price:.2f}, entry=${entry_price:.2f}, "

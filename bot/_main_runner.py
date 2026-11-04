@@ -506,7 +506,8 @@ def _do_clean_db() -> None:
     """
     con = init_db()
     tables = ("trades", "position_state", "risk_state",
-              "portfolio_snapshots", "signal_log", "screener_log")
+              "portfolio_snapshots", "signal_log", "screener_log",
+              "capital_pools", "capital_ledger")
     for table in tables:
         try:
             n = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]

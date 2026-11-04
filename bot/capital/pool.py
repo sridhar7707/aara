@@ -266,6 +266,65 @@ def set_reserve(conn: sqlite3.Connection, pool_id: int, reserve: float) -> None:
     conn.commit()
 
 
+def reconcile_pool(
+    conn: sqlite3.Connection, pool_id: int,
+    real_available_cash: float, real_invested_cost_basis: float,
+    tolerance: float = 1.0,
+) -> bool:
+    """True up available_cash (vs. the real Alpaca cash balance) and
+    invested_amount (vs. the real open positions' cost basis, from
+    position_state -- NOT mark-to-market, since this pool has always
+    tracked cost basis; see update_on_buy/update_on_sell) against reality.
+
+    Defense-in-depth per ADR-075: nothing else in this module reconciles
+    against the broker, so a silent failure in update_on_buy/update_on_sell
+    (or the SELL_RECONCILE gap this same ADR fixes in _main_positions.py)
+    would otherwise drift forever with no alert -- this is what caught an
+    $15.8K drift that had been silently suppressing every new BUY's sizing
+    for ~8 weeks.
+
+    Writes nothing and returns False when both figures are already within
+    `tolerance` -- keeps capital_ledger free of noise once the pool is in
+    sync, rather than appending a reconcile row every cycle regardless.
+    allocated_amount/reserve/realized_profit/profit_withdrawn are never
+    touched here (ADR-075 Section 2) -- not derivable from a point-in-time
+    snapshot, and touching them risks corrupting P&L/withdrawal history."""
+    _ensure_tables(conn)
+    row = conn.execute(
+        "SELECT available_cash, invested_amount FROM capital_pools WHERE id = ?",
+        (pool_id,),
+    ).fetchone()
+    if not row:
+        return False
+    old_cash, old_invested = float(row[0]), float(row[1])
+    cash_drift = real_available_cash - old_cash
+    invested_drift = real_invested_cost_basis - old_invested
+    if abs(cash_drift) < tolerance and abs(invested_drift) < tolerance:
+        return False
+    conn.execute(
+        "UPDATE capital_pools SET available_cash = ?, invested_amount = ?, "
+        "updated_at = datetime('now') WHERE id = ?",
+        (real_available_cash, real_invested_cost_basis, pool_id),
+    )
+    append_ledger(
+        conn, pool_id, "reconcile", cash_drift, real_available_cash,
+        notes=(
+            f"drift correction: cash {cash_drift:+.2f} "
+            f"({old_cash:.2f}->{real_available_cash:.2f}), "
+            f"invested {invested_drift:+.2f} "
+            f"({old_invested:.2f}->{real_invested_cost_basis:.2f})"
+        ),
+    )
+    conn.commit()
+    _logger.warning(
+        f"Capital pool reconciled: available_cash {old_cash:.2f} -> "
+        f"{real_available_cash:.2f} (drift {cash_drift:+.2f}), "
+        f"invested_amount {old_invested:.2f} -> {real_invested_cost_basis:.2f} "
+        f"(drift {invested_drift:+.2f})"
+    )
+    return True
+
+
 def append_ledger(
     conn: sqlite3.Connection,
     pool_id: int,

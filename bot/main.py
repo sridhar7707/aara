@@ -82,7 +82,9 @@ from bot._main_cycle import (
     _handle_exits, _handle_entry,
 )
 from bot._main_prep import prepare_cycle_context
-from bot.capital.pool import load_active_pool as _load_pool, compute_tradeable_capital
+from bot.capital.pool import (
+    load_active_pool as _load_pool, compute_tradeable_capital, reconcile_pool,
+)
 from bot._main_runner import (
     _do_clean_db, _do_reset_daily_start, end_of_day_summary, run_loop,
 )
@@ -262,8 +264,30 @@ def run(
         pdt_exempt = False
 
     positions       = _fetch_positions_for_reconcile(client, con, trust_conn)
+
+    # Compute once per cycle — avoids N identical DB reads inside _handle_entry.
+    # Loaded before _reconcile_positions (ADR-075) so the pool exists for
+    # that call to credit any newly-discovered closed position back into it.
+    _tradeable_capital = compute_tradeable_capital(con, portfolio_value)
+    # Track remaining profits pool across symbols so aggregate buys can't exceed it.
+    _remaining_tradeable = _tradeable_capital
+    _capital_pool = _load_pool(con, initial_amount=_tradeable_capital)
+
     if not _sanity_blocked:
-        _reconcile_positions(con, positions, portfolio_value=portfolio_value, client=client)
+        _reconcile_positions(con, positions, portfolio_value=portfolio_value,
+                             client=client, pool=_capital_pool)
+
+    # ADR-075: defense-in-depth reconciliation against the real broker
+    # account, independent of whatever the position-reconcile step above
+    # found. invested_amount reconciles against position_state's own cost
+    # basis (just trued up above), not mark-to-market -- see pool.py's
+    # reconcile_pool() docstring for why.
+    _real_invested_cost_basis = sum(
+        float(r[0]) * float(r[1])
+        for r in con.execute("SELECT entry_price, shares FROM position_state").fetchall()
+    )
+    if reconcile_pool(con, _capital_pool.id, real_available_cash, _real_invested_cost_basis):
+        _capital_pool = _load_pool(con, initial_amount=_tradeable_capital)
 
     (buy_order_syms, sell_order_syms, macro_score, macro_cap, macro_halt,
      bars_map, sentiments, spy_5bar_return, vs_spy_today, earnings_map,
@@ -271,12 +295,6 @@ def run(
         con, client, risk, mode, daily_start, real_portfolio_value,
         real_available_cash, portfolio_value, positions, active_symbols,
     )
-
-    # Compute once per cycle — avoids N identical DB reads inside _handle_entry.
-    _tradeable_capital = compute_tradeable_capital(con, portfolio_value)
-    # Track remaining profits pool across symbols so aggregate buys can't exceed it.
-    _remaining_tradeable = _tradeable_capital
-    _capital_pool = _load_pool(con, initial_amount=_tradeable_capital)
 
     _cycle_deployed_notional = 0.0
 

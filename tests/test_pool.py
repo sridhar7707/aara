@@ -17,6 +17,7 @@ from bot.capital.pool import (
     append_ledger,
     deposit,
     load_active_pool,
+    reconcile_pool,
     set_reserve,
     update_on_buy,
     update_on_sell,
@@ -220,3 +221,109 @@ def test_atomic_buy_sell_sequence(pool_db):
     ).fetchone()
     assert row[1] == pytest.approx(0.0)       # invested back to zero
     assert row[0] == pytest.approx(5100.0)    # original 5000 + 100 profit
+
+
+# ── 16. reconcile_pool (ADR-075) ──────────────────────────────────────────────
+
+def test_reconcile_pool_no_drift_writes_nothing(pool_db):
+    """Within tolerance of both real figures -- no write, no ledger entry,
+    returns False. Keeps capital_ledger free of per-cycle noise once the
+    pool is already in sync."""
+    con, pool = pool_db
+    before = con.execute(
+        "SELECT available_cash, invested_amount, updated_at FROM capital_pools WHERE id=?",
+        (pool.id,),
+    ).fetchone()
+
+    changed = reconcile_pool(con, pool.id, real_available_cash=5000.0, real_invested_cost_basis=0.0)
+
+    assert changed is False
+    after = con.execute(
+        "SELECT available_cash, invested_amount, updated_at FROM capital_pools WHERE id=?",
+        (pool.id,),
+    ).fetchone()
+    assert after == before
+    ledger_count = con.execute(
+        "SELECT COUNT(*) FROM capital_ledger WHERE event_type='reconcile'"
+    ).fetchone()[0]
+    assert ledger_count == 0
+
+
+def test_reconcile_pool_cash_drift_corrects_and_logs(pool_db):
+    """This is the exact production bug: available_cash stuck stale while
+    real cash is materially higher. Reconciliation corrects it and records
+    one ledger entry explaining the correction."""
+    con, pool = pool_db
+
+    changed = reconcile_pool(con, pool.id, real_available_cash=7500.0, real_invested_cost_basis=0.0)
+
+    assert changed is True
+    row = con.execute(
+        "SELECT available_cash FROM capital_pools WHERE id=?", (pool.id,)
+    ).fetchone()
+    assert row[0] == pytest.approx(7500.0)
+    ledger_row = con.execute(
+        "SELECT amount, balance_after FROM capital_ledger WHERE event_type='reconcile'"
+    ).fetchone()
+    assert ledger_row is not None
+    assert ledger_row[0] == pytest.approx(2500.0)   # the drift amount
+    assert ledger_row[1] == pytest.approx(7500.0)
+
+
+def test_reconcile_pool_invested_drift_corrects(pool_db):
+    """invested_amount drift alone (cash already correct) is also
+    detected and corrected independently of the cash figure."""
+    con, pool = pool_db
+    update_on_buy(con, pool.id, 1000.0)  # available=4000, invested=1000
+
+    # Real cost basis of open positions is actually 1500 (e.g. a position
+    # opened outside _pool_buy's own tracking) -- cash is already correct.
+    changed = reconcile_pool(con, pool.id, real_available_cash=4000.0, real_invested_cost_basis=1500.0)
+
+    assert changed is True
+    row = con.execute(
+        "SELECT available_cash, invested_amount FROM capital_pools WHERE id=?",
+        (pool.id,),
+    ).fetchone()
+    assert row[0] == pytest.approx(4000.0)   # unchanged
+    assert row[1] == pytest.approx(1500.0)   # corrected
+
+
+def test_reconcile_pool_both_drift_single_ledger_entry(pool_db):
+    """Both figures drifting at once still produces exactly one ledger
+    entry, not two -- the correction is a single atomic true-up."""
+    con, pool = pool_db
+
+    changed = reconcile_pool(con, pool.id, real_available_cash=6000.0, real_invested_cost_basis=900.0)
+
+    assert changed is True
+    count = con.execute(
+        "SELECT COUNT(*) FROM capital_ledger WHERE event_type='reconcile'"
+    ).fetchone()[0]
+    assert count == 1
+
+
+def test_reconcile_pool_never_touches_allocated_or_reserve(pool_db):
+    """ADR-075 Section 2: allocated_amount/reserve/realized_profit/
+    profit_withdrawn are never written by reconciliation."""
+    con, pool = pool_db
+    set_reserve(con, pool.id, 250.0)
+    update_on_buy(con, pool.id, 1000.0)
+    update_on_sell(con, pool.id, cost_basis=1000.0, fill_value=1200.0)  # realized_profit=200
+    before = con.execute(
+        "SELECT allocated_amount, reserve, realized_profit, profit_withdrawn "
+        "FROM capital_pools WHERE id=?", (pool.id,),
+    ).fetchone()
+
+    reconcile_pool(con, pool.id, real_available_cash=9999.0, real_invested_cost_basis=1234.0)
+
+    after = con.execute(
+        "SELECT allocated_amount, reserve, realized_profit, profit_withdrawn "
+        "FROM capital_pools WHERE id=?", (pool.id,),
+    ).fetchone()
+    assert after == before
+
+
+def test_reconcile_pool_missing_pool_id_returns_false(mem_db):
+    """A nonexistent pool_id is a no-op, not an error."""
+    assert reconcile_pool(mem_db, 999, real_available_cash=100.0, real_invested_cost_basis=0.0) is False
