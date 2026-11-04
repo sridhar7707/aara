@@ -140,6 +140,25 @@ def test_calibrated_proba_is_not_a_passthrough_of_raw_score(feature_df):
     assert result != 0.9
 
 
+def test_calibrated_proba_reuses_raw_prob_without_a_second_inference(feature_df):
+    """Efficiency fix: when the caller already ran predict_proba() on this row
+    (the bot/main.py pattern, once per symbol per cycle), passing that value
+    as raw_prob must skip a second XGBoost inference entirely."""
+    from bot.strategy.xgb_predictor import XGBPredictor
+    predictor = XGBPredictor()
+    predictor.model = MagicMock()
+    predictor._calibration = MagicMock()
+    predictor._calibration.predict.return_value = np.array([0.55])
+
+    raw = predictor.predict_proba(feature_df.iloc[-1])  # first (only) real inference
+    predictor.model.predict_proba.reset_mock()
+
+    result = predictor.calibrated_proba(feature_df.iloc[-1], raw_prob=raw)
+
+    predictor.model.predict_proba.assert_not_called()
+    assert result == pytest.approx(0.55)
+
+
 def test_calibrated_proba_none_when_predict_proba_is_fallback(feature_df):
     """If the raw prediction itself fell back to 0.5 (no model / error),
     the calibrated value must also be None, not a calibrated 0.5."""

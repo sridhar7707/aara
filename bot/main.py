@@ -337,7 +337,9 @@ def run(
             regime_name   = regime_clf.regime_name(regime_code)
 
             xgb_prob          = xgb.predict_proba(latest)
-            xgb_calibrated    = xgb.calibrated_proba(latest)  # ADR-076 — observation only, not used below
+            # ADR-076 — observation only, not used below. Reuses xgb_prob to avoid a
+            # second XGBoost inference on the same row.
+            xgb_calibrated    = xgb.calibrated_proba(latest, raw_prob=xgb_prob)
             lstm_prob         = lstm.predict_proba(sig_bars)
             sentiment         = sentiments.get(symbol, 0.0)
             action_str, ensemble_size = ensemble_signal(

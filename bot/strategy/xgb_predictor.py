@@ -213,8 +213,14 @@ class XGBPredictor:
             self.last_prediction_is_fallback = True
             return 0.5
 
-    def calibrated_proba(self, row: pd.Series) -> float | None:
+    def calibrated_proba(self, row: pd.Series, raw_prob: float | None = None) -> float | None:
         """Observation-only calibrated probability (ADR-076).
+
+        Pass the already-computed raw_prob (from a predict_proba() call on
+        this same row) to avoid a redundant second XGBoost inference —
+        callers that already call predict_proba() every cycle should always
+        do this. If omitted, computes it here (keeps this method usable on
+        its own, e.g. in tests).
 
         Returns None when no calibration model is loaded or the base model
         is unavailable — never a fabricated fallback value. Not read by
@@ -223,7 +229,7 @@ class XGBPredictor:
         if self.model is None or self._calibration is None:
             return None
         try:
-            raw = self.predict_proba(row)
+            raw = self.predict_proba(row) if raw_prob is None else raw_prob
             if self.last_prediction_is_fallback:
                 return None
             return float(self._calibration.predict([raw])[0])
