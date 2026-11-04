@@ -1,5 +1,18 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"c:\\Users\\ksri7\\projects\\ai-trading-bot\" && python tests/ui_tester.py; python tests/requirements_tracker.py --status; python tools/verify_docs.py --path docs --no-surface; true",
+            "shell": "bash",
+            "timeout": 60,
+            "statusMessage": "Running weekly health checks (ui_tester, requirements_tracker, verify_docs)..."
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
