@@ -337,6 +337,7 @@ def run(
             regime_name   = regime_clf.regime_name(regime_code)
 
             xgb_prob          = xgb.predict_proba(latest)
+            xgb_calibrated    = xgb.calibrated_proba(latest)  # ADR-076 — observation only, not used below
             lstm_prob         = lstm.predict_proba(sig_bars)
             sentiment         = sentiments.get(symbol, 0.0)
             action_str, ensemble_size = ensemble_signal(
@@ -354,7 +355,8 @@ def run(
             # Log every evaluated signal so the dashboard can show live model
             # output even on cycles where no trade fires.
             _log_signal(con, symbol, xgb_prob, lstm_prob, sentiment,
-                        macro_score, regime_name, action_str)
+                        macro_score, regime_name, action_str,
+                        xgb_calibrated_prob=xgb_calibrated)
 
             # Record per-symbol recommendation for every cycle so Rec History widget
             # shows what the bot was thinking even when no trade fires.

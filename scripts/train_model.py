@@ -97,6 +97,12 @@ def main():
         "date_range":       {"from": date_min, "to": date_max},
         "xgb_val_auc":      round(xgb.val_auc, 4),
         "lstm_val_loss":    round(lstm.val_loss, 4),
+        # ADR-076 — calibration quality, observation-only, not read by any gate.
+        # Computed on the same val split the calibrator was fit on (no third
+        # split exists at this data volume); None if calibration fit failed.
+        "xgb_calibration_brier_raw":        None if xgb.calibration_brier_raw is None else round(xgb.calibration_brier_raw, 4),
+        "xgb_calibration_brier_calibrated": None if xgb.calibration_brier_calibrated is None else round(xgb.calibration_brier_calibrated, 4),
+        "xgb_calibration_ece":              None if xgb.calibration_ece is None else round(xgb.calibration_ece, 4),
         "feature_count":    len(FEATURE_COLS),
         "feature_cols":     FEATURE_COLS,
         "forward_periods":  XGB_FP,

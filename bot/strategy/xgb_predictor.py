@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -7,12 +9,30 @@ import joblib
 from sklearn.metrics import roc_auc_score
 from loguru import logger
 from bot.strategy.features import FEATURE_COLS
+from bot.strategy.calibration import fit_conservative_calibration
 
 XGB_MODEL_PATH  = Path("models/saved/xgb_predictor.pkl")
 _XGB_META_PATH  = XGB_MODEL_PATH.with_suffix(".meta.json")
+_XGB_CALIBRATION_PATH = Path("models/saved/xgb_calibration.pkl")
 MODEL_MAX_AGE_DAYS = 30
 FORWARD_PERIODS = 21   # 1-month target — aligned with MAX_HOLD_DAYS=45 medium-term horizon
 MIN_MOVE_PCT    = 0.003  # require ≥0.3% move to label as "up" — filters 5-min microstructure noise
+
+
+def _expected_calibration_error(probs: np.ndarray, labels: np.ndarray, n_bins: int = 10) -> float:
+    """Standard binned ECE: weighted mean |predicted - actual| across equal-width bins."""
+    probs = np.asarray(probs, dtype=float)
+    labels = np.asarray(labels, dtype=float)
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    total = len(probs)
+    ece = 0.0
+    for lo, hi in zip(bin_edges[:-1], bin_edges[1:]):
+        mask = (probs >= lo) & (probs < hi) if hi < 1.0 else (probs >= lo) & (probs <= hi)
+        if not mask.any():
+            continue
+        bin_weight = mask.sum() / total
+        ece += bin_weight * abs(probs[mask].mean() - labels[mask].mean())
+    return float(ece)
 
 
 class XGBPredictor:
@@ -26,6 +46,15 @@ class XGBPredictor:
         # return type and value are unchanged in every case, so ensemble.py
         # and every other caller are unaffected.
         self.last_prediction_is_fallback: bool = False
+        self._calibration = None  # ADR-076 — observation-only calibrated probability
+        # Calibration-quality metrics (ADR-076), populated by train() for
+        # scripts/train_model.py's validation_report.json. Computed on the
+        # same X_val/y_val the calibrator is fit on (no third split exists
+        # in this project's data volume) — an in-sample-relative-to-fit
+        # metric, not a held-out one; reported as such, not hidden.
+        self.calibration_brier_raw: float | None = None
+        self.calibration_brier_calibrated: float | None = None
+        self.calibration_ece: float | None = None
         self._load()
 
     def _load(self):
@@ -49,6 +78,15 @@ class XGBPredictor:
                 logger.warning(f"Failed to load XGBoost model: {e}")
         else:
             logger.warning("No XGBoost model found — will need training.")
+        if _XGB_CALIBRATION_PATH.exists():
+            try:
+                # Self-produced artifact from our own train() below, same trust
+                # boundary as XGB_MODEL_PATH above (also loaded via joblib.load).
+                self._calibration = joblib.load(_XGB_CALIBRATION_PATH)
+                logger.info("XGBoost calibration model loaded (ADR-076, observation-only).")
+            except Exception as e:
+                logger.warning(f"Failed to load XGBoost calibration model: {e}")
+                self._calibration = None
 
     def _check_model_age(self) -> None:
         if not _XGB_META_PATH.exists():
@@ -126,6 +164,24 @@ class XGBPredictor:
             else:
                 logger.info(f"XGBoost val AUC-ROC (holdout 20%): {val_auc:.3f}")
 
+            try:
+                self._calibration = fit_conservative_calibration(val_proba, y_val.values)
+                calibrated_val = self._calibration.predict(val_proba)
+                self.calibration_brier_raw = float(np.mean((val_proba - y_val.values) ** 2))
+                self.calibration_brier_calibrated = float(np.mean((calibrated_val - y_val.values) ** 2))
+                self.calibration_ece = _expected_calibration_error(calibrated_val, y_val.values)
+                logger.info(
+                    "XGBoost calibration model fit (ADR-076, observation-only) — "
+                    f"brier raw={self.calibration_brier_raw:.4f} "
+                    f"calibrated={self.calibration_brier_calibrated:.4f} "
+                    f"ece={self.calibration_ece:.4f}"
+                )
+            except Exception as e:
+                logger.warning(f"XGBoost calibration fit failed: {e}")
+                self._calibration = None
+        else:
+            self._calibration = None
+
         if save:
             XGB_MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
             joblib.dump(self.model, XGB_MODEL_PATH)
@@ -133,6 +189,9 @@ class XGBPredictor:
                 json.dumps({"trained_at": datetime.now(timezone.utc).isoformat()})
             )
             logger.info(f"XGBoost trained and saved to {XGB_MODEL_PATH}")
+            if self._calibration is not None:
+                joblib.dump(self._calibration, _XGB_CALIBRATION_PATH)
+                logger.info(f"XGBoost calibration model saved to {_XGB_CALIBRATION_PATH}")
 
     def predict_proba(self, row: pd.Series) -> float:
         """Return probability (0-1) that price will be higher in {FORWARD_PERIODS} candles.
@@ -153,6 +212,24 @@ class XGBPredictor:
             logger.error(f"XGBoost predict failed: {e}")
             self.last_prediction_is_fallback = True
             return 0.5
+
+    def calibrated_proba(self, row: pd.Series) -> float | None:
+        """Observation-only calibrated probability (ADR-076).
+
+        Returns None when no calibration model is loaded or the base model
+        is unavailable — never a fabricated fallback value. Not read by
+        ensemble_signal(), XGB_MIN_CONFIDENCE, or any other live gate;
+        recorded to signal_log for analysis only."""
+        if self.model is None or self._calibration is None:
+            return None
+        try:
+            raw = self.predict_proba(row)
+            if self.last_prediction_is_fallback:
+                return None
+            return float(self._calibration.predict([raw])[0])
+        except Exception as e:
+            logger.warning(f"XGBoost calibrated_proba failed: {e}")
+            return None
 
     def explain(self, row: pd.Series) -> list:
         """Return top-3 [(feature_name, shap_value), ...] driving this prediction.

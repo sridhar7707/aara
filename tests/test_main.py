@@ -70,7 +70,8 @@ def db():
             symbol TEXT NOT NULL,
             xgb_prob REAL, lstm_prob REAL, sentiment_score REAL,
             macro_score REAL, ensemble_score REAL,
-            ensemble_action TEXT, regime TEXT
+            ensemble_action TEXT, regime TEXT,
+            xgb_calibrated_prob REAL DEFAULT NULL
         )
     """)
     con.commit()
@@ -992,6 +993,21 @@ def test_log_signal_each_row_has_timestamp(db):
     ts = db.execute("SELECT timestamp FROM signal_log").fetchone()[0]
     assert ts is not None
     assert len(ts) > 10  # ISO datetime string
+
+
+def test_log_signal_calibrated_prob_defaults_to_null(db):
+    """Existing call sites that don't pass xgb_calibrated_prob (ADR-076) must
+    keep writing NULL — observation-only, never a fabricated value."""
+    _log_signal(db, "AAPL", 0.70, 0.65, 0.30, 0.55, "TRENDING_UP", "BUY")
+    row = db.execute("SELECT xgb_calibrated_prob FROM signal_log").fetchone()
+    assert row[0] is None
+
+
+def test_log_signal_calibrated_prob_written_when_passed(db):
+    _log_signal(db, "AAPL", 0.70, 0.65, 0.30, 0.55, "TRENDING_UP", "BUY",
+                xgb_calibrated_prob=0.612345)
+    row = db.execute("SELECT xgb_calibrated_prob FROM signal_log").fetchone()
+    assert row[0] == pytest.approx(0.6123, abs=0.001)
 
 
 def test_latest_portfolio_value_zero_when_empty(db):

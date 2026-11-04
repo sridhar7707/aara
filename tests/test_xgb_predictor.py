@@ -91,3 +91,61 @@ def test_xgb_predictor_genuine_prediction_return_type_and_value_unchanged(featur
     result = predictor.predict_proba(feature_df.iloc[-1])
     assert isinstance(result, float)
     assert result == 0.77
+
+
+# --- calibrated_proba (ADR-076, observation-only) --------------------------
+
+def test_calibrated_proba_none_when_no_calibration_model(feature_df):
+    """A pre-ADR-076 model has no calibration file -- must return None, not
+    a fabricated value."""
+    from bot.strategy.xgb_predictor import XGBPredictor
+    predictor = XGBPredictor()
+    predictor.model = MagicMock()
+    predictor.model.predict_proba.return_value = np.array([[0.4, 0.6]])
+    predictor._calibration = None
+    assert predictor.calibrated_proba(feature_df.iloc[-1]) is None
+
+
+def test_calibrated_proba_none_when_base_model_missing(feature_df):
+    from bot.strategy.xgb_predictor import XGBPredictor
+    predictor = XGBPredictor()
+    predictor.model = None
+    predictor._calibration = MagicMock()
+    assert predictor.calibrated_proba(feature_df.iloc[-1]) is None
+
+
+def test_calibrated_proba_returns_float_in_range_when_available(feature_df):
+    from bot.strategy.xgb_predictor import XGBPredictor
+    predictor = XGBPredictor()
+    predictor.model = MagicMock()
+    predictor.model.predict_proba.return_value = np.array([[0.1, 0.9]])
+    predictor._calibration = MagicMock()
+    predictor._calibration.predict.return_value = np.array([0.7])
+    result = predictor.calibrated_proba(feature_df.iloc[-1])
+    assert isinstance(result, float)
+    assert 0.0 <= result <= 1.0
+
+
+def test_calibrated_proba_is_not_a_passthrough_of_raw_score(feature_df):
+    """Proves calibration is actually applied, not bypassed: a confident raw
+    score fed through a (mocked) conservative calibrator comes back lower."""
+    from bot.strategy.xgb_predictor import XGBPredictor
+    predictor = XGBPredictor()
+    predictor.model = MagicMock()
+    predictor.model.predict_proba.return_value = np.array([[0.1, 0.9]])
+    predictor._calibration = MagicMock()
+    predictor._calibration.predict.return_value = np.array([0.55])
+    result = predictor.calibrated_proba(feature_df.iloc[-1])
+    assert result == pytest.approx(0.55)
+    assert result != 0.9
+
+
+def test_calibrated_proba_none_when_predict_proba_is_fallback(feature_df):
+    """If the raw prediction itself fell back to 0.5 (no model / error),
+    the calibrated value must also be None, not a calibrated 0.5."""
+    from bot.strategy.xgb_predictor import XGBPredictor
+    predictor = XGBPredictor()
+    predictor.model = MagicMock()
+    predictor.model.predict_proba.side_effect = RuntimeError("boom")
+    predictor._calibration = MagicMock()
+    assert predictor.calibrated_proba(feature_df.iloc[-1]) is None
