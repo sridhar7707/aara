@@ -58,18 +58,23 @@ def log_signal(
     con: sqlite3.Connection, symbol: str,
     xgb_prob: float, lstm_prob: float, sentiment_score: float,
     macro_score: float, regime: str, ensemble_action: str,
+    xgb_calibrated_prob: float | None = None,
 ) -> int | None:
     """Record model output for every symbol evaluated each cycle (caller commits).
     Returns the new signal_log row id so callers (e.g. decision_service) can
-    link a decision back to the model evidence that produced it."""
+    link a decision back to the model evidence that produced it.
+
+    xgb_calibrated_prob (ADR-076) is observation-only: recorded for later
+    analysis, never read by ensemble_signal() or any live gate/threshold."""
     ensemble_score = ensemble_confidence(xgb_prob, lstm_prob, sentiment_score, macro_score)
     cur = con.execute(
         "INSERT INTO signal_log "
         "(timestamp, symbol, xgb_prob, lstm_prob, sentiment_score, macro_score, "
-        "ensemble_score, ensemble_action, regime) VALUES (?,?,?,?,?,?,?,?,?)",
+        "ensemble_score, ensemble_action, regime, xgb_calibrated_prob) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (datetime.now(timezone.utc).isoformat(), symbol,
          round(xgb_prob, 4), round(lstm_prob, 4), round(sentiment_score, 4),
-         round(macro_score, 4), round(ensemble_score, 4), ensemble_action, regime),
+         round(macro_score, 4), round(ensemble_score, 4), ensemble_action, regime,
+         None if xgb_calibrated_prob is None else round(xgb_calibrated_prob, 4)),
     )
     return cur.lastrowid
 

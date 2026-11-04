@@ -105,6 +105,12 @@ def init_db(db_path: str = TRADE_DB_PATH) -> sqlite3.Connection:
         symbol TEXT NOT NULL, xgb_prob REAL, lstm_prob REAL,
         sentiment_score REAL, macro_score REAL, ensemble_score REAL,
         ensemble_action TEXT, regime TEXT)""")
+    try:
+        # Observation-only calibrated probability (ADR-076) — never read by any
+        # live gate/threshold. NULL until a calibrated model is trained and loaded.
+        con.execute("ALTER TABLE signal_log ADD COLUMN xgb_calibrated_prob REAL DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     con.execute("""CREATE TABLE IF NOT EXISTS screener_log (
         id INTEGER PRIMARY KEY AUTOINCREMENT, screened_at TEXT NOT NULL,
         symbol TEXT NOT NULL, rank INTEGER, composite_score REAL,
