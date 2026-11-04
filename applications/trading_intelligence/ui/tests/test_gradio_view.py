@@ -508,8 +508,8 @@ def test_render_detail_header_clarifies_risk_is_not_resolved_when_risk_reference
     header = ui._render_detail("dec-001")[0]
 
     assert "risk-001" not in header
-    assert "opaque pointer" in header.lower()
-    assert "not currently implemented" in header.lower()
+    assert "internal reference id" in header.lower()
+    assert "not currently available" in header.lower()
 
 
 def test_render_detail_header_omits_risk_clarification_when_no_risk_reference():
@@ -527,7 +527,7 @@ def test_render_detail_header_omits_risk_clarification_when_no_risk_reference():
     header = ui._render_detail("dec-001")[0]
 
     assert "aara-decision-header" in header
-    assert "opaque pointer" not in header.lower()
+    assert "internal reference id" not in header.lower()
     assert "Risk" not in header
 
 
@@ -542,7 +542,7 @@ def test_render_detail_header_omits_reference_fields_when_none_are_present():
 
     assert "Evidence Reference" not in header
     assert "Risk Reference" not in header
-    assert "opaque pointer" not in header.lower()
+    assert "internal reference id" not in header.lower()
 
 
 # --- ADR-070 Sprint 3: recommendation-surfacing semantics rendered in the
@@ -560,14 +560,14 @@ def test_render_detail_header_labels_a_sentinel_authored_decision_a_sentinel_rec
     header = _header_for(action="BUY", action_source="SENTINEL")
 
     assert "Sentinel recommendation" in header
-    assert "interpreted strategy decision" not in header
+    assert "bot strategy decision" not in header
     assert "is-sentinel" in header  # provenance line carries the emphasis modifier
 
 
 def test_render_detail_header_labels_a_strategy_decision_an_interpreted_strategy_decision():
     header = _header_for(action="BUY", action_source="STRATEGY")
 
-    assert "interpreted strategy decision" in header
+    assert "bot strategy decision" in header
     assert "Sentinel recommendation" not in header
     assert "is-sentinel" not in header
 
@@ -576,7 +576,7 @@ def test_render_detail_header_treats_missing_or_unknown_provenance_as_interprete
     for missing in (None, "", "sentinel", "unexpected"):
         header = _header_for(action="BUY", action_source=missing)
 
-        assert "interpreted strategy decision" in header, missing
+        assert "bot strategy decision" in header, missing
         assert "Sentinel recommendation" not in header, missing
 
 
@@ -603,10 +603,10 @@ def test_render_detail_header_omits_the_non_concurrence_line_for_a_non_sentinel_
 def test_render_detail_header_shows_the_uncalibrated_confidence_qualifier():
     header = _header_for(action="BUY", action_source="SENTINEL", confidence=0.73)
 
-    assert '<div class="aara-confidence-qualifier">Uncalibrated ensemble model score</div>' in header
+    assert '<div class="aara-confidence-qualifier">A combined, uncalibrated score from several models -- not a guarantee of anything</div>' in header
     # the qualifier itself claims no calibrated accuracy / probability
-    qualifier = "Uncalibrated ensemble model score"
-    assert qualifier.startswith("Uncalibrated")
+    qualifier = "A combined, uncalibrated score from several models -- not a guarantee of anything"
+    assert "uncalibrated" in qualifier.lower()
     assert not any(ch.isdigit() for ch in qualifier)
     for forbidden in ("probability", "accuracy", "likelihood", "chance"):
         assert forbidden not in qualifier.lower()
@@ -640,8 +640,8 @@ def test_risk_reference_clarification_html_is_unchanged():
     assert _RISK_REFERENCE_CLARIFICATION_HTML == (
         '<div class="aara-disclosure-message">'
         '<div class="aara-disclosure-body">'
-        "This is an opaque pointer, not resolved risk analysis -- Risk "
-        "Intelligence is not currently implemented for this workspace."
+        "This is just an internal reference ID, not a risk analysis -- Risk "
+        "Intelligence is not currently available for this workspace."
         "</div></div>"
     )
 
@@ -739,7 +739,7 @@ def test_render_detail_header_never_leaks_raw_reference_values_even_hostile_ones
     assert "&lt;script&gt;" not in header
     assert "alert(1)" not in header
     assert "alert(2)" not in header
-    assert "opaque pointer" in header.lower()
+    assert "internal reference id" in header.lower()
 
 
 def test_render_detail_returns_blank_state_for_blank_decision_id():
@@ -1052,7 +1052,7 @@ def test_render_detail_renders_supported_polarity_once_for_its_evidence_record()
 
     assert evidence_html.count("Supported the BUY") == 1
     assert "Contradicted the BUY" not in evidence_html
-    assert "Polarity unavailable" not in evidence_html
+    assert "No clear side indicated" not in evidence_html
     assert 'class="aara-evidence-polarity"' in evidence_html
 
 
@@ -1063,7 +1063,7 @@ def test_render_detail_renders_contradicted_polarity_once_for_its_evidence_recor
 
     assert evidence_html.count("Contradicted the BUY") == 1
     assert "Supported the BUY" not in evidence_html
-    assert "Polarity unavailable" not in evidence_html
+    assert "No clear side indicated" not in evidence_html
 
 
 def test_render_detail_renders_unavailable_polarity_once_for_its_evidence_record():
@@ -1071,7 +1071,7 @@ def test_render_detail_renders_unavailable_polarity_once_for_its_evidence_record
 
     evidence_html = _evidence_html_for(entry)
 
-    assert evidence_html.count("Polarity unavailable") == 1
+    assert evidence_html.count("No clear side indicated") == 1
     assert "Supported the BUY" not in evidence_html
     assert "Contradicted the BUY" not in evidence_html
 
@@ -1089,9 +1089,9 @@ def test_render_detail_renders_polarity_per_record_not_aggregated():
     assert evidence_html.count('class="aara-evidence-polarity"') == 3
     assert evidence_html.count("Supported the BUY") == 1
     assert evidence_html.count("Contradicted the BUY") == 1
-    assert evidence_html.count("Polarity unavailable") == 1
+    assert evidence_html.count("No clear side indicated") == 1
     _assert_index_order(
-        evidence_html, "Supported the BUY", "Contradicted the BUY", "Polarity unavailable"
+        evidence_html, "Supported the BUY", "Contradicted the BUY", "No clear side indicated"
     )
 
 
@@ -1134,7 +1134,7 @@ def test_render_detail_evidence_polarity_absent_from_empty_missing_and_error_sta
         empty_controller, ["dec-001"]
     )._render_detail("dec-001")
     assert "aara-evidence-polarity" not in empty_evidence
-    assert "Polarity unavailable" not in empty_evidence
+    assert "No clear side indicated" not in empty_evidence
 
     missing_controller = _FakeController(detail_area=DecisionDetailArea(decision=None))
     *_, missing_evidence, _g2, _a2, _au2, _n2 = DecisionCenterUI(
@@ -1152,7 +1152,7 @@ def test_render_detail_evidence_polarity_absent_from_empty_missing_and_error_sta
     )._render_detail("dec-001")
     assert "aara-evidence-polarity" not in error_evidence
     assert "Supported the BUY" not in error_evidence
-    assert "Polarity unavailable" not in error_evidence
+    assert "No clear side indicated" not in error_evidence
     assert _EVIDENCE_ERROR_MESSAGE in error_evidence
 
 
@@ -1162,7 +1162,7 @@ def test_render_detail_blank_decision_id_carries_no_evidence_polarity():
     *_, blank_evidence, _g, _a, _au, _n = ui._render_detail("")
 
     assert "aara-evidence-polarity" not in blank_evidence
-    assert "Polarity unavailable" not in blank_evidence
+    assert "No clear side indicated" not in blank_evidence
 
 
 def test_evidence_detail_disclosure_renders_all_five_authorized_fields():
@@ -1315,13 +1315,13 @@ def test_model_ensemble_evidence_renders_its_data_values():
     out = _trades_evidence_html(entry)
 
     assert '<details class="aara-payload-disclosure">' in out
-    assert "XGB" in out and "0.5385" in out
-    assert "LSTM" in out and "0.4375" in out
+    assert "Price Pattern Model" in out and "0.5385" in out
+    assert "Price Trend Model" in out and "0.4375" in out
     assert "Ensemble" in out and "0.5222" in out
     assert "Threshold" in out and "0.52" in out
     assert "Regime" in out and "HIGH_VOLATILITY" in out
     # fixed label order: XGB, LSTM, ... Ensemble, Threshold, Regime
-    _assert_index_order(out, "XGB", "LSTM", "Ensemble", "Threshold", "Regime")
+    _assert_index_order(out, "Price Pattern Model", "Price Trend Model", "Ensemble", "Threshold", "Regime")
 
 
 def test_model_ensemble_omits_absent_keys_instead_of_rendering_none():
@@ -1331,7 +1331,7 @@ def test_model_ensemble_omits_absent_keys_instead_of_rendering_none():
     out = _trades_evidence_html(entry)
 
     assert "Ensemble" in out and "Threshold" in out
-    assert "XGB" not in out
+    assert "Price Pattern Model" not in out
     assert "Regime" not in out
     assert "None" not in out
 
@@ -1349,11 +1349,11 @@ def test_confidence_breakdown_renders_all_four_present_components():
     out = DecisionCenterUI._confidence_breakdown_html((entry,))
 
     assert "Confidence components" in out
-    assert "XGB" in out and "0.5385" in out
-    assert "LSTM" in out and "0.4375" in out
+    assert "Price Pattern Model" in out and "0.5385" in out
+    assert "Price Trend Model" in out and "0.4375" in out
     assert "Sentiment" in out and "0.0936" in out
     assert "Macro" in out and "0.6403" in out
-    _assert_index_order(out, "XGB", "LSTM", "Sentiment", "Macro")
+    _assert_index_order(out, "Price Pattern Model", "Price Trend Model", "Sentiment", "Macro")
 
 
 def test_confidence_breakdown_excludes_ensemble_threshold_and_regime():
@@ -1382,7 +1382,7 @@ def test_confidence_breakdown_omits_absent_components_without_a_fabricated_bar()
 
     out = DecisionCenterUI._confidence_breakdown_html((entry,))
 
-    assert "XGB" in out and "LSTM" in out
+    assert "Price Pattern Model" in out and "Price Trend Model" in out
     assert "Sentiment" not in out
     assert "Macro" not in out
     assert "0.0" not in out  # never a fabricated zero for an absent component
@@ -1425,7 +1425,7 @@ def test_confidence_breakdown_wired_into_the_decision_header():
     header = DecisionCenterUI._decision_header_html(view, evidence=(entry,))
 
     assert "Confidence components" in header
-    assert "XGB" in header
+    assert "Price Pattern Model" in header
     assert CONFIDENCE_QUALIFIER in header
 
 
@@ -1609,7 +1609,7 @@ def test_decision_header_html_outcome_coexists_with_confidence_breakdown_and_evi
     )
 
     assert "Confidence components" in out
-    assert "XGB" in out
+    assert "Price Pattern Model" in out
     assert CONFIDENCE_QUALIFIER in out
     assert "Decision Outcome" in out
     assert "CLOSED" in out
@@ -1787,7 +1787,7 @@ def test_decision_header_html_calibration_context_coexists_with_outcome_and_conf
     )
 
     assert "Confidence components" in out
-    assert "XGB" in out
+    assert "Price Pattern Model" in out
     assert CONFIDENCE_QUALIFIER in out
     assert "Decision Outcome" in out
     assert "CLOSED" in out
@@ -2378,12 +2378,13 @@ def test_all_three_trades_evidence_cards_render_together():
                     data={"text": "Cleared the threshold."}),
     )
     out = _trades_evidence_html(*entries)
-    # AI_RATIONALE is the domain-level evidence_type (unchanged, used above
-    # to construct the entry); its rendered card badge shows the accurate
-    # human-facing label "Entry Summary" instead -- see
-    # test_ai_rationale_evidence_type_renders_as_entry_summary_label below.
-    assert "MODEL_ENSEMBLE" in out and "FEATURE_DRIVERS" in out and "Entry Summary" in out
-    assert "AI_RATIONALE" not in out
+    # Every evidence_type below is the domain-level value (unchanged, used
+    # above to construct the entry); each rendered card badge shows its
+    # own accurate human-facing label instead -- see
+    # test_ai_rationale_evidence_type_renders_as_entry_summary_label and
+    # test_all_evidence_types_have_a_human_display_label below.
+    assert "Model Signals" in out and "Key Factors" in out and "Entry Summary" in out
+    assert "MODEL_ENSEMBLE" not in out and "FEATURE_DRIVERS" not in out and "AI_RATIONALE" not in out
     assert "0.5385" in out and "momentum" in out and "Cleared the threshold." in out
 
 
@@ -2401,13 +2402,16 @@ def test_ai_rationale_evidence_type_renders_as_entry_summary_label():
     assert "AI_RATIONALE" not in out
 
 
-def test_non_rationale_evidence_types_display_label_is_unchanged():
-    """The display-label override is scoped to AI_RATIONALE only -- every
-    other evidence_type still renders as its own raw type string."""
+def test_all_evidence_types_have_a_human_display_label():
+    """Every known evidence_type now renders a plain-language badge, not
+    its raw SCREAMING_SNAKE_CASE domain string (extended from the original
+    AI_RATIONALE-only override -- a non-technical user has no way to parse
+    "MODEL_ENSEMBLE" as a label)."""
     entry = _make_entry(evidence_type="MODEL_ENSEMBLE", source="aara-bot",
                          data={"ensemble": 0.52})
     out = _trades_evidence_html(entry)
-    assert "MODEL_ENSEMBLE" in out
+    assert "Model Signals" in out
+    assert "MODEL_ENSEMBLE" not in out
     assert "Entry Summary" not in out
 
 
@@ -2434,7 +2438,7 @@ def test_adr037_evidence_types_still_route_through_the_metadata_path():
     })
     out = _trades_evidence_html(entry)
     assert "Earnings beat" in out and "0.42" in out
-    assert "XGB" not in out and "0.99" not in out
+    assert "Price Pattern Model" not in out and "0.99" not in out
 
 
 def test_evidence_read_error_still_shows_unavailable_message_not_a_disclosure():

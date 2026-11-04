@@ -753,11 +753,11 @@ def test_performance_learning_evidence_maturity_banner_below_floor(browser):
     screen = replace(base, calibration_health=_HEALTHY, calibration_bands=bands)
     ui = PerformanceLearningUI(screen=screen)
     with _launched_app(ui) as url:
-        context, page = _page_with_text(browser, url, "Evidence maturity")
+        context, page = _page_with_text(browser, url, "closed outcomes needed")
         try:
             visible_text = page.inner_text("body")
             assert f"15 of {CALIBRATION_MIN_OUTCOMES}" in visible_text
-            assert "Below the established floor" in visible_text
+            assert "not enough yet" in visible_text
             assert "does not by itself imply" in visible_text
             lowered = visible_text.lower()
             for forbidden in ("is statistically significant", "is predictive", "is reliable"):
@@ -771,9 +771,9 @@ def test_performance_learning_evidence_maturity_banner_unavailable_by_default(br
     banner's own honest unavailable message, never a fabricated count."""
     ui = PerformanceLearningUI(screen=build_performance_learning_mock_screen())
     with _launched_app(ui) as url:
-        context, page = _page_with_text(browser, url, "Evidence maturity is not available")
+        context, page = _page_with_text(browser, url, "Performance history is not available")
         try:
-            assert "Evidence maturity is not available" in page.inner_text("body")
+            assert "Performance history is not available" in page.inner_text("body")
         finally:
             context.close()
 

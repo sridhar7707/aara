@@ -34,8 +34,8 @@ from applications.trading_intelligence.ui.decision_center.screen import (
 # action_source (ADR-070) is set here purely so the recommendation-surfacing
 # semantics are exercisable in a demo of the shipped Decision Center: one
 # Sentinel-authored BUY ("Sentinel recommendation"), one strategy-originated
-# decision ("interpreted strategy decision"), one with no provenance recorded
-# (the safe default -- also "interpreted strategy decision", never Sentinel),
+# decision ("bot strategy decision"), one with no provenance recorded
+# (the safe default -- also "bot strategy decision", never Sentinel),
 # and one Sentinel-authored WAIT (renders the inert non-concurrence line).
 _MOCK_DECISIONS = [
     DecisionView(
@@ -63,7 +63,7 @@ _MOCK_DECISIONS = [
         status=DecisionState.APPROVAL_RECORDED,
         confidence=0.91,
         updated_at=datetime.datetime(2026, 8, 4, 10, 15, 0),
-        # action_source deliberately absent -> "interpreted strategy decision".
+        # action_source deliberately absent -> "bot strategy decision".
     ),
     DecisionView(
         decision_id="mock-dec-004",
@@ -80,7 +80,7 @@ _MOCK_DECISIONS = [
 # polarity (ADR-070 §9) is set on these mock evidence records purely so a demo
 # of the shipped Decision Center shows all three per-record polarity phrases --
 # "Supported the BUY" (SUPPORTING), "Contradicted the BUY" (CONTRADICTING), and
-# "Polarity unavailable" (None -- a pre-B1 record, or B1's own HOLD /
+# "No clear side indicated" (None -- a pre-B1 record, or B1's own HOLD /
 # unrecognised-signal outcome). One value per record; nothing here is
 # aggregated, and no production semantics change.
 _MOCK_EVIDENCE = [

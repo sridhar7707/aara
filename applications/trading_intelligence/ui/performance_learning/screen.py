@@ -334,17 +334,24 @@ class PerformanceLearningScreen:
         count, the floor, and whether it has been reached -- never a
         significance, predictive-validity, or readiness claim (see
         EVIDENCE_MATURITY_DISCLAIMER, rendered alongside this)."""
+        # Plain-language rewrite (requested directly): "Evidence maturity"/
+        # "established floor" are invented internal jargon a non-technical
+        # user cannot be expected to know. Says the same fact plainly --
+        # still only the count, the floor, and whether it's been reached,
+        # never a significance/predictive/ready/reliable/accurate claim
+        # (see test_evidence_maturity_heading_never_claims_significance_or_
+        # readiness, which enforces that word list).
         if not self.calibration_available:
             return None
         n = self.calibration_total_outcomes
         if self.calibration_has_enough_data:
             return (
-                f"Evidence maturity: {n} of {CALIBRATION_MIN_OUTCOMES} closed "
-                "outcomes needed have been reached."
+                f"{n} of {CALIBRATION_MIN_OUTCOMES} closed outcomes needed "
+                "have been reached."
             )
         return (
-            f"Evidence maturity: {n} of {CALIBRATION_MIN_OUTCOMES} closed "
-            "outcomes needed. Below the established floor."
+            f"Only {n} of {CALIBRATION_MIN_OUTCOMES} closed outcomes needed "
+            "so far -- not enough yet to draw conclusions from."
         )
 
     @property

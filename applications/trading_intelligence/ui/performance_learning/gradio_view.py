@@ -123,7 +123,11 @@ _REGIME_CHART_DESCRIPTION = (
 _REGIME_CHART_TITLE = "Historical outcome by entry market regime"
 
 _OUTCOME_HEADERS = [
-    "Decision", "Entry date", "Status", "Exit date", "Holding days",
+    # "Status" -> "Outcome Status": matches Decision Center's own outcome
+    # card, which uses the same OutcomeStatus data and was relabeled for
+    # the same reason (collision with that screen's separate "Workflow
+    # Stage" field).
+    "Decision", "Entry date", "Outcome Status", "Exit date", "Holding days",
     "Realized P&L $", "Realized P&L %", "Exit basis", "Pairing method",
     "Pairing confidence", "Direction",
     # Decision Quality Cross-Linking: a clean, standalone reference back to
@@ -166,7 +170,7 @@ _PAGE_HEADER_HTML = (
 # real non-HEALTHY IntegrationHealth is routed through the shared
 # render_unavailable() so the specific reason is named.
 _EVIDENCE_MATURITY_UNAVAILABLE_MESSAGE = (
-    "Evidence maturity is not available -- the outcome data source could not "
+    "Performance history is not available -- the outcome data source could not "
     "be read in this environment."
 )
 

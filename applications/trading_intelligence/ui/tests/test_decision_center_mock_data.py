@@ -42,20 +42,20 @@ def test_build_mock_screen_detail_area_defaults_to_the_first_decision():
 def test_build_mock_screen_detail_area_exercises_every_evidence_polarity_phrase():
     """ADR-070 §9: the demo detail area carries evidence records whose
     per-record polarity labels cover all three phrases -- "Supported the
-    BUY", "Contradicted the BUY", "Polarity unavailable" -- one label per
+    BUY", "Contradicted the BUY", "No clear side indicated" -- one label per
     record, never aggregated."""
     screen = build_mock_screen()
 
     labels = [row.polarity_label for row in screen.detail_area.evidence_polarity_rows]
 
-    assert labels == ["Supported the BUY", "Contradicted the BUY", "Polarity unavailable"]
+    assert labels == ["Supported the BUY", "Contradicted the BUY", "No clear side indicated"]
     assert len(screen.detail_area.evidence) == len(get_mock_evidence())
 
 
 def test_mock_decisions_exercise_every_recommendation_provenance_state():
     """ADR-070 Sprint 3: the demo decisions must let a viewer see all the
     recommendation-surfacing states -- a Sentinel recommendation, an
-    interpreted strategy decision, an unrecorded-provenance decision (safe
+    bot strategy decision, an unrecorded-provenance decision (safe
     default), and a Sentinel-authored WAIT (the inert non-concurrence line)."""
     by_source = {}
     for view in get_mock_decisions():

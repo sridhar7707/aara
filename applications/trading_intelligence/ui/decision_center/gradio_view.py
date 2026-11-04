@@ -683,7 +683,13 @@ _PAGE_HEADER_HTML = (
     '<div class="aara-page-subtitle">Governed investment decisions</div>'
 )
 
-_LIST_HEADERS = ["Decision ID", "Symbol", "Action", "Status", "Confidence", "Last Updated", "Verdict"]
+# "Status" -> "Workflow Stage": this column and the hero detail field below
+# both show the governance workflow stage (DECISION_CREATED/EVIDENCE_
+# ATTACHED/.../DECISION_EXECUTED, humanized) -- plain-language pass,
+# requested directly, specifically to stop colliding with this SAME page's
+# "Decision Outcome" card, which has its own, differently-meant "Status"
+# (OPEN/PARTIAL/CLOSED) a few sections below. See _OUTCOME_STATUS_LABEL.
+_LIST_HEADERS = ["Decision ID", "Symbol", "Action", "Workflow Stage", "Confidence", "Last Updated", "Verdict"]
 _LIST_DATATYPES = ["str", "str", "markdown", "str", "str", "str", "markdown"]
 _MISSING_VALUE = "-"
 
@@ -878,8 +884,8 @@ _RISK_CONTEXT_HTML = (
 # the Evidence section is real. Reuses the body-only aara-disclosure-message
 # variant _format_why_summary_html already uses -- no new CSS class.
 _RISK_REFERENCE_CLARIFICATION = (
-    "This is an opaque pointer, not resolved risk analysis -- Risk "
-    "Intelligence is not currently implemented for this workspace."
+    "This is just an internal reference ID, not a risk analysis -- Risk "
+    "Intelligence is not currently available for this workspace."
 )
 _RISK_REFERENCE_CLARIFICATION_HTML = (
     '<div class="aara-disclosure-message">'
@@ -1159,20 +1165,38 @@ _TRADES_EVIDENCE_TYPES = frozenset({
     "MODEL_ENSEMBLE", "FEATURE_DRIVERS", "AI_RATIONALE", "RISK_PARAMETERS",
 })
 
-# Display-only label override (2026-09 algorithm audit finding): the stored
-# trades.db ai_reasoning text is a deterministic formatted summary built
-# from already-known numeric values (bot/_main_cycle.py), not independently
-# generated AI reasoning -- calling it "AI_RATIONALE" wherever a human
-# actually sees it overstates what it is. The domain-level evidence_type
-# string "AI_RATIONALE" is left completely unchanged everywhere else (the
-# adapter that constructs it, the audit trail, the dispatch branches a few
-# lines below in this same file, and every test asserting evidence_type) --
-# only the two places that render an evidence_type into visible/announced
-# text (the card's type badge below, and _why_summary_sentence's sentence)
-# pass it through this mapping first. Every other evidence_type is returned
-# unchanged.
+# Display-only label override. Originally scoped to AI_RATIONALE only
+# (2026-09 algorithm audit finding: the stored trades.db ai_reasoning text
+# is a deterministic formatted summary, not independently generated AI
+# reasoning -- calling it "AI_RATIONALE" wherever a human actually sees it
+# overstates what it is). Extended to cover every evidence_type (plain-
+# language pass, requested directly): raw SCREAMING_SNAKE_CASE type
+# strings like "MODEL_ENSEMBLE"/"FEATURE_DRIVERS"/"RISK_PARAMETERS" read as
+# code identifiers, not product vocabulary, to a non-technical user. The
+# domain-level evidence_type strings themselves are left completely
+# unchanged everywhere else (the adapter that constructs them, the audit
+# trail, the dispatch branches a few lines below in this same file, and
+# every test asserting evidence_type) -- only the two places that render
+# an evidence_type into visible/announced text (the card's type badge
+# below, and _why_summary_sentence's sentence) pass it through this
+# mapping first. Any evidence_type not listed here still falls back to its
+# own raw string (see _evidence_type_display_label below) -- the fallback
+# is a safety net for an unanticipated future type, not an intentional
+# jargon exception.
 _EVIDENCE_TYPE_DISPLAY_LABELS = {
     "AI_RATIONALE": "Entry Summary",
+    "MODEL_ENSEMBLE": "Model Signals",
+    "FEATURE_DRIVERS": "Key Factors",
+    "RISK_PARAMETERS": "Risk Settings",
+}
+
+# Same plain-language convention as _EVIDENCE_TYPE_DISPLAY_LABELS, for
+# governance policy_id values (e.g. "BUY_THRESHOLD" from
+# adapters/trade_decision_derivation.py's GovernanceEntry construction).
+# The domain-level policy_id string is unchanged everywhere else -- only
+# the governance card's rendered title passes through this mapping.
+_POLICY_ID_DISPLAY_LABELS = {
+    "BUY_THRESHOLD": "Buy Confidence Threshold",
 }
 
 
@@ -1183,9 +1207,15 @@ def _evidence_type_display_label(evidence_type: str) -> str:
 # rendered only when actually present in EvidenceEntry.data (the derivation
 # already omits zero/absent model sub-scores and a missing regime), so a
 # missing value is simply skipped -- never rendered as "None".
+#
+# "XGB"/"LSTM" -> "Price Pattern Model"/"Price Trend Model": plain-language
+# rewrite (requested directly -- a non-technical user has no way to know
+# what "XGB" or "LSTM" are; these are internal model-library names, not
+# product vocabulary). The internal data keys ("xgb"/"lstm") are unchanged
+# everywhere else -- only the human-facing label changes.
 _MODEL_ENSEMBLE_FIELD_LABELS = (
-    ("xgb", "XGB"),
-    ("lstm", "LSTM"),
+    ("xgb", "Price Pattern Model"),
+    ("lstm", "Price Trend Model"),
     ("sentiment", "Sentiment"),
     ("macro", "Macro"),
     ("ensemble", "Ensemble"),
@@ -1200,8 +1230,8 @@ _MODEL_ENSEMBLE_FIELD_LABELS = (
 # components of the confidence figure (ensemble is the already-combined
 # total; the other two are gating metadata, not model scores).
 _MODEL_ENSEMBLE_COMPONENT_LABELS = (
-    ("xgb", "XGB"),
-    ("lstm", "LSTM"),
+    ("xgb", "Price Pattern Model"),
+    ("lstm", "Price Trend Model"),
     ("sentiment", "Sentiment"),
     ("macro", "Macro"),
 )
@@ -1335,7 +1365,7 @@ class DecisionCenterUI:
                             elem_classes=["aara-field-value"],
                         )
                         status_output = gr.Textbox(
-                            label="Status", interactive=False,
+                            label="Workflow Stage", interactive=False,
                             elem_classes=["aara-field-value"],
                         )
                     # P2 Why/Rationale heading-clarity fix (UI-completion
@@ -1866,7 +1896,7 @@ class DecisionCenterUI:
         """ADR-070 §9 -- one calm, text-first micro-label carrying only this
         single evidence record's own polarity phrase, taken verbatim from
         screen.py's EvidencePolarityRow.polarity_label (exactly one of
-        "Supported the BUY" / "Contradicted the BUY" / "Polarity unavailable").
+        "Supported the BUY" / "Contradicted the BUY" / "No clear side indicated").
         The phrase is never recomputed here, never combined with another
         record's, and no count / majority / unanimity / net polarity / score /
         tally is derived. Same muted supporting-caption treatment as the
@@ -2060,7 +2090,7 @@ class DecisionCenterUI:
             return DecisionCenterUI._error_message_html(_GOVERNANCE_ERROR_MESSAGE)
         cards = [
             DecisionCenterUI._record_card_html(
-                entry.policy_id,
+                _POLICY_ID_DISPLAY_LABELS.get(entry.policy_id, entry.policy_id),
                 "Evaluated",
                 [
                     ("Enabled", "Yes" if entry.enabled else "No", False),
@@ -2396,7 +2426,10 @@ class DecisionCenterUI:
         field the outcome does not carry (e.g. a rare CLOSED row missing
         its own realized_pnl_pct) is omitted, never fabricated as a
         placeholder."""
-        fields = [("Status", outcome.status.name)]
+        # "Outcome Status" -- not bare "Status": this card's OPEN/PARTIAL/
+        # CLOSED financial resolution must not collide with the page's own
+        # "Workflow Stage" field above (see _LIST_HEADERS's comment).
+        fields = [("Outcome Status", outcome.status.name)]
         if outcome.outcome_direction is not None:
             fields.append(("Direction", outcome.outcome_direction.name))
         if outcome.realized_pnl_pct is not None:
@@ -2539,7 +2572,7 @@ class DecisionCenterUI:
         * Provenance line, always shown: "Sentinel recommendation" only when
           DecisionView.action_source is exactly "SENTINEL" (never inferred from
           action/confidence/evidence); "STRATEGY", None, or any unexpected
-          value -> "interpreted strategy decision" (the safe default).
+          value -> "bot strategy decision" (the safe default).
         * Sentinel non-concurrence line, only for a Sentinel-authored WAIT
           (action == "WAIT" and action_source == "SENTINEL") -- the exact inert
           sentence, carrying no veto / block / schedule / "check back" meaning.

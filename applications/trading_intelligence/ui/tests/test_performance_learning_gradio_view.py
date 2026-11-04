@@ -576,7 +576,7 @@ def test_evidence_maturity_empty_real_zero_renders_honestly():
 
     block = _evidence_maturity_block(demo)
     assert f"0 of {CALIBRATION_MIN_OUTCOMES}" in block.value
-    assert "Below the established floor" in block.value
+    assert "not enough yet" in block.value
 
 
 def test_evidence_maturity_below_floor_renders_the_real_count_and_floor():
@@ -588,7 +588,7 @@ def test_evidence_maturity_below_floor_renders_the_real_count_and_floor():
 
     block = _evidence_maturity_block(demo)
     assert f"15 of {CALIBRATION_MIN_OUTCOMES}" in block.value
-    assert "Below the established floor" in block.value
+    assert "not enough yet" in block.value
     assert EVIDENCE_MATURITY_DISCLAIMER in block.value
 
 
@@ -602,7 +602,7 @@ def test_evidence_maturity_exactly_at_floor_renders_reached():
     block = _evidence_maturity_block(demo)
     assert f"{CALIBRATION_MIN_OUTCOMES} of {CALIBRATION_MIN_OUTCOMES}" in block.value
     assert "reached" in block.value.lower()
-    assert "Below the established floor" not in block.value
+    assert "not enough yet" not in block.value
 
 
 def test_evidence_maturity_above_floor_renders_reached():
@@ -1260,7 +1260,7 @@ def test_evidence_maturity_updates_on_refresh():
     updates = ui._render()
 
     assert f"15 of {CALIBRATION_MIN_OUTCOMES}" in updates[1]["value"]
-    assert "Below the established floor" in updates[1]["value"]
+    assert "not enough yet" in updates[1]["value"]
 
 
 def test_outcome_history_updates_on_refresh():

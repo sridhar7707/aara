@@ -178,6 +178,7 @@ from applications.trading_intelligence.contracts.decision_outcome_contract impor
     OutcomeDirection,
     OutcomeLineage,
     OutcomeStatus,
+    PairingMethod,
 )
 from applications.trading_intelligence.services.decision_outcome_query_service import (
     DecisionOutcomeQueryService,
@@ -741,6 +742,25 @@ def _format_section_as_of(raw: Optional[str]) -> Optional[str]:
     return parsed.astimezone(_MB_SECTION_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M %Z")
 
 
+# Plain-language display labels for bot/strategy/regime_classifier.py's
+# REGIMES values (TRENDING_UP/TRENDING_DOWN/RANGING/HIGH_VOLATILITY) --
+# duplicated here rather than imported, per this product's established
+# "duplicate the primitive, never import across a package boundary"
+# convention (see e.g. ui/shell.py's own docstring). An unrecognized value
+# passes through unchanged rather than erroring -- this is a display-only
+# convenience, not a validated enum.
+_REGIME_DISPLAY_LABELS = {
+    "TRENDING_UP": "Trending Up",
+    "TRENDING_DOWN": "Trending Down",
+    "RANGING": "Ranging",
+    "HIGH_VOLATILITY": "High Volatility",
+}
+
+
+def _humanize_regime(regime: str) -> str:
+    return _REGIME_DISPLAY_LABELS.get(regime, regime)
+
+
 _MORNING_BRIEF_PORTFOLIO_HISTORY_WINDOW_DAYS = 30
 
 
@@ -1040,9 +1060,16 @@ def _build_morning_brief_screen(db_path: Optional[str] = None) -> MorningBriefSc
     if regime_result.value is not None:
         market_mood_regime = replace(
             market_mood_regime,
-            # Regime string unchanged; the signal_log.timestamp of the row
-            # it came from is surfaced separately as `as_of`.
-            available_summary=f"Current market regime: {regime_result.value.regime}.",
+            # Display-only humanization (plain-language pass, requested
+            # directly: a raw "HIGH_VOLATILITY" reads as a code constant,
+            # not a sentence). The underlying regime string itself is
+            # unchanged -- `as_of` below still comes from the real row --
+            # an unrecognized value (any regime label this dict doesn't
+            # know about) passes through verbatim rather than erroring.
+            available_summary=(
+                f"Current market regime: "
+                f"{_humanize_regime(regime_result.value.regime)}."
+            ),
             as_of=_format_section_as_of(regime_result.value.as_of),
         )
         # P2: append a factual SPY daily-move clause -- ONLY when a live
@@ -1639,6 +1666,19 @@ _EXIT_BASIS_LABELS = {
     ExitBasis.BOT_FILL: "Bot fill",
     ExitBasis.RECONCILIATION_MARK: "Reconciliation mark",
 }
+# Plain-language labels (requested directly -- raw PairingMethod.name values
+# like "WINDOW_BOT_EXIT_AFTER_RECONCILE_SUPPRESSION" read as internal code
+# identifiers, not product vocabulary). Domain-level PairingMethod values
+# are unchanged everywhere else; only this display mapping is new.
+_PAIRING_METHOD_LABELS = {
+    PairingMethod.WINDOW_SINGLE_BOT_EXIT: "Matched bot exit",
+    PairingMethod.WINDOW_BOT_EXIT_AFTER_RECONCILE_SUPPRESSION: "Bot exit (after cleanup)",
+    PairingMethod.WINDOW_SINGLE_RECONCILE_MARK: "Matched reconcile mark",
+    PairingMethod.WINDOW_PARTIAL_BOT_EXIT: "Partial bot exit",
+    PairingMethod.WINDOW_PARTIAL_RECONCILE_MARK: "Partial reconcile mark",
+    PairingMethod.NONE_OPEN: "Still open",
+    PairingMethod.UNRESOLVED_MULTIPLE: "Unresolved (multiple matches)",
+}
 _EXCLUDED_REASON_LABELS = {
     ExcludedSellReason.PHANTOM_RECONCILE_SUPPRESSED: "phantom-reconcile-suppressed",
     ExcludedSellReason.ORPHAN_NO_BUY: "orphan",
@@ -1698,7 +1738,7 @@ def _outcome_history_row(outcome) -> OutcomeHistoryRow:
         realized_pnl_usd=pnl_usd,
         realized_pnl_pct=pnl_pct,
         exit_basis=_EXIT_BASIS_LABELS.get(outcome.exit_basis, "") if resolved else "",
-        pairing_method=outcome.pairing_method.name,
+        pairing_method=_PAIRING_METHOD_LABELS.get(outcome.pairing_method, outcome.pairing_method.name),
         pairing_confidence=outcome.pairing_confidence.name,
         direction=direction,
         decision_reference=outcome.decision_id,

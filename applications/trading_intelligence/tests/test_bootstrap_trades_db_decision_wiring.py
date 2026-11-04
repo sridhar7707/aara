@@ -187,11 +187,12 @@ def test_seeded_db_decision_renders_through_the_full_ui_layer():
         # The decision reached the rendered Evidence section (index 6 of
         # the 11 detail outputs -- see build()'s detail_outputs ordering).
         evidence_html = detail[6]
-        assert "MODEL_ENSEMBLE" in evidence_html
-        assert "FEATURE_DRIVERS" in evidence_html
-        # Rendered display label, not the domain-level evidence_type (still
-        # "AI_RATIONALE" -- the stored ai_reasoning text is a deterministic
-        # formatted summary, not independently generated AI reasoning).
+        # Rendered display labels, not the domain-level evidence_type strings
+        # (still "MODEL_ENSEMBLE"/"FEATURE_DRIVERS"/"AI_RATIONALE" everywhere
+        # else -- plain-language display mapping only, see gradio_view.py's
+        # _EVIDENCE_TYPE_DISPLAY_LABELS).
+        assert "Model Signals" in evidence_html
+        assert "Key Factors" in evidence_html
         assert "Entry Summary" in evidence_html
         assert "reasoning" in evidence_html
     finally:

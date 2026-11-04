@@ -59,7 +59,9 @@ logger = logging.getLogger(__name__)
 # trade here.
 _BUY_THRESHOLD = 0.52
 
-_EVIDENCE_SOURCE = "aara-bot"
+# Human-readable display name (plain-language pass, requested directly --
+# "aara-bot" read as a raw system/service ID, not a product-facing name).
+_EVIDENCE_SOURCE = "AARA Trading Bot"
 
 # Bounded regardless of future column growth.
 _MAX_EVIDENCE_ENTRIES = 4

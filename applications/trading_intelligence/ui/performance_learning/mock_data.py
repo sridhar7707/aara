@@ -45,29 +45,24 @@ from applications.trading_intelligence.ui.performance_learning.screen import (
     PerformanceLearningSection,
 )
 
+# Plain-language rewrite (requested directly -- "Sentinel-side ... contract
+# is wired yet" is internal engineering phrasing, not product vocabulary).
 _OUTCOME_HISTORY = PerformanceLearningSection(
     title=OUTCOME_HISTORY_TITLE,
     unavailable_message=(
-        "No Sentinel-side outcome contract is wired yet -- this section "
-        "has no source. Outcomes, once wired, would cover BUY decisions "
-        "only, never every decision."
+        "This section is not connected to a data source yet. Once it is, "
+        "it would only cover BUY decisions, not every decision."
     ),
 )
 
 _ATTRIBUTION_BREAKDOWN = PerformanceLearningSection(
     title=ATTRIBUTION_BREAKDOWN_TITLE,
-    unavailable_message=(
-        "No Sentinel-side attribution contract is wired yet -- this "
-        "section has no source."
-    ),
+    unavailable_message="This section is not connected to a data source yet.",
 )
 
 _MODEL_CONFIDENCE_CALIBRATION = PerformanceLearningSection(
     title=MODEL_CONFIDENCE_CALIBRATION_TITLE,
-    unavailable_message=(
-        "No Sentinel-side model-calibration contract is wired yet -- "
-        "this section has no source."
-    ),
+    unavailable_message="This section is not connected to a data source yet.",
 )
 
 

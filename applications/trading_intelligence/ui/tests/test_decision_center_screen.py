@@ -399,17 +399,17 @@ def test_provenance_label_sentinel_is_a_sentinel_recommendation():
 
 
 def test_provenance_label_strategy_is_an_interpreted_strategy_decision():
-    assert provenance_label("STRATEGY") == "interpreted strategy decision"
-    assert INTERPRETED_STRATEGY_DECISION_LABEL == "interpreted strategy decision"
+    assert provenance_label("STRATEGY") == "bot strategy decision"
+    assert INTERPRETED_STRATEGY_DECISION_LABEL == "bot strategy decision"
 
 
 def test_provenance_label_none_is_an_interpreted_strategy_decision():
-    assert provenance_label(None) == "interpreted strategy decision"
+    assert provenance_label(None) == "bot strategy decision"
 
 
 def test_provenance_label_unexpected_value_is_an_interpreted_strategy_decision():
     for unexpected in ("sentinel", "Sentinel", "SENTINEL ", "AI", "", "STRATEGY_V2"):
-        assert provenance_label(unexpected) == "interpreted strategy decision"
+        assert provenance_label(unexpected) == "bot strategy decision"
 
 
 def test_is_sentinel_recommendation_is_exact_literal_only():
@@ -424,9 +424,9 @@ def test_provenance_is_not_inferred_from_action():
     buy_strategy = DecisionDetailArea(decision=_make_view(action="BUY", action_source="STRATEGY"))
     wait_legacy = DecisionDetailArea(decision=_make_view(action="WAIT", action_source=None))
 
-    assert buy_strategy.recommendation_provenance_display == "interpreted strategy decision"
+    assert buy_strategy.recommendation_provenance_display == "bot strategy decision"
     assert buy_strategy.is_sentinel_recommendation is False
-    assert wait_legacy.recommendation_provenance_display == "interpreted strategy decision"
+    assert wait_legacy.recommendation_provenance_display == "bot strategy decision"
     assert wait_legacy.is_sentinel_recommendation is False
 
 
@@ -496,8 +496,8 @@ def test_confidence_numeric_value_is_preserved_exactly():
 
 def test_confidence_qualifier_is_the_uncalibrated_ensemble_score_wording():
     area = DecisionDetailArea(decision=_make_view(confidence=0.78))
-    assert area.confidence_qualifier == "Uncalibrated ensemble model score"
-    assert CONFIDENCE_QUALIFIER == "Uncalibrated ensemble model score"
+    assert area.confidence_qualifier == "A combined, uncalibrated score from several models -- not a guarantee of anything"
+    assert CONFIDENCE_QUALIFIER == "A combined, uncalibrated score from several models -- not a guarantee of anything"
 
 
 def test_confidence_qualifier_is_none_when_no_decision():
@@ -533,7 +533,7 @@ def test_evidence_polarity_label_contradicting():
 
 def test_evidence_polarity_label_none_missing_or_unknown_is_unavailable():
     for value in (None, "", "HOLD", "NEUTRAL", "supporting", "SUPPORTING "):
-        assert evidence_polarity_label(value) == "Polarity unavailable"
+        assert evidence_polarity_label(value) == "No clear side indicated"
 
 
 def test_evidence_polarity_rows_are_per_record_and_keep_identity():
@@ -551,7 +551,7 @@ def test_evidence_polarity_rows_are_per_record_and_keep_identity():
     assert rows == (
         EvidencePolarityRow("ev-xgb", "xgboost", "Supported the BUY"),
         EvidencePolarityRow("ev-lstm", "lstm", "Contradicted the BUY"),
-        EvidencePolarityRow("ev-fin", "finbert", "Polarity unavailable"),
+        EvidencePolarityRow("ev-fin", "finbert", "No clear side indicated"),
     )
     # One row per evidence record -- nothing collapsed, nothing added.
     assert len(rows) == 3
@@ -586,7 +586,7 @@ def test_detail_area_exposes_no_polarity_aggregate():
     rows = area.evidence_polarity_rows
     # The rows are plain per-record labels: only the three defined phrasings.
     assert {row.polarity_label for row in rows} <= {
-        "Supported the BUY", "Contradicted the BUY", "Polarity unavailable",
+        "Supported the BUY", "Contradicted the BUY", "No clear side indicated",
     }
     # No row carries a numeric or aggregate field.
     for row in rows:
@@ -611,7 +611,7 @@ def test_batch2_properties_do_not_disturb_existing_core_formatting():
     # Batch 2 additions, alongside:
     assert area.recommendation_provenance_display == "Sentinel recommendation"
     assert area.sentinel_non_concurrence_display == "Sentinel does not concur at this time."
-    assert area.confidence_qualifier == "Uncalibrated ensemble model score"
+    assert area.confidence_qualifier == "A combined, uncalibrated score from several models -- not a guarantee of anything"
 
 
 # --- Sprint 4 Item #3: decision_created_display (event-timeline enrichment) ---

@@ -271,18 +271,18 @@ def test_capital_summary_html_includes_every_metric():
 
     summary_html = PortfolioIntelligenceUI._format_capital_summary_html(capital)
 
-    assert "Allocated" in summary_html
+    assert "Total Budget" in summary_html
     assert "$1,000.00" in summary_html
-    assert "Available Cash" in summary_html
+    assert "Unspent Budget" in summary_html
     assert "$400.00" in summary_html
-    assert "Invested" in summary_html
+    assert "Spent on Open Trades" in summary_html
     assert "$600.00" in summary_html
-    assert "Reserve" in summary_html
+    assert "Safety Buffer Held Back" in summary_html
     assert "$100.00" in summary_html
-    assert "Tradeable Cash" in summary_html
+    assert "Budget Ready to Trade" in summary_html
     assert "$300.00" in summary_html
-    assert "Total Value" in summary_html
-    assert "Realized Profit" in summary_html
+    assert "Total Budget Value" in summary_html
+    assert "Profit Made So Far" in summary_html
     assert "$50.00" in summary_html
 
 
@@ -290,8 +290,9 @@ def test_capital_summary_html_includes_every_metric():
 
 
 def test_negative_realized_profit_renders_the_negative_token():
-    """Realized Profit is the one capital metric that can meaningfully be
-    negative in this domain -- it gets the product's one restrained
+    """"Profit Made So Far" (the realized_profit field) is the one capital
+    metric that can meaningfully be negative in this domain -- it gets the
+    product's one restrained
     --aara-negative-fg token, not a red/green stoplight color. The
     $-prefixed sign in the text (e.g. "$-50.00") is unchanged and remains
     the primary signal; this is reinforcement, not the only cue."""
@@ -324,7 +325,7 @@ def test_zero_realized_profit_does_not_render_the_negative_token():
 def test_only_realized_profit_can_carry_the_negative_token():
     """The other six capital metrics never take the negative modifier,
     even when this fixture's own values happen to be small -- only
-    Realized Profit is a signed P&L figure in this domain."""
+    "Profit Made So Far" is a signed P&L figure in this domain."""
     capital = _make_capital(realized_profit=-50.0)
 
     summary_html = PortfolioIntelligenceUI._format_capital_summary_html(capital)
@@ -344,7 +345,7 @@ def test_allocation_html_reflects_cash_and_invested_weights():
     allocation_html = PortfolioIntelligenceUI._format_allocation_html(capital)
 
     assert "Invested 60.0%" in allocation_html
-    assert "Cash 40.0%" in allocation_html
+    assert "Unspent Budget 40.0%" in allocation_html
     assert "width:60.0%" in allocation_html
     assert "width:40.0%" in allocation_html
 
@@ -1278,7 +1279,7 @@ def test_derived_allocation_values_render_correctly_for_a_real_capital_screen():
     combined = "\n".join(_html_values(ui.build()))
 
     assert "Invested 75.0%" in combined
-    assert "Cash 25.0%" in combined
+    assert "Unspent Budget 25.0%" in combined
 
 
 # --- REAL and EMPTY states -----------------------------------------
@@ -2047,10 +2048,10 @@ def test_snapshot_line_shows_the_provider_time_and_is_stable_across_render():
 
 
 def test_capital_summary_carries_the_internal_ledger_source_caption_in_every_state():
-    """Capital Summary / Allocation are the bot's internal managed
+    """Bot's Trading Budget / Allocation are the bot's internal managed
     capital-pool ledger, a separate system of record from the Alpaca Paper
-    Account below; the caption saying so renders in the unavailable, real
-    and partial states alike."""
+    Account below; the caption saying so (in plain, non-technical language)
+    renders in the unavailable, real and partial states alike."""
     unavailable = PortfolioIntelligenceUI(PortfolioScreen()).build()
     real = PortfolioIntelligenceUI(
         PortfolioScreen(capital=_make_capital(), holdings=(_make_holding(),))
@@ -2062,7 +2063,7 @@ def test_capital_summary_carries_the_internal_ledger_source_caption_in_every_sta
     for demo in (unavailable, real, partial):
         assert any(_CAPITAL_SOURCE_CAPTION in v for v in _html_values(demo))
     assert "Alpaca Paper Account" in _CAPITAL_SOURCE_CAPTION
-    assert "may not match" in _CAPITAL_SOURCE_CAPTION
+    assert "not your real account balance" in _CAPITAL_SOURCE_CAPTION
 
 
 def test_orders_section_carries_the_verbatim_status_note_in_every_state():

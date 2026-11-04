@@ -92,21 +92,21 @@ _SNAPSHOT_UNAVAILABLE = _SNAPSHOT_PREFIX + "unavailable"
 _SECTION_AS_OF_PREFIX = "as of "
 
 # Always-on data-source caption for the Portfolio Snapshot section only.
-# That section reads trades.db's `portfolio_snapshots` (the freshest
-# per-cycle operational portfolio value, marked to market) -- deliberately
-# NOT the internal managed capital-pool ledger that backs Portfolio
-# Intelligence's Capital Summary. The two systems of record are tracked
-# independently and are expected to differ; this line says so plainly so
-# the Morning Brief figure is never read as the same number Portfolio
-# Intelligence shows. Same always-on caption pattern (and "-- the two are
-# different systems and may not match" phrasing) as
-# ui/portfolio_intelligence/gradio_view.py's own _CAPITAL_SOURCE_CAPTION,
-# with wording truthful for this section's actual source. Reuses the
-# existing `.mb-subtitle` treatment; no theme.py change.
+# That section reads trades.db's `portfolio_snapshots` -- a value the bot
+# writes once per trading cycle, not a live read -- deliberately NOT the
+# internal managed capital-pool ledger that backs Portfolio Intelligence's
+# Capital Summary (itself a separate, slower-moving number; its own live
+# Alpaca Paper Account section is the one that re-fetches on every
+# Refresh). Plain-language rewrite (requested directly, same pass as
+# ui/portfolio_intelligence/gradio_view.py's own _CAPITAL_SOURCE_CAPTION):
+# states once-per-cycle vs. live plainly instead of "marked to market"/
+# "managed capital-pool ledger" jargon, and is now accurate about WHICH
+# other number this can lag, not just that "the two may not match."
+# Reuses the existing `.mb-subtitle` treatment; no theme.py change.
 _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION = (
-    "Latest per-cycle operational portfolio snapshot, marked to market. "
-    "Tracked separately from Portfolio Intelligence's managed capital-pool "
-    "ledger -- the two are different systems and may not match."
+    "This number updates once per trading cycle, not instantly -- it may lag "
+    "slightly behind the live balance on Portfolio Intelligence, and it is "
+    "tracked separately from the internal budget tracker shown on that screen."
 )
 _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML = (
     f'<div class="mb-subtitle">{html.escape(_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION)}</div>'

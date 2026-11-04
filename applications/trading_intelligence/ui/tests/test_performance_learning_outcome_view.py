@@ -215,7 +215,7 @@ def test_headers_are_the_twelve_factual_columns():
     unchanged, in the same order."""
     frame = _dataframe(PerformanceLearningUI(screen=_populated_screen([_closed_row()])).build())
     assert frame.headers == [
-        "Decision", "Entry date", "Status", "Exit date", "Holding days",
+        "Decision", "Entry date", "Outcome Status", "Exit date", "Holding days",
         "Realized P&L $", "Realized P&L %", "Exit basis", "Pairing method",
         "Pairing confidence", "Direction", "Decision ID",
     ]

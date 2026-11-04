@@ -410,7 +410,7 @@ def test_evidence_maturity_heading_real_zero_is_a_real_available_fact():
     heading = screen.evidence_maturity_heading
     assert heading is not None
     assert f"0 of {CALIBRATION_MIN_OUTCOMES}" in heading
-    assert "Below the established floor" in heading
+    assert "not enough yet" in heading
 
 
 def test_evidence_maturity_heading_below_floor():
@@ -423,7 +423,7 @@ def test_evidence_maturity_heading_below_floor():
     assert screen.calibration_has_enough_data is False
     heading = screen.evidence_maturity_heading
     assert f"15 of {CALIBRATION_MIN_OUTCOMES}" in heading
-    assert "Below the established floor" in heading
+    assert "not enough yet" in heading
     assert "reached" not in heading.lower()
 
 
@@ -440,7 +440,7 @@ def test_evidence_maturity_heading_exactly_at_floor():
     heading = screen.evidence_maturity_heading
     assert f"{CALIBRATION_MIN_OUTCOMES} of {CALIBRATION_MIN_OUTCOMES}" in heading
     assert "reached" in heading.lower()
-    assert "Below the established floor" not in heading
+    assert "not enough yet" not in heading
 
 
 def test_evidence_maturity_heading_above_floor():

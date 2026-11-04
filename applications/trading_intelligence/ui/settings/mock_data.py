@@ -41,12 +41,11 @@ _USER_SETTINGS = SettingsArea(
     ),
 )
 
+# Plain-language rewrite (requested directly -- "product-layer ... contract
+# is wired yet" is internal engineering phrasing, not product vocabulary).
 _THRESHOLDS = SettingsArea(
     title=THRESHOLDS_TITLE,
-    unavailable_message=(
-        "No product-layer threshold-configuration contract is wired "
-        "yet -- this area has no source."
-    ),
+    unavailable_message="This section is not connected to a data source yet.",
 )
 
 _NOTIFICATION_PREFERENCES = SettingsArea(

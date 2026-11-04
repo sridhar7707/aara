@@ -143,9 +143,9 @@ _OBSERVED_CLASSIFICATION_HTML = (
     '<div class="ri-disclosure">'
     '<div class="ri-disclosure-title aara-disclosure-title">Observed governor classification</div>'
     '<div class="ri-disclosure-body aara-disclosure-body">'
-    "This risk state is read from the operational risk_state table and reflects "
-    "the risk governor's most recently observed classification. It is not a "
-    "confirmation that the system enforced this state or blocked any execution."
+    "This shows the most recently observed classification from the risk "
+    "governor. It is not a confirmation that the system enforced this state "
+    "or blocked any execution."
     "</div>"
     "</div>"
 )

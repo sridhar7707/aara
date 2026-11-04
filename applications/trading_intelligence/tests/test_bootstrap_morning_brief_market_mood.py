@@ -15,7 +15,7 @@ from applications.trading_intelligence.adapters.legacy_regime_source import Regi
 from applications.trading_intelligence.adapters.live_market_quote_source import MarketQuote
 from applications.trading_intelligence.ui.morning_brief.mock_data import build_mock_screen
 
-_REGIME_SENTENCE = "Current market regime: HIGH_VOLATILITY."
+_REGIME_SENTENCE = "Current market regime: High Volatility."
 
 
 def _down(provider):
@@ -79,7 +79,7 @@ def test_healthy_quote_appends_the_exact_spy_clause(monkeypatch):
     )
 
     assert section.available_summary == (
-        "Current market regime: HIGH_VOLATILITY. "
+        "Current market regime: High Volatility. "
         "SPY 512.34, prev close 508.10 (+0.83% today) -- daily bar as of 2026-09-01."
     )
     # regime sentence preserved byte-for-byte at the front

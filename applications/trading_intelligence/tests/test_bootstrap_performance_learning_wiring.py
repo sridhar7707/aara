@@ -97,8 +97,8 @@ def test_missing_db_path_is_explicitly_unavailable():
     assert screen.outcome_rows == ()
     assert screen.summary is None
     # Attribution + Calibration untouched
-    assert "attribution contract is wired yet" in screen.attribution_breakdown.unavailable_message
-    assert "model-calibration contract is wired yet" in screen.model_confidence_calibration.unavailable_message
+    assert "not connected to a data source yet" in screen.attribution_breakdown.unavailable_message
+    assert "not connected to a data source yet" in screen.model_confidence_calibration.unavailable_message
 
 
 def test_missing_trades_table_is_api_error_unavailable():
@@ -160,7 +160,7 @@ def test_valid_snapshot_populates_outcome_history():
         assert amzn.realized_pnl_usd == "-27.77"
         assert amzn.realized_pnl_pct == "-0.23%"
         assert amzn.holding_days == "47"
-        assert amzn.pairing_method == "WINDOW_SINGLE_BOT_EXIT"
+        assert amzn.pairing_method == "Matched bot exit"
         assert amzn.pairing_confidence == "HIGH"
         assert amzn.decision_reference == "trade-1"
 

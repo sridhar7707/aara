@@ -60,12 +60,20 @@ def format_display_timestamp(moment: datetime) -> str:
 # ---------------------------------------------------------------------------
 
 SENTINEL_RECOMMENDATION_LABEL = "Sentinel recommendation"
-INTERPRETED_STRATEGY_DECISION_LABEL = "interpreted strategy decision"
+INTERPRETED_STRATEGY_DECISION_LABEL = "bot strategy decision"
 SENTINEL_NON_CONCURRENCE_STATEMENT = "Sentinel does not concur at this time."
-CONFIDENCE_QUALIFIER = "Uncalibrated ensemble model score"
+# Plain-language rewrite (requested directly -- a non-technical user found
+# this screen's internal-model-jargon style confusing, same pass as the
+# Portfolio Intelligence cash-label fix). Was "Uncalibrated ensemble model
+# score" -- says the same thing in plain words. The word "uncalibrated"
+# itself must stay verbatim (test_confidence_qualifier_uses_no_probability_
+# or_certainty_language, ADR-070): this is a disclaimer the screen is
+# required to make, not optional phrasing. "probability"/"chance"/etc. are
+# separately forbidden by the same test -- do not reintroduce them here.
+CONFIDENCE_QUALIFIER = "A combined, uncalibrated score from several models -- not a guarantee of anything"
 EVIDENCE_POLARITY_SUPPORTED_LABEL = "Supported the BUY"
 EVIDENCE_POLARITY_CONTRADICTED_LABEL = "Contradicted the BUY"
-EVIDENCE_POLARITY_UNAVAILABLE_LABEL = "Polarity unavailable"
+EVIDENCE_POLARITY_UNAVAILABLE_LABEL = "No clear side indicated"
 
 _SENTINEL_ACTION_SOURCE = "SENTINEL"
 _WAIT_ACTION = "WAIT"
@@ -111,7 +119,7 @@ CALIBRATION_MIN_OUTCOMES = 30
 def provenance_label(action_source: Optional[str]) -> str:
     """"Sentinel recommendation" iff ``action_source`` is exactly
     ``"SENTINEL"``; every other value -- ``"STRATEGY"``, ``None``, or any
-    unexpected string -- is an "interpreted strategy decision" (ADR-070 §6).
+    unexpected string -- is an "bot strategy decision" (ADR-070 §6).
     Provenance is never inferred from any other field."""
     if action_source == _SENTINEL_ACTION_SOURCE:
         return SENTINEL_RECOMMENDATION_LABEL
@@ -141,7 +149,7 @@ def sentinel_non_concurrence_statement(
 def evidence_polarity_label(polarity: Optional[str]) -> str:
     """Per-record only. ``"SUPPORTING"`` -> "Supported the BUY";
     ``"CONTRADICTING"`` -> "Contradicted the BUY"; ``None`` / missing / any
-    other value -> "Polarity unavailable" (ADR-070 §9). No count, majority,
+    other value -> "No clear side indicated" (ADR-070 §9). No count, majority,
     unanimity, net polarity, or score is derived from these anywhere."""
     if polarity == _SUPPORTING_POLARITY:
         return EVIDENCE_POLARITY_SUPPORTED_LABEL
@@ -293,7 +301,7 @@ class DecisionDetailArea:
     @property
     def recommendation_provenance_display(self) -> Optional[str]:
         """"Sentinel recommendation" iff DecisionView.action_source is
-        exactly "SENTINEL"; otherwise "interpreted strategy decision".
+        exactly "SENTINEL"; otherwise "bot strategy decision".
         None when no decision is selected."""
         if self.decision is None:
             return None

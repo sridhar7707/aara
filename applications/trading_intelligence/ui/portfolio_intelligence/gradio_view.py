@@ -391,17 +391,21 @@ _PAGE_HEADER_HTML = (
     "</div>"
 )
 
-# Shown once, directly under the Capital Summary heading, in every state.
-# Capital Summary / Allocation are the bot's own internal managed
-# capital-pool ledger (trades.db capital_pools) -- a deliberately separate
-# system of record from the "Alpaca Paper Account" block further down,
-# which is the broker's marked-to-market view. The two are tracked
-# independently and are expected to differ; this line says so plainly so
-# neither is read as authoritative over the other. Same always-on caption
-# pattern as _ALPACA_ORDERS_SCOPE_CAPTION.
+# Shown once, directly under the Bot's Trading Budget heading, in every
+# state. This section is the bot's own internal managed capital-pool
+# ledger (trades.db capital_pools) -- a deliberately separate system of
+# record from the "Alpaca Paper Account" block further down, which is the
+# broker's marked-to-market view. The two are tracked independently and
+# are expected to differ; this line says so in plain language (not "ledger"/
+# "system of record"/"marked-to-market" jargon -- a layperson-facing rewrite,
+# requested directly, since even the prior jargon-free-sounding version
+# still confused a non-technical user) so neither is read as authoritative
+# over the other. Same always-on caption pattern as
+# _ALPACA_ORDERS_SCOPE_CAPTION.
 _CAPITAL_SOURCE_CAPTION = (
-    "Internal managed capital-pool ledger. Tracked separately from the Alpaca "
-    "Paper Account below -- the two are different systems and may not match."
+    "This is an internal budget tracker the bot uses, not your real account "
+    "balance. It only updates when the bot actually buys or sells, so it can "
+    "lag behind the real numbers in the Alpaca Paper Account section below."
 )
 _CAPITAL_SOURCE_CAPTION_HTML = (
     f'<div class="pi-source-caption">{html.escape(_CAPITAL_SOURCE_CAPTION)}</div>'
@@ -542,7 +546,7 @@ class PortfolioIntelligenceUI:
 
             disclosure_output = gr.HTML(self._format_disclosure_html(initial))
 
-            gr.HTML('<div class="pi-section-label">Capital Summary</div>')
+            gr.HTML('<div class="pi-section-label">Bot\'s Trading Budget</div>')
             gr.HTML(_CAPITAL_SOURCE_CAPTION_HTML)
             capital_summary_output = gr.HTML(self._capital_summary_state(initial)[0])
 
@@ -638,7 +642,10 @@ class PortfolioIntelligenceUI:
 
             # Drawdown: visually complements the value chart directly above
             # it, sharing the SAME timeframe_selector -- no second control.
-            gr.HTML('<div class="pi-section-label">Drawdown</div>')
+            # "Drawdown" -> "Portfolio Drawdown": matches Morning Brief's and
+            # Risk Intelligence's own section label for the same concept
+            # (plain-language/consistency pass, requested directly).
+            gr.HTML('<div class="pi-section-label">Portfolio Drawdown</div>')
             gr.HTML(f'<div class="pi-source-caption">{html.escape(_DRAWDOWN_DISCLAIMER)}</div>')
             (
                 drawdown_message_value, drawdown_message_visible,
@@ -1512,22 +1519,30 @@ class PortfolioIntelligenceUI:
         return _UNAVAILABLE_DATA_HTML
 
     # Impeccable critique finding #5: of these seven capital metrics, only
-    # "Realized Profit" is a signed P&L figure that can meaningfully be
-    # negative in this domain (Allocated/Available Cash/Invested/Reserve/
-    # Tradeable Cash/Total Value are not) -- so it is the one label this
-    # set's negative-value modifier below is keyed to.
-    _NEGATIVE_ELIGIBLE_CAPITAL_METRIC = "Realized Profit"
+    # "Profit Made So Far" is a signed P&L figure that can meaningfully be
+    # negative in this domain (Total Budget/Unspent Budget/Spent on Open
+    # Trades/Safety Buffer Held Back/Budget Ready to Trade/Total Budget
+    # Value are not) -- so it is the one label this set's negative-value
+    # modifier below is keyed to.
+    #
+    # Labels rewritten to plain language (requested directly -- a
+    # non-technical user found "Capital Summary"/"Available Cash" etc.
+    # confusing, specifically because "Available Cash" here collided
+    # verbatim with Morning Brief's own "Available Cash" KPI, which reads
+    # from a different real-time source -- see _CAPITAL_SOURCE_CAPTION's
+    # own comment). Same underlying CapitalSummary fields, new labels only.
+    _NEGATIVE_ELIGIBLE_CAPITAL_METRIC = "Profit Made So Far"
 
     @staticmethod
     def _format_capital_summary_html(capital: CapitalSummary) -> str:
         fields = [
-            ("Allocated", capital.allocated_amount),
-            ("Available Cash", capital.available_cash),
-            ("Invested", capital.invested_amount),
-            ("Reserve", capital.reserve),
-            ("Tradeable Cash", capital.tradeable_cash),
-            ("Total Value", capital.total_value),
-            ("Realized Profit", capital.realized_profit),
+            ("Total Budget", capital.allocated_amount),
+            ("Unspent Budget", capital.available_cash),
+            ("Spent on Open Trades", capital.invested_amount),
+            ("Safety Buffer Held Back", capital.reserve),
+            ("Budget Ready to Trade", capital.tradeable_cash),
+            ("Total Budget Value", capital.total_value),
+            ("Profit Made So Far", capital.realized_profit),
         ]
 
         def _value_class(label: str, value: float) -> str:
@@ -1557,7 +1572,7 @@ class PortfolioIntelligenceUI:
             "</div>"
             '<div class="pi-allocation-legend">'
             f'<span class="invested"><span class="swatch"></span>Invested {invested_pct:.1f}%</span>'
-            f'<span class="cash"><span class="swatch"></span>Cash {cash_pct:.1f}%</span>'
+            f'<span class="cash"><span class="swatch"></span>Unspent Budget {cash_pct:.1f}%</span>'
             "</div>"
         )
 
@@ -1686,9 +1701,14 @@ class PortfolioIntelligenceUI:
 
     @staticmethod
     def _format_alpaca_account_html(account: AlpacaAccountSnapshot) -> str:
+        # "Cash" -> "Available Cash": matches Morning Brief's own KPI label
+        # for the same real, live broker balance -- one consistent name for
+        # "your real cash" across both screens, now that the Bot's Trading
+        # Budget section above has its own, deliberately different "Unspent
+        # Budget" label for the bot's separate internal figure.
         fields = [
             ("Equity", account.equity),
-            ("Cash", account.cash),
+            ("Available Cash", account.cash),
             ("Buying Power", account.buying_power),
             ("Portfolio Value", account.portfolio_value),
         ]

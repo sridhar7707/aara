@@ -103,8 +103,10 @@ def test_section_label_is_present_and_after_the_two_unavailable_areas():
 def test_outcome_history_attribution_calibration_are_untouched():
     blob = _html_blob(_screen(ledger_inspection=_inspection([_candidate()])))
     assert "Outcome History" in blob
-    assert "No Sentinel-side attribution contract is wired yet" in blob
-    assert "No Sentinel-side model-calibration contract is wired yet" in blob
+    # 3, not 2: this phrase is also the first sentence of Outcome History's
+    # own (longer) unavailable message, so it matches there too, plus
+    # Attribution and Calibration's own identical short messages.
+    assert blob.count("This section is not connected to a data source yet.") == 3
 
 
 # --- health tri-state -------------------------------------------

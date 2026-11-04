@@ -690,7 +690,7 @@ footer { display: none !important; }
 
 /* ADR-070 Sprint 3 -- recommendation-surfacing semantics, sat directly under
    the decision identity line. Text-first and calm: provenance is a small
-   micro-label (muted for an interpreted strategy decision, navy for a genuine
+   micro-label (muted for an bot strategy decision, navy for a genuine
    Sentinel recommendation -- the words already differ, colour is never the
    only signal); the Sentinel non-concurrence line is one plain informational
    sentence, never a stoplight colour or pill; the confidence qualifier is a
@@ -812,7 +812,7 @@ footer { display: none !important; }
 /* ADR-070 Sprint 3 (§9) -- per-record evidence polarity. One small, muted
    supporting label inside an evidence record's card, carrying only that
    record's own phrase ("Supported the BUY" / "Contradicted the BUY" /
-   "Polarity unavailable"). Same calm muted-caption treatment as
+   "No clear side indicated"). Same calm muted-caption treatment as
    .aara-confidence-qualifier above -- no badge, no gauge, no red/green-only
    signal, no motion, no new hierarchy beyond a small supporting label. Never
    an aggregate. */

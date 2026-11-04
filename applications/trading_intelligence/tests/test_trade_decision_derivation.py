@@ -136,7 +136,7 @@ def test_to_evidence_entries_trade_45_has_three_ordered_entries():
     assert [e.evidence_id for e in entries] == [
         "trade-45-model", "trade-45-drivers", "trade-45-rationale", "trade-45-risk",
     ]
-    assert all(e.source == "aara-bot" for e in entries)
+    assert all(e.source == "AARA Trading Bot" for e in entries)
     assert all(e.attached_at == _TS_DT for e in entries)
 
 

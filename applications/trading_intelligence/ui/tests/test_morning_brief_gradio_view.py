@@ -137,8 +137,8 @@ def test_portfolio_snapshot_carries_a_data_source_caption():
     combined = "\n".join(_html_values(MorningBriefUI().build()))
 
     assert combined.count(_PORTFOLIO_SNAPSHOT_SOURCE_CAPTION_HTML) == 1
-    assert "Tracked separately from Portfolio Intelligence" in _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION
-    assert "the two are different systems and may not match" in _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION
+    assert "tracked separately from the internal budget tracker" in _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION
+    assert "may lag slightly behind the live balance on Portfolio Intelligence" in _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION
     # never implies equivalence with the Capital Summary figure
     for equivalence_claim in ("same as", "identical to", "matches portfolio intelligence"):
         assert equivalence_claim not in _PORTFOLIO_SNAPSHOT_SOURCE_CAPTION.lower()
