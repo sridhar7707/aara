@@ -496,6 +496,34 @@ def test_reconcile_records_actual_pnl_when_client_available(db):
     assert row[1] == pytest.approx(0.10, abs=1e-4)  # pnl_pct = +10%
 
 
+def test_reconcile_credits_the_capital_pool_on_sell_reconcile(db):
+    """ADR-075: SELL_RECONCILE must credit the capital pool exactly like
+    every other sell path already does. Before this fix, a position closed
+    by this reconcile branch silently never credited cash back into
+    capital_pools -- the confirmed source of a real ~$15.8K production
+    drift that suppressed buy sizing for weeks."""
+    from bot.capital.pool import load_active_pool
+
+    pool = load_active_pool(db, 10_000.0)
+    _upsert_position_state(db, "AAPL", 100.0, 100.0, 1.0, 5.0)
+    log_trade(db, "AAPL", "BUY", 5.0, 100.0, 500.0, "TRENDING_UP", 10000.0, 0.0)
+
+    class FakeClient:
+        def get_latest_price(self, symbol):
+            return 120.0  # 20% gain: sell_notional = 5 * 120 = 600
+
+    _reconcile_positions(db, alpaca_positions={}, client=FakeClient(), pool=pool)
+
+    row = db.execute(
+        "SELECT available_cash FROM capital_pools WHERE id=?", (pool.id,)
+    ).fetchone()
+    assert row[0] == pytest.approx(10_600.0)  # 10000 + 600 credited back
+    ledger_row = db.execute(
+        "SELECT event_type, symbol FROM capital_ledger WHERE event_type='sell' AND symbol='AAPL'"
+    ).fetchone()
+    assert ledger_row is not None
+
+
 def test_reconcile_falls_back_to_entry_price_on_client_error(db):
     """If market price fetch fails, reconcile should fall back to entry price."""
     _upsert_position_state(db, "MSFT", 200.0, 200.0, 2.0, 2.0)
