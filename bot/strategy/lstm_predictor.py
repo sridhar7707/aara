@@ -104,12 +104,21 @@ class LSTMPredictor:
             if saved_val_loss > LSTM_DEGRADED_VAL_LOSS:
                 self.is_degraded = True
                 self.val_loss = saved_val_loss
-                logger.warning(
-                    f"⚠ LSTM model is DEGRADED — val_loss={saved_val_loss:.4f} "
-                    f"(threshold={LSTM_DEGRADED_VAL_LOSS}). "
-                    f"Model outputs will be treated as indeterminate. "
-                    f"Run: python scripts/train_model.py"
-                )
+                if report.get("lstm_retired"):
+                    # ADR-078 — intentional retirement (ADR-077), not an
+                    # actionable error. is_degraded/val_loss above are set
+                    # identically either way; only this message differs.
+                    logger.info(
+                        "LSTM retired from the active retrain pipeline (ADR-077) — "
+                        "ensemble weight permanently excluded; this is expected, not an error."
+                    )
+                else:
+                    logger.warning(
+                        f"⚠ LSTM model is DEGRADED — val_loss={saved_val_loss:.4f} "
+                        f"(threshold={LSTM_DEGRADED_VAL_LOSS}). "
+                        f"Model outputs will be treated as indeterminate. "
+                        f"Run: python scripts/train_model.py"
+                    )
         except Exception as exc:
             logger.debug(f"LSTM degradation check skipped: {exc}")
 

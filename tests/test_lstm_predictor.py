@@ -149,6 +149,66 @@ def test_lstm_predictor_degraded_model_forces_fallback_even_with_confident_outpu
     assert predictor.last_prediction_is_fallback is True
 
 
+# --- ADR-078: retirement vs genuine degradation log message ---------------
+#
+# ADR-077 writes an explicit retirement sentinel (lstm_val_loss=1.0,
+# lstm_retired=true) so is_degraded stays True forever. The pre-ADR-078
+# "DEGRADED ... Run: python scripts/train_model.py" message is now
+# permanently false for that case (the script can never change it), so the
+# log message must branch on lstm_retired without ever changing is_degraded
+# or val_loss themselves.
+
+@pytest.fixture()
+def _loguru_sink():
+    # loguru binds its default sink to sys.stderr at logger.add() time, before
+    # pytest's capsys fixture swaps the stream for a given test -- capsys and
+    # caplog (which hooks stdlib logging) both miss loguru output. A temporary
+    # sink of our own is loguru's own documented way to capture it in tests.
+    from loguru import logger
+    messages = []
+    sink_id = logger.add(lambda message: messages.append(message), level="DEBUG")
+    yield messages
+    logger.remove(sink_id)
+
+
+def test_check_degradation_retired_report_logs_info_not_warning(tmp_path, monkeypatch, _loguru_sink):
+    import json
+    import bot.strategy.lstm_predictor as lstm_mod
+    report_path = tmp_path / "validation_report.json"
+    report_path.write_text(json.dumps({"lstm_val_loss": 1.0, "lstm_retired": True}))
+    monkeypatch.setattr(lstm_mod, "_VALIDATION_REPORT_PATH", report_path)
+
+    predictor = lstm_mod.LSTMPredictor()
+    out = "".join(str(m) for m in _loguru_sink)
+
+    assert predictor.is_degraded is True
+    assert predictor.val_loss == 1.0
+    assert "DEGRADED" not in out
+    assert "Run: python scripts/train_model.py" not in out
+    assert "retired" in out.lower()
+    assert "ADR-077" in out
+
+
+def test_check_degradation_non_retired_report_logs_original_warning(tmp_path, monkeypatch, _loguru_sink):
+    """Proves the retirement branch doesn't regress the genuine-degradation
+    alert path: a report with no lstm_retired flag (e.g. a pre-ADR-077
+    report, or a future non-retired LSTM that genuinely degrades) must still
+    produce the original actionable warning, verbatim."""
+    import json
+    import bot.strategy.lstm_predictor as lstm_mod
+    report_path = tmp_path / "validation_report.json"
+    report_path.write_text(json.dumps({"lstm_val_loss": 0.62}))
+    monkeypatch.setattr(lstm_mod, "_VALIDATION_REPORT_PATH", report_path)
+
+    predictor = lstm_mod.LSTMPredictor()
+    out = "".join(str(m) for m in _loguru_sink)
+
+    assert predictor.is_degraded is True
+    assert predictor.val_loss == 0.62
+    assert "DEGRADED" in out
+    assert "Run: python scripts/train_model.py" in out
+
+
 def test_lstm_predictor_not_degraded_preserves_existing_behavior(lstm_feature_df):
     """Same mocked confident model, is_degraded explicitly False (the default) --
     must behave exactly as before this fix, proving no regression."""

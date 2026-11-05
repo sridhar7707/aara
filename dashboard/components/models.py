@@ -160,6 +160,11 @@ def render_paper_trading_scorecard() -> str:
         f'</div>'
     )
 
+def _lstm_loss_display(r: dict, retired_text: str) -> tuple:
+    val_loss = r.get("lstm_val_loss", 1.0)
+    return (TEXT2, retired_text) if r.get("lstm_retired") else (
+        GAIN if val_loss < 0.65 else (NEURAL if val_loss < 0.70 else LOSS), f"{val_loss:.4f}")
+
 @safe_render("Validation Report")
 def render_validation_report() -> str:
     import json as _json
@@ -176,9 +181,8 @@ def render_validation_report() -> str:
                 f'<span style="color:{LOSS}">{exc}</span></div>')
 
     auc      = r.get("xgb_val_auc",  0.0)
-    val_loss = r.get("lstm_val_loss", 1.0)
     auc_c    = GAIN if auc >= 0.60 else (NEURAL if auc >= 0.55 else LOSS)
-    loss_c   = GAIN if val_loss < 0.65 else (NEURAL if val_loss < 0.70 else LOSS)
+    loss_c, loss_val = _lstm_loss_display(r, "Retired (ADR-077)")
     dr       = r.get("date_range", {})
 
     def _vr(label: str, val: str, color: str = TEXT1) -> str:
@@ -193,7 +197,7 @@ def render_validation_report() -> str:
 
     rows = (
         _vr("XGBoost Val AUC", f"{auc:.3f}",                    auc_c)
-        + _vr("LSTM Val Loss",f"{val_loss:.4f}",               loss_c)
+        + _vr("LSTM Val Loss",loss_val,                        loss_c)
         + _vr("Train Rows",   f"{r.get('training_rows',0):,}")
         + _vr("Symbols",      str(r.get("training_symbols","&mdash;")))
         + _vr("Cutoff",       r.get("train_cutoff", "&mdash;"))
@@ -208,8 +212,8 @@ def render_validation_report() -> str:
         f'<b>XGBoost Val AUC</b> &mdash; How well XGBoost predicts the right direction on data it '
         f'<em>never trained on</em>. 0.50 = random guessing. 0.60+ = meaningfully predictive. '
         f'1.0 = perfect (never achieved in practice).<br>'
-        f'<b>LSTM Val Loss</b> &mdash; Prediction error on unseen data. Lower is better. '
-        f'A random classifier scores ~0.69; a well-trained model scores below 0.65.<br>'
+        f'<b>LSTM Val Loss</b> &mdash; Prediction error on unseen data (shows "Retired" if the model was '
+        f'intentionally removed from training, ADR-077). A well-trained model scores below 0.65.<br>'
         f'<b>Train Cutoff</b> &mdash; All data <em>after</em> this date was held out during training '
         f'to test real-world performance.'
         f'</div>'
@@ -364,9 +368,8 @@ def _model_quality_fallback() -> str:
             f'Bot is live. Awaiting first trade to show performance metrics.</div>'
         )
     auc      = r.get("xgb_val_auc",  0.0)
-    val_loss = r.get("lstm_val_loss", 1.0)
     auc_c    = GAIN if auc >= 0.60 else (NEURAL if auc >= 0.55 else LOSS)
-    loss_c   = GAIN if val_loss < 0.65 else (NEURAL if val_loss < 0.70 else LOSS)
+    loss_c, loss_val = _lstm_loss_display(r, "Retired")
     generated = r.get("generated_at", "")[:10]
 
     cards = (
@@ -377,8 +380,8 @@ def _model_quality_fallback() -> str:
                 TEXT2, TEXT2, "appears after first closed trade", 0.06)
         + _stat_card("XGBoost AUC",        f"{auc:.3f}",
                 TEXT2, auc_c, "≥0.60 = good · 0.50 = random", 0.12)
-        + _stat_card("LSTM Val Loss",     f"{val_loss:.4f}",
-                TEXT2, loss_c, "≤0.65 = well-trained · 0.69 = random", 0.18)
+        + _stat_card("LSTM Val Loss",     loss_val, TEXT2, loss_c,
+                "Retired (ADR-077)" if r.get("lstm_retired") else "≤0.65 = well-trained · 0.69 = random", 0.18)
         + f'</div>'
     )
     explain = (
