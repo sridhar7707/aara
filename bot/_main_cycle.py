@@ -7,6 +7,7 @@ import os
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -318,8 +319,11 @@ def _handle_entry(
         recorder.reject("cash_reserve_min", _reason)
         return available_cash
     _managed = ctx.pool.tradeable_cash if ctx.pool else None
+    # ADR-080 A1: pending buys (submitted, not yet in positions) count toward the cap
+    _pending = len(ctx.buy_order_syms - set(ctx.positions))
     if not risk.approve_buy(symbol, notional, ctx.portfolio_value,
-                            ctx.portfolio_value, ctx.positions, managed_capital=_managed):
+                            ctx.portfolio_value, ctx.positions, managed_capital=_managed,
+                            pending_count=_pending):
         _reason = "risk.approve_buy() declined (portfolio-level risk check)"  # was previously silent
         logger.info(f"BUY {symbol} skipped — {_reason}")
         recorder.reject("risk_manager_approval", _reason)
@@ -414,6 +418,11 @@ def _handle_entry(
             _upsert_position_state(con, symbol, fill_price, fill_price, ctx.current_atr, fill_shares)
             available_cash -= notional
             ctx.buy_order_syms.discard(symbol)  # order is now filled, not pending
+            # ADR-080 §1: register the fill so later gates in this cycle count it
+            ctx.positions[symbol] = SimpleNamespace(
+                symbol=symbol, qty=fill_shares, market_value=notional,
+                avg_entry_price=fill_price, unrealized_plpc=0.0,
+            )
             _report_execution_outcome_safe(
                 ctx.trust_conn, symbol, "BUY", "EXECUTED",
                 side="buy", outcome="FILLED", is_paper=_is_paper_execution,
