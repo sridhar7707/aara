@@ -1,3 +1,5 @@
+"""ADR-080 §6: live-loop check through the real bot.main.run() cycle (Alpaca,
+yfinance, sentiment and model calls are stubbed; entry gates and fills are real)."""
 from types import SimpleNamespace
 import numpy as np, pandas as pd
 import bot.main as m

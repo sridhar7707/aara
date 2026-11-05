@@ -121,7 +121,7 @@ Live path: `trade.yml` → `bot/main.py --mode paper --loop`. The change only af
 **Amended scope (additions to §1 only; §2–§7 unchanged):**
 
 - **Add** `bot/_main_cycle.py`: `_handle_entry` may register a fill in `ctx.positions`. Limited to that one assignment after a recorded fill. No gate logic changes.
-- **Add** `bot/risk/risk_manager.py` `approve_buy`: an optional keyword `pending_count: int = 0` that is added to `len(open_positions)` in the position-cap check. Default `0` keeps current behaviour. `bot/main.py` passes the count of symbols in `buy_order_syms` not already in `positions`.
+- **Add** `bot/risk/risk_manager.py` `approve_buy`: an optional keyword `pending_count: int = 0` that is added to `len(open_positions)` in the position-cap check. Default `0` keeps current behaviour. `bot/_main_cycle.py` `_handle_entry` computes the count as `len(buy_order_syms - positions)` and passes it in. (Corrected 2026-11-05: `bot/main.py` is not changed by this amendment.)
 - Pending symbols are **never** inserted into `positions`, so `_handle_exits` is unaffected.
 
 **Explicitly still not touched:** gate thresholds, exit and trailing-stop logic, ADR-075 reconciliation, workflows.
@@ -129,3 +129,14 @@ Live path: `trade.yml` → `bot/main.py --mode paper --loop`. The change only af
 **Acceptance criteria:** §5.1 repro must pass with the marker removed; §5.2 (correlated pair) and a new §5.3 test (pending order counts toward the cap, via `pending_count`) must pass; §5.4 no-double-count must pass; full suite green.
 
 **Rollback:** revert the amendment's commit; the `pending_count` default of `0` makes that safe.
+
+### Review notes (2026-11-05, for the Architecture Owner; not accepted)
+
+Found in code review of PR #5. Each item is either fixed in the branch or recorded as a known gap.
+
+- **Fixed:** a timed-out buy was marked pending. `wait_for_fill()` cancels the order before returning 0, so the mark blocked later symbols for an order that was already dead. The mark is removed.
+- **Fixed:** the Telegram sector figure counted the just-filled position twice. Cosmetic only; the alert is currently a no-op.
+- **Known gap, not fixed:** sector gates (`sector_check`, Gate 8c) read only `positions`. A same-sector order still pending from a previous cycle is counted toward the position cap but not toward sector limits. A1 scoped pending to the cap only. Needs an owner decision.
+- **Known gap, out of scope:** `bot/execution/alpaca_client.py` `wait_for_fill()` reads `filled_qty` before cancelling. A fill that lands between that read and the cancel is returned as 0 and not recorded this cycle. Fixing it means changing the broker client, which needs its own ADR.
+- **Known gap, pre-existing:** if a DB or ledger write after the fill registration raises, `main.py`'s per-symbol handler keeps the pre-buy cash figure. The registration itself is unchanged.
+- **Design note, deferred:** placeholder objects sit in the broker-snapshot dict. A separate per-cycle "filled this cycle" set would be cleaner and is the preferred design if this grows.

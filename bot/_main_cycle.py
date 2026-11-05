@@ -372,7 +372,7 @@ def _handle_entry(
                 _existing_sv = sum(
                     float(getattr(p, "market_value", 0) or 0)
                     for s2, p in ctx.positions.items()
-                    if SECTOR_MAP.get(s2, "") == _sym_sector_tg
+                    if SECTOR_MAP.get(s2, "") == _sym_sector_tg and s2 != symbol  # fill already registered
                 )
                 _sect_pct_tg = (_existing_sv + notional) / ctx.portfolio_value * 100
             _cash_pct_tg = ((available_cash - notional) / ctx.portfolio_value * 100
@@ -432,9 +432,7 @@ def _handle_entry(
             )
         else:
             _fail_reason = "order submitted but did not fill within timeout"
-            # ADR-080 A1: the order may still fill at the broker, so keep it pending for
-            # the rest of this cycle (restrictive only; the next cycle re-reads open orders)
-            ctx.buy_order_syms.add(symbol)
+            # wait_for_fill() has already cancelled this order, so it is not pending.
             logger.warning(f"BUY {symbol} order did not fill — position state NOT recorded")
             recorder.record_order_not_filled(_fail_reason)
             _report_execution_outcome_safe(

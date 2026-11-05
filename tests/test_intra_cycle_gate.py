@@ -18,7 +18,6 @@ from tests.phase1a.test_decision_capture_integration import (  # reuse real fixt
     chain,
     ledger_conn,
     trades_db,
-    _clear_candidate_cache,
 )
 
 # Real symbols from SECTOR_MAP so the sector gate runs against real config.
@@ -156,9 +155,9 @@ class _TimeoutFirstClient(_CountingFillClient):
         return 0.0 if order_id == f"ord-{self.buys[0]}" else 10.0
 
 
-def test_timed_out_order_stays_pending_for_the_rest_of_the_cycle(trades_db, ledger_conn, chain):
-    """Review finding: an order that times out may still fill at the broker, so
-    it must count toward the cap for later symbols in the same cycle."""
+def test_timed_out_order_is_cancelled_and_does_not_block_later_symbols(trades_db, ledger_conn, chain):
+    """wait_for_fill() cancels a timed-out order before returning 0, so the
+    symbol must not stay pending and must not consume a cap slot."""
     positions = _held_positions(NON_TECH_HOLDINGS)
     buy_order_syms: set = set()
     client = _TimeoutFirstClient()
@@ -171,8 +170,8 @@ def test_timed_out_order_stays_pending_for_the_rest_of_the_cycle(trades_db, ledg
             xgb=_NoDriversXgb(),
         )
         _handle_entry(trades_db, client=client, risk=risk, symbol=symbol, ctx=ctx)
-    assert client.buys == ["AAPL"], f"timed-out order not counted as pending: {client.buys}"
-    assert "AAPL" in buy_order_syms and "AAPL" not in positions
+    assert client.buys == ["AAPL", "MSFT"], f"cancelled order blocked a later symbol: {client.buys}"
+    assert "AAPL" not in buy_order_syms and "AAPL" not in positions
 
 
 def test_fill_registered_even_if_trade_log_write_fails(trades_db, ledger_conn, chain, monkeypatch):
