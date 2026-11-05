@@ -22,6 +22,9 @@ import subprocess
 import sys
 import tempfile
 
+import os
+import pathlib
+
 import gradio as gr
 import pytest
 
@@ -47,13 +50,18 @@ _ISOLATE_DB = (
         "from requirements.txt; this test is authoritative there."
     ),
 )
-def test_dashboard_app_imports_without_crashing():
+def test_dashboard_app_imports_without_crashing(tmp_path):
     """Full import of dashboard.app must succeed — catches registry key mismatches,
     missing mounts, and any other module-level wiring error that unit tests can't see
     because they never construct the actual gr.Blocks app."""
+    # Run from a temp cwd so the import's relative 'trades.db' default never lands
+    # in the repo root; PYTHONPATH keeps the project packages importable.
+    repo_root = str(pathlib.Path(__file__).resolve().parent.parent)
+    env = {**os.environ, "PYTHONPATH": repo_root + os.pathsep + os.environ.get("PYTHONPATH", "")}
     result = subprocess.run(
         [sys.executable, "-c", _ISOLATE_DB],
-        cwd=".",
+        cwd=str(tmp_path),
+        env=env,
         capture_output=True,
         text=True,
         timeout=120,

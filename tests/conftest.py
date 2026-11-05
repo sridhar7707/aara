@@ -31,3 +31,37 @@ def make_ohlcv(n: int = 270, seed: int = 42) -> pd.DataFrame:
 @pytest.fixture
 def ohlcv():
     return make_ohlcv()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_default_dashboard_db(tmp_path, monkeypatch):
+    """dashboard.data.get_db_conn() falls back to the relative 'trades.db', which
+    sqlite3.connect creates in the repo root whenever a test reads it unpatched.
+    Redirect that default for every test so the suite never leaks a root file."""
+    try:
+        import dashboard.data as _dd
+    except ImportError:
+        return
+    monkeypatch.setattr(_dd, "DB_PATH", str(tmp_path / "default_trades.db"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_scheduler_dbs(tmp_path, monkeypatch):
+    """scheduler modules bind their default db_path at import time, so no-argument
+    calls from the dashboard always open the cwd-relative 'trades.db'. Redirect
+    each module's _conn default to a temp file for every test."""
+    import importlib
+    temp_db = str(tmp_path / "scheduler_test.db")
+    for mod_name in ("scheduler.session_manager", "scheduler.health_monitor"):
+        try:
+            mod = importlib.import_module(mod_name)
+        except ImportError:
+            continue
+        real_conn = mod._conn
+
+        def _redirected(db_path=None, _real=real_conn):
+            if db_path in (None, "trades.db"):
+                db_path = temp_db
+            return _real(db_path)
+
+        monkeypatch.setattr(mod, "_conn", _redirected)
