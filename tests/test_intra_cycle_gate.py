@@ -147,3 +147,61 @@ def test_filled_position_not_double_counted_when_pending_clears(trades_db, ledge
     )
     _handle_entry(trades_db, client=client, risk=RiskManager(), symbol="MSFT", ctx=ctx)
     assert client.buys == ["MSFT"], f"pending symbol double-counted: {client.buys}"
+
+
+class _TimeoutFirstClient(_CountingFillClient):
+    """First order times out unfilled (wait_for_fill -> 0); later orders fill."""
+
+    def wait_for_fill(self, order_id, timeout_secs=15):
+        return 0.0 if order_id == f"ord-{self.buys[0]}" else 10.0
+
+
+def test_timed_out_order_stays_pending_for_the_rest_of_the_cycle(trades_db, ledger_conn, chain):
+    """Review finding: an order that times out may still fill at the broker, so
+    it must count toward the cap for later symbols in the same cycle."""
+    positions = _held_positions(NON_TECH_HOLDINGS)
+    buy_order_syms: set = set()
+    client = _TimeoutFirstClient()
+    risk = RiskManager()
+    for symbol in ("AAPL", "MSFT"):
+        ctx = _minimal_entry_ctx(
+            ledger_conn, chain,
+            positions=positions, buy_order_syms=buy_order_syms,
+            available_cash=50_000.0, tradeable_capital=50_000.0, portfolio_value=100_000.0,
+            xgb=_NoDriversXgb(),
+        )
+        _handle_entry(trades_db, client=client, risk=risk, symbol=symbol, ctx=ctx)
+    assert client.buys == ["AAPL"], f"timed-out order not counted as pending: {client.buys}"
+    assert "AAPL" in buy_order_syms and "AAPL" not in positions
+
+
+def test_fill_registered_even_if_trade_log_write_fails(trades_db, ledger_conn, chain, monkeypatch):
+    """Review finding: a confirmed fill must be counted by later gates even if the
+    DB/ledger write after it raises."""
+    import bot._main_cycle as mc
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated log_trade failure")
+
+    monkeypatch.setattr(mc, "log_trade", _boom)
+    positions = _held_positions(NON_TECH_HOLDINGS)
+    client = _CountingFillClient()
+    risk = RiskManager()
+    ctx = _minimal_entry_ctx(
+        ledger_conn, chain,
+        positions=positions,
+        available_cash=50_000.0, tradeable_capital=50_000.0, portfolio_value=100_000.0,
+        xgb=_NoDriversXgb(),
+    )
+    with pytest.raises(RuntimeError):
+        _handle_entry(trades_db, client=client, risk=risk, symbol="AAPL", ctx=ctx)
+    assert client.buys == ["AAPL"] and "AAPL" in positions
+
+    ctx2 = _minimal_entry_ctx(
+        ledger_conn, chain,
+        positions=positions,
+        available_cash=50_000.0, tradeable_capital=50_000.0, portfolio_value=100_000.0,
+        xgb=_NoDriversXgb(),
+    )
+    _handle_entry(trades_db, client=client, risk=risk, symbol="MSFT", ctx=ctx2)
+    assert client.buys == ["AAPL"], f"later symbol not blocked after failed write: {client.buys}"
