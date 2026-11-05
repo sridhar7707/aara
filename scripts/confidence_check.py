@@ -7,7 +7,7 @@ import numpy as np
 from loguru import logger
 from config import TRADE_DB_PATH, BENCHMARK
 import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import bot.monitor.telegram_bot as tg
 
 THRESHOLDS = {
@@ -16,6 +16,13 @@ THRESHOLDS = {
     "min_sharpe": 1.0,
     "max_drawdown": 0.15,
     "max_consecutive_losing_days": 4,
+    # "Adapts and learns" gate (distinct from the performance gate above) --
+    # the user's real-money condition is explicitly two-part: good enough
+    # performance AND genuine adaptive/learning behavior, not just a date.
+    "adaptive_learning_min_commits": 3,     # fewer than this → status UNKNOWN, not FAIL
+    "adaptive_learning_max_auc_decline": 0.02,
+    "adaptive_learning_min_auc": 0.52,
+    "adaptive_learning_max_stale_days": 10,  # retrain.yml runs weekly; 10d of silence is a real stall
 }
 
 
@@ -133,6 +140,25 @@ def run_check():
         if not passed:
             all_pass = False
 
+    # "Adapts and learns" -- the second, separate half of the real-money bar
+    # (the user's own condition: good performance AND genuine adaptive
+    # behavior, not just a date). Pulls real weekly-retrain history from HF;
+    # UNKNOWN (missing creds/network/not enough history yet) never fails the
+    # overall check -- only a genuinely observed stall or AUC decline does.
+    adaptive = check_adaptive_learning(_pull_validation_history())
+    if adaptive["status"] == "UNKNOWN":
+        logger.info(f"  UNKNOWN  Adaptive learning (retrain health): {adaptive['detail']} — not counted against readiness")
+    else:
+        passed = adaptive["status"] == "PASS"
+        value = (f"AUC {adaptive['auc_recent_avg']:.3f} recent vs {adaptive['auc_earlier_avg']:.3f} earlier, "
+                  f"last retrain {adaptive['days_since_last_retrain']}d ago")
+        logger.info(f"  {adaptive['status']}  Adaptive learning (retrain health): {value} "
+                     f"(min AUC {THRESHOLDS['adaptive_learning_min_auc']}, "
+                     f"max decline {THRESHOLDS['adaptive_learning_max_auc_decline']}, "
+                     f"max stale {THRESHOLDS['adaptive_learning_max_stale_days']}d)")
+        if not passed:
+            all_pass = False
+
     if all_pass:
         logger.info("ALL CHECKS PASSED — Bot is ready for real money.")
         tg.alert_confidence_passed()
@@ -150,6 +176,83 @@ def _max_consecutive_losses(day_returns):
         else:
             current = 0
     return max_streak
+
+
+def check_adaptive_learning(history: list, max_auc_decline: float = None,
+                             min_auc: float = None, max_stale_days: int = None,
+                             min_commits: int = None) -> dict:
+    """Pure function: given real weekly-retrain validation_report.json dicts
+    (each needs 'xgb_val_auc' and '_commit_at', a tz-aware datetime; oldest
+    first), decide whether the model is still being retrained on schedule
+    and whether XGB val AUC has been declining -- the "adapts and learns"
+    half of the real-money bar, distinct from run_check()'s performance gate.
+
+    Returns status "UNKNOWN" (not "FAIL") when there isn't enough history to
+    judge a trend -- an unrelated data-availability gap must never read as a
+    real-money-readiness failure."""
+    max_auc_decline = THRESHOLDS["adaptive_learning_max_auc_decline"] if max_auc_decline is None else max_auc_decline
+    min_auc         = THRESHOLDS["adaptive_learning_min_auc"] if min_auc is None else min_auc
+    max_stale_days  = THRESHOLDS["adaptive_learning_max_stale_days"] if max_stale_days is None else max_stale_days
+    min_commits     = THRESHOLDS["adaptive_learning_min_commits"] if min_commits is None else min_commits
+
+    if len(history) < min_commits:
+        return {"status": "UNKNOWN", "detail": f"only {len(history)} retrain commit(s) found — need {min_commits}+ to assess a trend"}
+
+    ordered = sorted(history, key=lambda r: r["_commit_at"])
+    latest_age_days = (datetime.now(timezone.utc) - ordered[-1]["_commit_at"]).days
+    stalled = latest_age_days > max_stale_days
+
+    aucs = [float(r.get("xgb_val_auc", 0.0)) for r in ordered]
+    half = max(len(aucs) // 2, 1)
+    first_half_avg  = sum(aucs[:half]) / half
+    second_half_avg = sum(aucs[half:]) / max(len(aucs) - half, 1)
+    declining   = (first_half_avg - second_half_avg) > max_auc_decline
+    below_floor = aucs[-1] < min_auc
+
+    passed = not stalled and not declining and not below_floor
+    return {
+        "status": "PASS" if passed else "FAIL",
+        "latest_auc": round(aucs[-1], 4),
+        "auc_earlier_avg": round(first_half_avg, 4),
+        "auc_recent_avg": round(second_half_avg, 4),
+        "days_since_last_retrain": latest_age_days,
+        "stalled": stalled,
+        "declining": declining,
+        "below_floor": below_floor,
+        "n_commits": len(ordered),
+    }
+
+
+def _pull_validation_history(n_commits: int = 8) -> list:
+    """Pull validation_report.json across the last n_commits real auto-retrain
+    commits on the HF model repo. Returns [] on any failure (missing creds,
+    network, HF outage) -- the caller (check_adaptive_learning) treats an
+    empty/short history as UNKNOWN, never as a readiness failure caused by
+    something unrelated to the model itself."""
+    import json
+    from config import HF_TOKEN, HF_REPO_ID
+    if not HF_TOKEN or not HF_REPO_ID:
+        logger.warning("adaptive_learning: HF_TOKEN/HF_REPO_ID not set — skipping (status will be UNKNOWN).")
+        return []
+    try:
+        from huggingface_hub import HfApi, hf_hub_download
+        api = HfApi(token=HF_TOKEN)
+        commits = [c for c in api.list_repo_commits(repo_id=HF_REPO_ID) if c.title.startswith("auto-retrain")]
+    except Exception as exc:
+        logger.warning(f"adaptive_learning: could not reach HF Hub: {exc}")
+        return []
+
+    history = []
+    for c in commits[:n_commits]:
+        try:
+            path = hf_hub_download(repo_id=HF_REPO_ID, filename="validation_report.json",
+                                    revision=c.commit_id, token=HF_TOKEN)
+            r = json.loads(Path(path).read_text())
+            r["_commit_at"] = c.created_at
+            history.append(r)
+        except Exception as exc:
+            logger.debug(f"adaptive_learning: skipping commit {c.commit_id[:8]}: {exc}")
+    return history
 
 
 if __name__ == "__main__":

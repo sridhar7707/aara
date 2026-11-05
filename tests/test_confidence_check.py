@@ -3,6 +3,8 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from datetime import datetime, timedelta, timezone
+
 import numpy as np
 import pytest
 from scripts.confidence_check import (
@@ -10,6 +12,7 @@ from scripts.confidence_check import (
     compute_sharpe,
     compute_max_drawdown,
     _max_consecutive_losses,
+    check_adaptive_learning,
 )
 
 
@@ -173,3 +176,76 @@ def test_max_consecutive_losses_zero_is_not_loss():
 
 def test_max_consecutive_losses_single_loss():
     assert _max_consecutive_losses([-0.01]) == 1
+
+
+# --- check_adaptive_learning ---
+#
+# The "adapts and learns" half of the real-money bar, distinct from the
+# performance gate above -- the user's own stated condition is explicitly
+# two-part (good enough performance AND genuine adaptive behavior).
+
+def _history(aucs: list, days_ago_oldest_first: list = None) -> list:
+    """Build a synthetic validation-history list, oldest first. By default
+    spaces entries one week apart ending today (not stale)."""
+    now = datetime.now(timezone.utc)
+    if days_ago_oldest_first is None:
+        n = len(aucs)
+        days_ago_oldest_first = [7 * (n - 1 - i) for i in range(n)]
+    return [
+        {"xgb_val_auc": auc, "_commit_at": now - timedelta(days=d)}
+        for auc, d in zip(aucs, days_ago_oldest_first)
+    ]
+
+
+def test_adaptive_learning_unknown_with_too_little_history():
+    result = check_adaptive_learning(_history([0.55, 0.56]))
+    assert result["status"] == "UNKNOWN"
+
+
+def test_adaptive_learning_unknown_with_no_history():
+    result = check_adaptive_learning([])
+    assert result["status"] == "UNKNOWN"
+
+
+def test_adaptive_learning_passes_on_flat_real_world_pattern():
+    # The actual production pattern found this session: AUC noisy around
+    # ~0.555 for 10 weeks, no real trend -- must not be flagged as failing.
+    aucs = [0.5549, 0.5502, 0.5559, 0.5556, 0.5568, 0.5549, 0.5544, 0.554, 0.5511, 0.5517]
+    result = check_adaptive_learning(_history(aucs))
+    assert result["status"] == "PASS"
+    assert result["stalled"] is False
+    assert result["declining"] is False
+    assert result["below_floor"] is False
+
+
+def test_adaptive_learning_fails_on_genuine_decline():
+    aucs = [0.60, 0.59, 0.58, 0.56, 0.54, 0.52]
+    result = check_adaptive_learning(_history(aucs))
+    assert result["status"] == "FAIL"
+    assert result["declining"] is True
+
+
+def test_adaptive_learning_fails_below_auc_floor():
+    aucs = [0.50, 0.50, 0.50, 0.50]
+    result = check_adaptive_learning(_history(aucs))
+    assert result["status"] == "FAIL"
+    assert result["below_floor"] is True
+
+
+def test_adaptive_learning_fails_when_stalled():
+    # Plenty of history, but the most recent retrain is long overdue --
+    # simulates retrain.yml silently breaking.
+    aucs = [0.555] * 5
+    days_ago = [60, 45, 30, 25, 20]  # most recent is 20 days stale
+    result = check_adaptive_learning(_history(aucs, days_ago))
+    assert result["status"] == "FAIL"
+    assert result["stalled"] is True
+
+
+def test_adaptive_learning_custom_thresholds_override_defaults():
+    aucs = [0.70, 0.60]  # a real decline by default thresholds
+    result = check_adaptive_learning(
+        _history(aucs), max_auc_decline=0.50, min_commits=2,
+    )
+    assert result["status"] == "PASS"
+    assert result["declining"] is False
