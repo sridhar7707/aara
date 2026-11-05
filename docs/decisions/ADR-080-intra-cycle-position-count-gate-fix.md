@@ -106,3 +106,26 @@ Live path: `trade.yml` → `bot/main.py --mode paper --loop`. The change only af
 
 - **2026-11-05 — Proposed.** Found by a fresh `bot/` audit and verified by reading `bot/main.py`: the position snapshot is fetched once per cycle and never refreshed after buys fill.
 - **2026-11-05 — Accepted by ksri77.** Implementation to follow in an isolated worktree per §3, starting with the reproduction test in §5.1 (must fail on current code).
+
+---
+
+## Amendment A1 (Proposed — not in force until accepted by the Architecture Owner)
+
+**Status:** Proposed. Under ADR-058 D4 this amendment carries no authority until landed under ADR-058 D2 by the Architecture Owner.
+
+**Why:** Two findings from the implementation worktree (`intra-cycle-gate`):
+
+1. The fill is recorded in `_handle_entry` (`bot/_main_cycle.py`), which §1 does not name. The §5.1 reproduction calls `_handle_entry` directly, so it can only pass if that file is in scope. The fix already committed (`330ca18`) lives in `bot/main.py` and is verified by the full suite, but the repro still xfails for this reason.
+2. §1 bullet 2 (count submitted-but-unfilled buys toward the cap) cannot be implemented by adding pending symbols to the `positions` dict. `_handle_exits` reads that same dict, so a pending buy would be evaluated for stops and exits with no real position behind it. The clean design is a separate input to the cap check.
+
+**Amended scope (additions to §1 only; §2–§7 unchanged):**
+
+- **Add** `bot/_main_cycle.py`: `_handle_entry` may register a fill in `ctx.positions`. Limited to that one assignment after a recorded fill. No gate logic changes.
+- **Add** `bot/risk/risk_manager.py` `approve_buy`: an optional keyword `pending_count: int = 0` that is added to `len(open_positions)` in the position-cap check. Default `0` keeps current behaviour. `bot/main.py` passes the count of symbols in `buy_order_syms` not already in `positions`.
+- Pending symbols are **never** inserted into `positions`, so `_handle_exits` is unaffected.
+
+**Explicitly still not touched:** gate thresholds, exit and trailing-stop logic, ADR-075 reconciliation, workflows.
+
+**Acceptance criteria:** §5.1 repro must pass with the marker removed; §5.2 (correlated pair) and a new §5.3 test (pending order counts toward the cap, via `pending_count`) must pass; §5.4 no-double-count must pass; full suite green.
+
+**Rollback:** revert the amendment's commit; the `pending_count` default of `0` makes that safe.
