@@ -60,7 +60,6 @@ def _held_positions(symbols):
     return {s: _Pos(s) for s in symbols}
 
 
-@pytest.mark.xfail(strict=True, reason="ADR-080 §5.1: reproduces the stale per-cycle position snapshot; remove this marker in the fix commit")
 def test_same_cycle_buys_respect_position_and_sector_caps(trades_db, ledger_conn, chain):
     assert all(SECTOR_MAP[s] == "Technology" for s in TECH_CANDIDATES)
     assert len(NON_TECH_HOLDINGS) == MAX_POSITIONS - 1  # 7 open, room for exactly 1 more
@@ -93,11 +92,9 @@ def test_same_cycle_buys_respect_position_and_sector_caps(trades_db, ledger_conn
 
 def test_correlated_pair_second_buy_blocked_after_first_fill(trades_db, ledger_conn, chain):
     """ADR-080 §5.2: once the first buy fills, the correlation gate must see it
-    when evaluating a highly correlated second symbol in the same cycle.
-    The placeholder insertion mirrors the fill registration in bot/main.py."""
+    when evaluating a highly correlated second symbol in the same cycle."""
     import numpy as np
     import pandas as pd
-    from types import SimpleNamespace
     from bot._main_positions import BarData
 
     rng = np.random.default_rng(0)
@@ -116,10 +113,37 @@ def test_correlated_pair_second_buy_blocked_after_first_fill(trades_db, ledger_c
             available_cash=50_000.0, tradeable_capital=50_000.0, portfolio_value=100_000.0,
             xgb=_NoDriversXgb(),
         )
-        before = len(client.buys)
         _handle_entry(trades_db, client=client, risk=risk, symbol=symbol, ctx=ctx)
-        if len(client.buys) > before:  # fill registered, as bot/main.py does
-            positions[symbol] = SimpleNamespace(symbol=symbol, qty=1.0, market_value=1_000.0,
-                                                avg_entry_price=100.0, unrealized_plpc=0.0)
 
     assert client.buys == ["AAPL"], f"correlated second buy was not blocked: {client.buys}"
+
+
+def test_pending_buy_order_counts_toward_position_cap(trades_db, ledger_conn, chain):
+    """ADR-080 §5.3: a submitted-but-unfilled buy counts toward MAX_POSITIONS.
+    7 open + 1 pending (BAC, not held) = 8 = cap, so AAPL must be blocked."""
+    positions = _held_positions(NON_TECH_HOLDINGS)
+    client = _CountingFillClient()
+    ctx = _minimal_entry_ctx(
+        ledger_conn, chain,
+        positions=positions, buy_order_syms={"BAC"},
+        available_cash=50_000.0, tradeable_capital=50_000.0, portfolio_value=100_000.0,
+        xgb=_NoDriversXgb(),
+    )
+    _handle_entry(trades_db, client=client, risk=RiskManager(), symbol="AAPL", ctx=ctx)
+    assert client.buys == [], "pending order did not count toward the position cap"
+
+
+def test_filled_position_not_double_counted_when_pending_clears(trades_db, ledger_conn, chain):
+    """ADR-080 §5.4: a symbol that is both pending and now in the positions
+    snapshot (its fill has appeared) must count once. 6 real + AAPL (real, still
+    listed as pending) = 7 -> MSFT is still allowed; double counting would give 8."""
+    positions = _held_positions(NON_TECH_HOLDINGS[:6] + ["AAPL"])
+    client = _CountingFillClient()
+    ctx = _minimal_entry_ctx(
+        ledger_conn, chain,
+        positions=positions, buy_order_syms={"AAPL"},
+        available_cash=50_000.0, tradeable_capital=50_000.0, portfolio_value=100_000.0,
+        xgb=_NoDriversXgb(),
+    )
+    _handle_entry(trades_db, client=client, risk=RiskManager(), symbol="MSFT", ctx=ctx)
+    assert client.buys == ["MSFT"], f"pending symbol double-counted: {client.buys}"

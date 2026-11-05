@@ -284,7 +284,9 @@ def test_min_volume_ratio_gate_unchanged():
 
     cycle_src = (Path(__file__).parent.parent / "bot" / "_main_cycle.py").read_text(encoding="utf-8")
     lines = cycle_src.splitlines()
-    assert lines[172] == "    if ctx.volume_ratio < MIN_VOLUME_RATIO:"  # line 173 (1-indexed)
+    # Located by content, not by line number: ADR-080 A1 added an import line above it.
+    gate_lines = [ln for ln in lines if ln == "    if ctx.volume_ratio < MIN_VOLUME_RATIO:"]
+    assert len(gate_lines) == 1, "Gate 2 volume comparison missing or duplicated"
 
 
 def test_fetch_symbol_spy_rs_trim_before_close_derivation(monkeypatch):
