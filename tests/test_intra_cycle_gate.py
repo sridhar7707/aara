@@ -89,3 +89,37 @@ def test_same_cycle_buys_respect_position_and_sector_caps(trades_db, ledger_conn
         f"{len(NON_TECH_HOLDINGS)} already open; caps allow at most {allowed_new}"
     )
     assert len(NON_TECH_HOLDINGS) + len(client.buys) <= MAX_POSITIONS
+
+
+def test_correlated_pair_second_buy_blocked_after_first_fill(trades_db, ledger_conn, chain):
+    """ADR-080 §5.2: once the first buy fills, the correlation gate must see it
+    when evaluating a highly correlated second symbol in the same cycle.
+    The placeholder insertion mirrors the fill registration in bot/main.py."""
+    import numpy as np
+    import pandas as pd
+    from types import SimpleNamespace
+    from bot._main_positions import BarData
+
+    rng = np.random.default_rng(0)
+    closes = 100 + np.cumsum(rng.normal(0, 1, 80))
+    daily = pd.DataFrame({"close": closes})
+    bars_map = {s: BarData(pd.DataFrame(), daily) for s in ("AAPL", "MSFT")}
+
+    positions: dict = {}
+    client = _CountingFillClient()
+    risk = RiskManager()
+
+    for symbol in ("AAPL", "MSFT"):
+        ctx = _minimal_entry_ctx(
+            ledger_conn, chain,
+            positions=positions, bars_map=bars_map,
+            available_cash=50_000.0, tradeable_capital=50_000.0, portfolio_value=100_000.0,
+            xgb=_NoDriversXgb(),
+        )
+        before = len(client.buys)
+        _handle_entry(trades_db, client=client, risk=risk, symbol=symbol, ctx=ctx)
+        if len(client.buys) > before:  # fill registered, as bot/main.py does
+            positions[symbol] = SimpleNamespace(symbol=symbol, qty=1.0, market_value=1_000.0,
+                                                avg_entry_price=100.0, unrealized_plpc=0.0)
+
+    assert client.buys == ["AAPL"], f"correlated second buy was not blocked: {client.buys}"
