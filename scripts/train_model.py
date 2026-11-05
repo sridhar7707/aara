@@ -3,12 +3,23 @@ Run locally or on HuggingFace ZeroGPU.
 
 Outputs after a successful run:
   models/saved/                   — trained model artefacts (pkl / pt)
-  models/validation_report.json   — XGB val AUC, LSTM val loss, training metadata
+  models/validation_report.json   — XGB val AUC + calibration quality, training metadata.
+                                     lstm_val_loss is a retirement sentinel (ADR-077), not
+                                     a live measurement — see LSTMPredictor below.
   models/feature_importance.json  — XGBoost feature importances (used by dashboard chart)
 
 Walk-forward split: train on all data up to 30 days before today, validate on the last 30 days.
 This keeps the holdout window current regardless of when retraining runs.
 Re-run scripts/download_data.py first if raw data is missing or stale.
+
+LSTM retired from this pipeline (ADR-077, 2026-11-04): 10 straight weekly retrains
+showed identical immediate overfitting (val loss diverges from epoch 3 on, best-ever
+val_loss still above the degraded threshold) regardless of growing training data —
+a structural issue, not a "needs more data" one. LSTMPredictor.train() is left
+callable for a future, separately-scoped experiment; it is simply no longer invoked
+here. bot/strategy/lstm_predictor.py's degradation logic is untouched and still
+correctly excludes it from every live ensemble decision (it already has for 10+
+weeks) via the sentinel this script writes below.
 """
 from __future__ import annotations
 
@@ -22,8 +33,16 @@ from loguru import logger
 from bot.strategy.features import FEATURE_COLS, compute_features
 from bot.strategy.regime_classifier import RegimeClassifier, label_regime
 from bot.strategy.xgb_predictor import XGBPredictor, FORWARD_PERIODS as XGB_FP
-from bot.strategy.lstm_predictor import LSTMPredictor
+from bot.strategy.lstm_predictor import LSTM_DEGRADED_VAL_LOSS
 from config import TRAINING_SYMBOLS, INITIAL_CAPITAL
+
+# Retirement sentinel (ADR-077) — not a real measurement. Must stay strictly
+# greater than LSTM_DEGRADED_VAL_LOSS so LSTMPredictor._check_degradation()
+# keeps setting is_degraded=True, which keeps predict_proba() returning exactly
+# 0.5, which keeps ensemble.py's indeterminate-band detection excluding it from
+# live ensemble weight — exactly the behavior it has already had for 10+ weeks.
+_LSTM_RETIRED_SENTINEL = 1.0
+assert _LSTM_RETIRED_SENTINEL > LSTM_DEGRADED_VAL_LOSS
 
 DATA_DIR = "data/raw"
 
@@ -77,12 +96,6 @@ def main():
     xgb = XGBPredictor()
     xgb.train(df.drop(columns=["symbol", "regime"], errors="ignore"))
 
-    # symbol column is kept so _make_sequences() can group per-symbol,
-    # preventing 60-bar windows that mix data from different companies.
-    logger.info("Training LSTM predictor on full multi-symbol dataset...")
-    lstm = LSTMPredictor()
-    lstm.train(df.drop(columns=["regime"], errors="ignore"))
-
     os.makedirs("models", exist_ok=True)
 
     # ── Validation report ─────────────────────────────────────────────────────
@@ -96,7 +109,11 @@ def main():
         "training_rows":    len(df),
         "date_range":       {"from": date_min, "to": date_max},
         "xgb_val_auc":      round(xgb.val_auc, 4),
-        "lstm_val_loss":    round(lstm.val_loss, 4),
+        # ADR-077 — LSTM retired from this pipeline. Not a real measurement;
+        # see _LSTM_RETIRED_SENTINEL above for why this must stay > 0.58.
+        "lstm_val_loss":    _LSTM_RETIRED_SENTINEL,
+        "lstm_retired":     True,
+        "lstm_retired_since": "2026-11-04",
         # ADR-076 — calibration quality, observation-only, not read by any gate.
         # Computed on the same val split the calibrator was fit on (no third
         # split exists at this data volume); None if calibration fit failed.
@@ -110,8 +127,7 @@ def main():
     with open("models/validation_report.json", "w") as fh:
         json.dump(report, fh, indent=2)
     logger.info(
-        f"Validation report → models/validation_report.json "
-        f"(xgb_auc={report['xgb_val_auc']}, lstm_loss={report['lstm_val_loss']})"
+        f"Validation report → models/validation_report.json (xgb_auc={report['xgb_val_auc']})"
     )
 
     # ── Runtime version snapshot ──────────────────────────────────────────────
@@ -143,8 +159,6 @@ def main():
     from pathlib import Path
     required = {
         "XGBoost model":      Path("models/saved/xgb_predictor.pkl"),
-        "LSTM model":         Path("models/saved/lstm_predictor.pt"),
-        "LSTM scaler":        Path("models/saved/lstm_scaler.pkl"),
         "Regime model":       Path("models/saved/regime_classifier.pkl"),
         "Validation report":  Path("models/validation_report.json"),
         "Feature importance": Path("models/feature_importance.json"),
@@ -160,13 +174,9 @@ def main():
     logger.info("All models trained and verified successfully.")
 
     # ── Model quality gate ────────────────────────────────────────────────────
-    from bot.strategy.lstm_predictor import LSTM_DEGRADED_VAL_LOSS
+    # LSTM excluded (ADR-077) — its degraded state is a settled, intentional
+    # retirement now, not a weekly quality anomaly to flag.
     _issues = []
-    if report["lstm_val_loss"] > LSTM_DEGRADED_VAL_LOSS:
-        _issues.append(
-            f"LSTM val_loss={report['lstm_val_loss']:.4f} > {LSTM_DEGRADED_VAL_LOSS} "
-            f"(model outputs logit≈0; retrain with more data or tune hyperparameters)"
-        )
     if report["xgb_val_auc"] < 0.52:
         _issues.append(
             f"XGB val_auc={report['xgb_val_auc']:.4f} < 0.52 (near coin-flip; check feature quality)"
@@ -176,7 +186,7 @@ def main():
         for issue in _issues:
             logger.warning(f"  • {issue}")
     else:
-        logger.info(f"Model quality OK — xgb_auc={report['xgb_val_auc']:.4f}, lstm_loss={report['lstm_val_loss']:.4f}")
+        logger.info(f"Model quality OK — xgb_auc={report['xgb_val_auc']:.4f}")
 
 
 if __name__ == "__main__":
