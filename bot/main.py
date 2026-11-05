@@ -6,6 +6,7 @@ import os
 import sqlite3
 import sys
 import time
+from types import SimpleNamespace
 import traceback
 from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -431,6 +432,11 @@ def run(
             if _deployed > 0.0:
                 _remaining_tradeable = max(0.0, _remaining_tradeable - _deployed)
                 _cycle_deployed_notional += _deployed
+                # ADR-080: register the fill so every later gate in this cycle counts it
+                positions[symbol] = SimpleNamespace(
+                    symbol=symbol, qty=_deployed / current_price, market_value=_deployed,
+                    avg_entry_price=current_price, unrealized_plpc=0.0,
+                )
 
             _sym_errors.pop(symbol, None)   # reset failure streak on success
 
