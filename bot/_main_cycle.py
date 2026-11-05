@@ -354,6 +354,13 @@ def _handle_entry(
                     f"({slippage_bps:+.1f} bps vs limit ${ctx.current_price:.2f})"
                 )
             fill_shares = notional / fill_price
+            # ADR-080 §1: register the confirmed fill before any fallible write, so a
+            # DB/ledger exception below cannot leave the cap and sector gates blind to it
+            ctx.buy_order_syms.discard(symbol)  # order is now filled, not pending
+            ctx.positions[symbol] = SimpleNamespace(
+                symbol=symbol, qty=fill_shares, market_value=notional,
+                avg_entry_price=fill_price, unrealized_plpc=0.0,
+            )
             _drivers = ctx.xgb.explain(ctx.latest)
             recorder.record_executed(notional, fill_price, fill_shares,
                                      stop_pct, tp_target_pct, rr_ratio, xgb_drivers=_drivers)
@@ -417,12 +424,6 @@ def _handle_entry(
                         confidence=int(ctx.xgb_prob * 100), status="executed")
             _upsert_position_state(con, symbol, fill_price, fill_price, ctx.current_atr, fill_shares)
             available_cash -= notional
-            ctx.buy_order_syms.discard(symbol)  # order is now filled, not pending
-            # ADR-080 §1: register the fill so later gates in this cycle count it
-            ctx.positions[symbol] = SimpleNamespace(
-                symbol=symbol, qty=fill_shares, market_value=notional,
-                avg_entry_price=fill_price, unrealized_plpc=0.0,
-            )
             _report_execution_outcome_safe(
                 ctx.trust_conn, symbol, "BUY", "EXECUTED",
                 side="buy", outcome="FILLED", is_paper=_is_paper_execution,
@@ -431,6 +432,9 @@ def _handle_entry(
             )
         else:
             _fail_reason = "order submitted but did not fill within timeout"
+            # ADR-080 A1: the order may still fill at the broker, so keep it pending for
+            # the rest of this cycle (restrictive only; the next cycle re-reads open orders)
+            ctx.buy_order_syms.add(symbol)
             logger.warning(f"BUY {symbol} order did not fill — position state NOT recorded")
             recorder.record_order_not_filled(_fail_reason)
             _report_execution_outcome_safe(
