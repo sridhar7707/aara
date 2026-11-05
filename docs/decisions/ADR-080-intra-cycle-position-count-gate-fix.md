@@ -109,9 +109,9 @@ Live path: `trade.yml` → `bot/main.py --mode paper --loop`. The change only af
 
 ---
 
-## Amendment A1 (Proposed — not in force until accepted by the Architecture Owner)
+## Amendment A1 (Accepted by ksri77, 2026-11-05)
 
-**Status:** Proposed. Under ADR-058 D4 this amendment carries no authority until landed under ADR-058 D2 by the Architecture Owner.
+**Status:** Accepted by ksri77 on 2026-11-05. Implementation note: the cap count is computed in `_handle_entry` (`bot/_main_cycle.py`) from `buy_order_syms` and `positions`, not passed in from `bot/main.py`. The fill registration lives in `_handle_entry` too, so `bot/main.py` carries no change from this ADR.
 
 **Why:** Two findings from the implementation worktree (`intra-cycle-gate`):
 
