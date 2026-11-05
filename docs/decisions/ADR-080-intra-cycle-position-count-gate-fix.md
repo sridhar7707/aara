@@ -1,8 +1,8 @@
 # ADR-080: ADR-002 Exception — Intra-Cycle Position-Count and Sector Gate Fix
 
-**Status:** Proposed
+**Status:** Accepted
 **Date Proposed:** 2026-11-05
-**Date Accepted:** _(pending — see Acceptance)_
+**Date Accepted:** 2026-11-05
 **Decision Type:** Narrow ADR-002 exception, prospective. Fixes a verified gap where risk gates read a per-cycle position snapshot that is never refreshed after a buy fills, so several buys in one cycle can together exceed MAX_POSITIONS and per-sector limits.
 
 ---
@@ -96,12 +96,13 @@ Live path: `trade.yml` → `bot/main.py --mode paper --loop`. The change only af
 
 *(Per ADR-058 D4, this document is a proposal and carries no authority until it is landed under ADR-058 D2, by explicit act of the Architecture Owner.)*
 
-**Status:** Proposed
-**Date Accepted:** _(pending)_
-**Accepted By:** _(pending — Architecture Owner)_
+**Status:** Accepted
+**Date Accepted:** 2026-11-05
+**Accepted By:** ksri77
 
 ---
 
 ## Status Log
 
 - **2026-11-05 — Proposed.** Found by a fresh `bot/` audit and verified by reading `bot/main.py`: the position snapshot is fetched once per cycle and never refreshed after buys fill.
+- **2026-11-05 — Accepted by ksri77.** Implementation to follow in an isolated worktree per §3, starting with the reproduction test in §5.1 (must fail on current code).
