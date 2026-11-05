@@ -18,6 +18,7 @@ from tests.phase1a.test_decision_capture_integration import (  # reuse real fixt
     chain,
     ledger_conn,
     trades_db,
+    _clear_candidate_cache,  # autouse fixture: must stay imported, not unused
 )
 
 # Real symbols from SECTOR_MAP so the sector gate runs against real config.
