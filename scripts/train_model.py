@@ -76,7 +76,13 @@ def load_combined(cutoff: str | None = None) -> pd.DataFrame:
         # ADR-081 1.1 / 1.4: labels are built per symbol, before frames are combined,
         # so their forward windows never cross tickers.
         df["regime"] = label_regime(df)
-        df["target"] = forward_target(df["close"])
+        # ADR-081 1.6: label = beats SPY over the horizon. The absolute-return label was
+        # dominated by market drift (base rate 0.40-0.71 by year) and the model learned the market.
+        if spy_close is None:
+            raise FileNotFoundError("SPY.csv is required for the excess-over-SPY target (ADR-081 1.6)")
+        df["target"] = forward_target(df["close"], benchmark_close=spy_close)
+        if sym == "SPY":
+            df["target"] = float("nan")  # the benchmark has no excess return against itself
         df["symbol"] = sym
         frames.append(df)
     if not frames:

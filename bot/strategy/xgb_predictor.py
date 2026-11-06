@@ -19,12 +19,27 @@ FORWARD_PERIODS = 21   # 1-month target — aligned with MAX_HOLD_DAYS=45 medium
 MIN_MOVE_PCT    = 0.003  # require ≥0.3% move to label as "up" — filters 5-min microstructure noise
 
 
-def forward_target(close: pd.Series) -> pd.Series:
-    """Binary target for ONE symbol: 1 if the close FORWARD_PERIODS bars ahead is at
-    least MIN_MOVE_PCT higher. Must be applied per symbol before frames are combined
-    (ADR-081 1.1): on a combined frame the shift crosses tickers."""
-    fwd = (close.shift(-FORWARD_PERIODS) - close) / close
-    return (fwd > MIN_MOVE_PCT).astype(int)
+def forward_target(close: pd.Series, benchmark_close: pd.Series | None = None) -> pd.Series:
+    """Binary target for ONE symbol. Must be applied per symbol before frames are combined
+    (ADR-081 1.1): on a combined frame the shift crosses tickers.
+
+    Without a benchmark: 1 if the close FORWARD_PERIODS bars ahead is at least
+    MIN_MOVE_PCT higher. That label is dominated by market drift (base rate 0.40-0.71
+    by year), so the model learned the market, not the stock.
+
+    With a benchmark (ADR-081 1.6): 1 if the stock's forward return beats the benchmark's
+    over the same bars. Base rate is about 0.50, and the market drift is removed.
+    Rows where the benchmark has no value are NaN, so they are dropped.
+    """
+    stock_fwd = (close.shift(-FORWARD_PERIODS) - close) / close
+    if benchmark_close is None:
+        return (stock_fwd > MIN_MOVE_PCT).astype(int)
+    # Benchmark forward return is computed on the benchmark's own dates, then aligned,
+    # so gaps in the stock's bars cannot shift the benchmark window.
+    bench_fwd = ((benchmark_close.shift(-FORWARD_PERIODS) - benchmark_close) / benchmark_close)
+    bench_fwd = bench_fwd.reindex(close.index)
+    target = ((stock_fwd - bench_fwd) > 0).astype(float)
+    return target.where(stock_fwd.notna() & bench_fwd.notna())
 
 
 def time_split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:

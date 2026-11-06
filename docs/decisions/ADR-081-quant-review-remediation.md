@@ -147,3 +147,26 @@ A local retrain on the corrected pipeline was run from the worktree. Nothing was
 ## Status log (addition)
 
 - **2026-11-06 — Accepted by ksri77** ("yes fix all"). Implemented Tiers 1–4 where listed above. Tier 1 retrain shows holdout AUC 0.510 with early stopping at tree 0.
+
+## XGB investigation: tree-0 early stop (2026-11-06)
+
+**Question:** why did XGB early stopping halt at tree 0 on the corrected per-symbol labels?
+
+**Findings (scratch probes, not committed):**
+- The absolute-return target has base rate 0.40–0.71 by year (overall 0.58). The validation slice is at 0.52 against a training rate of 0.60. Validation log loss at tree 0 (0.7045) equals a constant predictor at the training base rate. Early stopping reacted to base-rate drift, not to missing features.
+- Univariate AUCs on train and holdout cluster at 0.47–0.53. The features carry little signal individually.
+- Under the absolute-return label the target is mostly market direction. The model was learning the market, not the stock.
+
+**Fix applied (ADR-081 1.6):** the target is now "stock beats SPY over the same 21 bars". The benchmark is computed on SPY's own dates and aligned. SPY's own target is NaN. Base rate is about 0.50. Tests in `tests/test_model_validity.py`.
+
+**Retrain on the excess target (local, not deployed):**
+- Early stopping: tree 50 (was tree 0). Validation log loss is no longer degenerate.
+- Holdout AUC: **0.520**. Holdout log loss ≈ 0.696, above the no-skill value of 0.693.
+- Regularised variants (depth 2–3, larger min child weight), selected on validation: holdout AUC 0.509–0.514.
+- Probe with no early stopping (400 trees): holdout AUC 0.538. Single run, sensitive to the stopping point. Standard error for the holdout is roughly 0.015 (effective n ≈ holdout / 21).
+
+**Conclusion:** the pipeline is now correct, and the model shows **no demonstrated out-of-sample skill** for 21-day excess returns with these 22 features in this period. The earlier 0.556 was the contaminated label. The corrected model must not be deployed as a signal.
+
+**Consequence for live gates:** about 77% of holdout predictions clear the live `XGB_MIN_CONFIDENCE` of 0.52. The gate would no longer select candidates. Any deployment of a retrained model therefore needs the threshold reconsidered together with the model. That is a trading decision and is not made here.
+
+**Not done, and why:** no model is deployed or uploaded to HuggingFace. The live bot still loads the HF model trained on the old labels. Improving the features is a research task, not a bug fix.
