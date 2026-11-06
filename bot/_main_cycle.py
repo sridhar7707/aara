@@ -432,7 +432,11 @@ def _handle_entry(
             )
         else:
             _fail_reason = "order submitted but did not fill within timeout"
-            # wait_for_fill() has already cancelled this order, so it is not pending.
+            # Fail closed: wait_for_fill() attempts a cancel but returns 0 whether or not
+            # the cancel succeeded, so the order may still be live at the broker. Keep the
+            # symbol pending for the rest of this cycle. Cost: one cap slot until the next
+            # cycle re-reads open orders. Cancel-result detail is a known gap (ADR-080 review notes).
+            ctx.buy_order_syms.add(symbol)
             logger.warning(f"BUY {symbol} order did not fill — position state NOT recorded")
             recorder.record_order_not_filled(_fail_reason)
             _report_execution_outcome_safe(

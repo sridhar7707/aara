@@ -106,6 +106,8 @@ Live path: `trade.yml` → `bot/main.py --mode paper --loop`. The change only af
 
 - **2026-11-05 — Proposed.** Found by a fresh `bot/` audit and verified by reading `bot/main.py`: the position snapshot is fetched once per cycle and never refreshed after buys fill.
 - **2026-11-05 — Accepted by ksri77.** Implementation to follow in an isolated worktree per §3, starting with the reproduction test in §5.1 (must fail on current code).
+- **2026-11-05 — Amendment A1 accepted by ksri77.** Scope extended to `bot/_main_cycle.py` and `approve_buy(pending_count)`.
+- **2026-11-06 — Implemented on branch `worktree-intra-cycle-gate` (PR #5).** §5.1–§5.4 tests pass with the xfail removed; full suite green. Review notes below record the accepted gaps; the owner decides on them before or after merge.
 
 ---
 
@@ -134,7 +136,7 @@ Live path: `trade.yml` → `bot/main.py --mode paper --loop`. The change only af
 
 Found in code review of PR #5. Each item is either fixed in the branch or recorded as a known gap.
 
-- **Fixed:** a timed-out buy was marked pending. `wait_for_fill()` cancels the order before returning 0, so the mark blocked later symbols for an order that was already dead. The mark is removed.
+- **Decided (fail closed):** a timed-out buy stays pending for the rest of the cycle. `wait_for_fill()` attempts a cancel but returns 0 whether or not the cancel succeeded, so the order may still be live. Keeping the symbol pending costs one cap slot until the next cycle; dropping it could let a live order breach the cap. The cost is accepted.
 - **Fixed:** the Telegram sector figure counted the just-filled position twice. Cosmetic only; the alert is currently a no-op.
 - **Known gap, not fixed:** sector gates (`sector_check`, Gate 8c) read only `positions`. A same-sector order still pending from a previous cycle is counted toward the position cap but not toward sector limits. A1 scoped pending to the cap only. Needs an owner decision.
 - **Known gap, out of scope:** `bot/execution/alpaca_client.py` `wait_for_fill()` reads `filled_qty` before cancelling. A fill that lands between that read and the cancel is returned as 0 and not recorded this cycle. Fixing it means changing the broker client, which needs its own ADR.

@@ -156,9 +156,9 @@ class _TimeoutFirstClient(_CountingFillClient):
         return 0.0 if order_id == f"ord-{self.buys[0]}" else 10.0
 
 
-def test_timed_out_order_is_cancelled_and_does_not_block_later_symbols(trades_db, ledger_conn, chain):
-    """wait_for_fill() cancels a timed-out order before returning 0, so the
-    symbol must not stay pending and must not consume a cap slot."""
+def test_timed_out_order_fails_closed_for_the_rest_of_the_cycle(trades_db, ledger_conn, chain):
+    """Fail closed: a timed-out order's cancel result is unknown, so the symbol stays
+    pending for the rest of the cycle and blocks the same symbol and one cap slot."""
     positions = _held_positions(NON_TECH_HOLDINGS)
     buy_order_syms: set = set()
     client = _TimeoutFirstClient()
@@ -171,8 +171,9 @@ def test_timed_out_order_is_cancelled_and_does_not_block_later_symbols(trades_db
             xgb=_NoDriversXgb(),
         )
         _handle_entry(trades_db, client=client, risk=risk, symbol=symbol, ctx=ctx)
-    assert client.buys == ["AAPL", "MSFT"], f"cancelled order blocked a later symbol: {client.buys}"
-    assert "AAPL" not in buy_order_syms and "AAPL" not in positions
+    # 7 open + AAPL pending = 8 = MAX_POSITIONS, so MSFT must be blocked.
+    assert client.buys == ["AAPL"], f"timed-out order did not hold its cap slot: {client.buys}"
+    assert "AAPL" in buy_order_syms and "AAPL" not in positions
 
 
 def test_fill_registered_even_if_trade_log_write_fails(trades_db, ledger_conn, chain, monkeypatch):
