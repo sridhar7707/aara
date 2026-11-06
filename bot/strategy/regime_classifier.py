@@ -74,7 +74,11 @@ class RegimeClassifier:
 
     def train(self, df: pd.DataFrame) -> None:
         df = df.copy().reset_index(drop=True)
-        df["regime"] = label_regime(df)
+        # ADR-081 1.4: labels must come from label_regime() applied PER SYMBOL before
+        # frames are combined. Recomputing here on a combined frame crosses tickers.
+        if "regime" not in df.columns:
+            raise ValueError("RegimeClassifier.train needs per-symbol 'regime' labels "
+                             "(label_regime() applied per symbol before combining)")
         mask = df[REGIME_FEATURES].notna().all(axis=1)
         X = df.loc[mask, REGIME_FEATURES]
         y = df.loc[mask, "regime"]

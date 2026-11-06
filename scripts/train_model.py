@@ -8,8 +8,9 @@ Outputs after a successful run:
                                      a live measurement — see LSTMPredictor below.
   models/feature_importance.json  — XGBoost feature importances (used by dashboard chart)
 
-Walk-forward split: train on all data up to 30 days before today, validate on the last 30 days.
-This keeps the holdout window current regardless of when retraining runs.
+Split (ADR-081 1.2): rows before TRAIN_CUTOFF (30 days before today) are split in time into
+train (70%), early-stopping validation (15%) and holdout (15%), with a purge at each boundary.
+The reported AUC and calibration use the holdout only. The holdout is NOT the last 30 days.
 Re-run scripts/download_data.py first if raw data is missing or stale.
 
 LSTM retired from this pipeline (ADR-077, 2026-11-04): 10 straight weekly retrains
@@ -32,7 +33,7 @@ import pandas as pd
 from loguru import logger
 from bot.strategy.features import FEATURE_COLS, compute_features
 from bot.strategy.regime_classifier import RegimeClassifier, label_regime
-from bot.strategy.xgb_predictor import XGBPredictor, FORWARD_PERIODS as XGB_FP
+from bot.strategy.xgb_predictor import XGBPredictor, FORWARD_PERIODS as XGB_FP, forward_target
 from bot.strategy.lstm_predictor import LSTM_DEGRADED_VAL_LOSS
 from config import TRAINING_SYMBOLS, INITIAL_CAPITAL
 
@@ -46,7 +47,7 @@ assert _LSTM_RETIRED_SENTINEL > LSTM_DEGRADED_VAL_LOSS
 
 DATA_DIR = "data/raw"
 
-# Rolling 30-day holdout: train on everything before this date, validate on last 30 days.
+# Training cutoff: rows before this date are used. The final 15% of them is the holdout (ADR-081 1.2).
 # Recomputed at runtime so the model is never trained on stale out-of-distribution data.
 _HOLDOUT_DAYS = 30
 TRAIN_CUTOFF = (datetime.now(timezone.utc) - timedelta(days=_HOLDOUT_DAYS)).strftime("%Y-%m-%d")
@@ -72,7 +73,10 @@ def load_combined(cutoff: str | None = None) -> pd.DataFrame:
         if cutoff:
             df = df[df.index < cutoff]
         df = compute_features(df, spy_close=spy_close)
+        # ADR-081 1.1 / 1.4: labels are built per symbol, before frames are combined,
+        # so their forward windows never cross tickers.
         df["regime"] = label_regime(df)
+        df["target"] = forward_target(df["close"])
         df["symbol"] = sym
         frames.append(df)
     if not frames:

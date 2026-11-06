@@ -303,6 +303,10 @@ def kelly_fraction(con: sqlite3.Connection, symbol: str, default: float = BUY_FR
     win_rate = len(wins) / len(pnls)
     b        = (sum(wins) / len(wins)) / (sum(losses) / len(losses))
     kelly    = (win_rate * b - (1 - win_rate)) / b
+    # ADR-081 2.5: a non-positive edge sizes to zero (no entry), not to the 2% floor.
+    if kelly <= 0:
+        logger.debug(f"Kelly {symbol}: non-positive edge (kelly={kelly:.3f}) — sized to 0")
+        return 0.0
     half_k   = max(0.02, min(KELLY_FRACTION_MAX, kelly * 0.5))
     logger.debug(f"Kelly {symbol}: win_rate={win_rate:.2f}, b={b:.2f}, half_f={half_k:.3f}")
     return half_k

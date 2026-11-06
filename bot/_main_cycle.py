@@ -185,7 +185,8 @@ def _handle_entry(
         risk=risk, news_data_timestamp=ctx.news_data_timestamp,
     )
 
-    # Gate 0 — VIX emergency halt: no new positions when VIX >= 40
+    # Gate 0 — VIX emergency halt: set by the macro module (threshold MACRO_HALT_VIX in config.py;
+    # ADR-081 4.1 corrected a stale "VIX >= 40" comment here)
     if ctx.macro_halt:
         _log_buy_skip(symbol, "VIX emergency halt")
         recorder.reject("vix_halt", "VIX emergency halt")
@@ -266,9 +267,9 @@ def _handle_entry(
                 return available_cash
 
     # Gate 8 — Cash and risk approval
-    # ensemble_size: STRONG_BUY=0.20, BUY=0.12 — use as confidence multiplier on Kelly
+    # ensemble_size: STRONG_BUY=0.10, BUY=0.08 (ensemble.py) — used as a confidence multiplier on Kelly
     kelly_f      = _kelly_fraction(con, symbol)
-    confidence   = ctx.ensemble_size / BUY_FRACTION  # 1.0 for BUY, 1.67 for STRONG_BUY
+    confidence   = ctx.ensemble_size / BUY_FRACTION  # 1.0 for BUY, 1.25 for STRONG_BUY (0.10 / 0.08; ADR-081 4.2)
     pos_fraction = min(kelly_f * ctx.macro_cap * confidence, KELLY_FRACTION_MAX)
 
     # Reinvestment guard: tradeable_capital is pre-computed once per cycle by main.py
@@ -296,7 +297,9 @@ def _handle_entry(
         stop_pct = STOP_LOSS_PCT
         tp_target_pct = _TP_FLOOR
 
-    # Gate 8a — Minimum absolute profit target: not worth entering if upside < MIN_TP_PCT
+    # Gate 8a — Minimum absolute profit target: not worth entering if upside < MIN_TP_PCT.
+    # ADR-081 4.3: unreachable while the take-profit floor (_TP_FLOOR) is above MIN_TP_PCT.
+    # Kept as a guard for any future change to the TP floor or ATR-based TP.
     if tp_target_pct < MIN_TP_PCT:
         _detail = f"TP target {tp_target_pct:.1%} < min {MIN_TP_PCT:.1%}"
         _log_buy_skip(symbol, _detail)

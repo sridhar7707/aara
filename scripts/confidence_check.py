@@ -13,6 +13,7 @@ import bot.monitor.telegram_bot as tg
 THRESHOLDS = {
     "min_days": 60,
     "min_win_rate": 0.52,
+    "min_win_rate_trades": 30,  # ADR-081 3.2: fewer closed exits than this is UNKNOWN, not a pass
     "min_sharpe": 1.0,
     "max_drawdown": 0.15,
     "max_consecutive_losing_days": 4,
@@ -96,9 +97,13 @@ def run_check():
     end = datetime.fromisoformat(timestamps[-1])
     days_trading = (end - start).days
 
-    sell_trades = [t for t in trades if t[1].startswith("SELL")]
+    # ADR-081 3.1: only real exits count. SELL_RECONCILE records a broker read, and
+    # SELL_TRIM is a partial exit, so neither is a trade outcome.
+    sell_trades = [t for t in trades
+                   if t[1].startswith("SELL") and t[1] not in ("SELL_RECONCILE", "SELL_TRIM")]
     wins = sum(1 for t in sell_trades if t[2] > 0)
     win_rate = wins / len(sell_trades) if sell_trades else 0.0
+    wr_low, wr_high = wilson_interval(wins, len(sell_trades))
 
     # Use daily snapshots for Sharpe/drawdown/streaks — trade-row values inflate Sharpe
     # by excluding quiet (no-trade) days from the denominator.
@@ -125,7 +130,13 @@ def run_check():
 
     results = {
         "Days trading":          (days_trading, THRESHOLDS["min_days"], days_trading >= THRESHOLDS["min_days"]),
-        "Win rate":              (f"{win_rate:.1%}", f"{THRESHOLDS['min_win_rate']:.1%}", win_rate >= THRESHOLDS["min_win_rate"]),
+        # ADR-081 3.2: below the sample floor the result is UNKNOWN and cannot pass readiness.
+        "Win rate":              (f"{win_rate:.1%} (n={len(sell_trades)}, 95% CI {wr_low:.0%}-{wr_high:.0%})"
+                                  + ("" if len(sell_trades) >= THRESHOLDS["min_win_rate_trades"]
+                                     else " UNKNOWN: below sample floor"),
+                                  f"{THRESHOLDS['min_win_rate']:.1%}",
+                                  len(sell_trades) >= THRESHOLDS["min_win_rate_trades"]
+                                  and win_rate >= THRESHOLDS["min_win_rate"]),
         "Sharpe ratio":          (f"{sharpe:.2f}", f"{THRESHOLDS['min_sharpe']:.2f}", sharpe >= THRESHOLDS["min_sharpe"]),
         "Max drawdown":          (f"{max_dd:.1%}", f"{THRESHOLDS['max_drawdown']:.1%}", max_dd <= THRESHOLDS["max_drawdown"]),
         "Max consec losing days":(max_consec_loss, THRESHOLDS["max_consecutive_losing_days"], max_consec_loss <= THRESHOLDS["max_consecutive_losing_days"]),
@@ -165,6 +176,17 @@ def run_check():
     else:
         logger.warning("NOT READY — Keep paper trading.")
     return all_pass
+
+
+def wilson_interval(wins: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson score interval for a win rate. (0, 1) when n is 0 (no information)."""
+    if n == 0:
+        return 0.0, 1.0
+    p = wins / n
+    denom = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / denom
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5) / denom
+    return max(0.0, centre - half), min(1.0, centre + half)
 
 
 def _max_consecutive_losses(day_returns):

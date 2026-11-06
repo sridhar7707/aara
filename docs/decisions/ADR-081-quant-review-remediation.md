@@ -1,6 +1,6 @@
 # ADR-081: Quant Review Remediation
 
-**Status:** Proposed (not in force until accepted by the Architecture Owner under ADR-058 D2)
+**Status:** Accepted by ksri77 on 2026-11-06 ("yes fix all"). Implementation status per item is in the section "Implementation status" below. Items not implemented are owner decisions or larger work, and are listed there.
 **Date Proposed:** 2026-11-06
 **Decision Type:** Remediation plan for findings from a full-codebase quant review. Each item names its own scope, tier and tests. Items marked **ADR-002** need an isolated worktree and named scope before code changes.
 
@@ -101,3 +101,49 @@ Each tier reverts independently. Tier 1 reverts by restoring the previous model 
 ## Status Log
 
 - **2026-11-06 — Proposed.** Drafted from the full-codebase quant review. Item 1.1 verified against code; the rest pending per-item confirmation.
+
+---
+
+## Implementation status (2026-11-06)
+
+Full suite: 1508 passed, 12 skipped, 0 failed.
+
+| # | Item | Status | Where / test |
+|---|------|--------|--------------|
+| 1.1 | Per-symbol forward target | **Done** | `forward_target()` applied per symbol in `scripts/train_model.py`; `XGBPredictor.train` refuses a frame without a per-symbol target. `tests/test_model_validity.py` |
+| 1.2 | Three-way split, holdout not used for early stopping | **Done** | `time_split()` in `bot/strategy/xgb_predictor.py`: 70 / 15 / 15 with purge. Reported AUC and calibration use holdout only. Tests check disjointness and purge gaps |
+| 1.3 | Effective-N reporting, purge | **Partly done** | Purge is in. Logged holdout line reports effective n ≈ n / horizon. A proper standard error is not computed yet |
+| 1.4 | Regime labels recomputed on combined frame | **Done** | `RegimeClassifier.train` refuses frames without per-symbol labels (`bot/strategy/regime_classifier.py`). Test in `tests/test_model_validity.py` |
+| 1.5 | `FWD_VOL_THRESHOLD` vs. single-stock volatility | **Not done: owner decision** | Needs the per-regime label distribution on the corrected labels before a threshold is chosen. Also decide whether HIGH_VOLATILITY should pass Gate 1 |
+| 2.1 | Earnings gate fails open and caches the failure | **Done** | Exceptions block the symbol for that cycle and are not cached (`bot/_main_market.py`). Tests in `tests/test_quant_tier2.py` |
+| 2.2 | Partial fills recorded at requested notional | **Not done** | Touches the ADR-075 pool debit. Needs owner review of the pool path |
+| 2.3 | Logged stop differs from enforced stop | **Not done: owner decision** | Choose one definition and a cap on ATR widening |
+| 2.4 | Sizing base decays within a cycle | **Not done: owner decision** | Fix is to use start-of-cycle capital. Sizing is a governed decision |
+| 2.5 | Kelly floor applies to a negative edge | **Done** | Non-positive edge sizes to 0 (`bot/risk/risk_manager.py`). The existing test `test_kelly_fraction_minimum_floor` encoded the old floor and was updated to `test_kelly_fraction_negative_edge_sizes_to_zero`. Tests in `tests/test_quant_tier2.py` |
+| 3.1 | Win rate counts `SELL_RECONCILE` / `SELL_TRIM` | **Done** | Excluded in `scripts/confidence_check.py` |
+| 3.2 | No sample-size floor on win rate | **Done** | Wilson 95% interval is shown. Below 30 closed exits the row is marked UNKNOWN and cannot pass readiness. Tests in `tests/test_confidence_readiness.py` |
+| 3.3 | Walk-forward "out-of-sample" uses the deployed model | **Not done** | Needs a per-window model train. Larger harness change |
+| 3.4 | Backtest parameters differ from live | **Not done** | Needs a parity table, then alignment |
+| 4.1 | VIX comment says 40; actual halt is `MACRO_HALT_VIX=28` | **Done** | Comment corrected (`bot/_main_cycle.py`) |
+| 4.2 | STRONG_BUY ratio comment | **Done** | Comment corrected to 0.10 / 0.08 = 1.25 |
+| 4.3 | Unreachable MIN_TP gate | **Done (documented)** | Kept as a guard, comment says why |
+| 4.4 | Correlation gate fails open on missing bars | **Not done: owner decision** | Either document as accepted or fail closed |
+| 4.5 | Sentiment unvalidated | **Not done: owner decision** | Document or remove from score |
+| 4.6 | Calibration margin note | **Not done** | Documentation only, low value |
+
+## Retrain result (local, not deployed)
+
+A local retrain on the corrected pipeline was run from the worktree. Nothing was uploaded to HuggingFace, and the tracked `models/` report files were restored, so no artifacts are committed.
+
+- Training rows: 199,485 across 45 symbols (2008-01-03 to 2026-07-22, cutoff 2026-10-07).
+- XGB early stopping stopped at **tree 0**. The validation log loss did not improve after the first tree.
+- Holdout AUC: **0.510** (previously reported 0.556 on the contaminated target).
+- Calibration Brier raw 0.2466, calibrated 0.2456, ECE 0.0187.
+
+**Reading:** the earlier 0.556 was an artifact of the cross-symbol target, as the review predicted. With the corrected target the features show no measurable skill at this configuration. Early stopping at tree 0 needs its own check before the result is trusted. It could be a real absence of signal, or a problem in the feature set or the learning rate. Until that is resolved, the live XGB model's skill is **not established**.
+
+**Consequence for live trading:** the bot currently runs the model trained on the old labels. Do not treat its performance history as evidence of skill. Deploying the corrected model is a separate decision and needs the early-stopping question answered first.
+
+## Status log (addition)
+
+- **2026-11-06 — Accepted by ksri77** ("yes fix all"). Implemented Tiers 1–4 where listed above. Tier 1 retrain shows holdout AUC 0.510 with early stopping at tree 0.
