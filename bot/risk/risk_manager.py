@@ -298,8 +298,11 @@ def kelly_fraction(con: sqlite3.Connection, symbol: str, default: float = BUY_FR
     pnls   = [r[0] for r in rows]
     wins   = [p for p in pnls if p > 0]
     losses = [abs(p) for p in pnls if p <= 0]
-    if not wins or not losses:
+    if not losses:  # no losing trade observed: keep the default size (ADR-081 2.5)
         return default
+    if not wins:    # 10+ trades, every one a loss: a negative edge sizes to zero, not the default
+        logger.debug(f"Kelly {symbol}: no winning trades in {len(pnls)} — sized to 0")
+        return 0.0
     win_rate = len(wins) / len(pnls)
     b        = (sum(wins) / len(wins)) / (sum(losses) / len(losses))
     kelly    = (win_rate * b - (1 - win_rate)) / b

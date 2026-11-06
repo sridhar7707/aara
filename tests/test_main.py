@@ -276,12 +276,12 @@ def test_kelly_fraction_returns_default_when_all_wins(db):
     assert result == BUY_FRACTION
 
 
-def test_kelly_fraction_returns_default_when_all_losses(db):
-    from bot.strategy.ensemble import BUY_FRACTION
+def test_kelly_fraction_all_losses_sizes_to_zero(db):
+    # ADR-081 2.5 follow-up: 15 losing trades and no win is a negative edge -> no entry.
     for _ in range(15):
         _insert_sell(db, "AAPL", -0.05)
     result = _kelly_fraction(db, "AAPL")
-    assert result == BUY_FRACTION
+    assert result == 0.0
 
 
 def test_kelly_fraction_positive_edge_is_bounded(db):
