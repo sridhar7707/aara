@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"c:\\Users\\ksri7\\projects\\ai-trading-bot\\.claude\\worktrees\\intra-cycle-gate\" && python scripts/post_commit_review.py",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/post_commit_review.py\"",
             "if": "Bash(git commit*)",
             "shell": "bash",
             "timeout": 60,
