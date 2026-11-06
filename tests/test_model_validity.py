@@ -87,3 +87,33 @@ def test_regime_train_refuses_a_frame_without_per_symbol_labels():
     df = pd.DataFrame({"close": np.linspace(1, 2, 50)}, index=idx)
     with pytest.raises(ValueError, match="per-symbol 'regime' labels"):
         RegimeClassifier.__new__(RegimeClassifier).train(df)
+
+
+def test_excess_target_is_one_only_when_beating_the_benchmark():
+    """ADR-081 1.6: label is 'beats SPY over the horizon', not 'goes up'."""
+    idx = pd.date_range("2024-01-01", periods=80, freq="B")
+    bench = pd.Series(np.full(80, 100.0), index=idx)            # flat benchmark
+    rising = pd.Series(np.linspace(100, 150, 80), index=idx)    # outperforms the flat benchmark
+    tracking = bench.copy()                                     # identical to benchmark
+    t_rise = forward_target(rising, benchmark_close=bench)
+    t_track = forward_target(tracking, benchmark_close=bench)
+    assert t_rise.dropna().eq(1).all()
+    assert t_track.dropna().eq(0).all()  # equal return is not 'beats'
+
+
+def test_excess_target_is_nan_in_the_forward_tail():
+    idx = pd.date_range("2024-01-01", periods=80, freq="B")
+    bench = pd.Series(np.linspace(100, 110, 80), index=idx)
+    t = forward_target(bench.copy(), benchmark_close=bench)
+    assert t.iloc[-FORWARD_PERIODS:].isna().all()
+    assert t.iloc[:-FORWARD_PERIODS].notna().all()
+
+
+def test_excess_target_is_base_rate_neutral_on_a_drifting_market():
+    """A stock that moves exactly with a rising market has no excess return: base rate 0."""
+    idx = pd.date_range("2020-01-01", periods=400, freq="B")
+    rng = np.random.default_rng(1)
+    market = pd.Series(100 * np.exp(np.cumsum(0.001 + rng.normal(0, 0.01, 400))), index=idx)
+    stock = market * 2.0  # same returns as the market
+    t = forward_target(stock, benchmark_close=market).dropna()
+    assert t.eq(0).all()
