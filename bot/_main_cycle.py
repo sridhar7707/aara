@@ -138,6 +138,34 @@ def _report_execution_outcome_safe(
         logger.warning(f"Sentinel execution-outcome reporting failed for {symbol}: {e}")
 
 
+def position_placeholder(symbol: str, qty: float, market_value: float,
+                         avg_entry_price: float, current_price: float | None = None) -> SimpleNamespace:
+    """In-cycle stand-in for a position, with the same attribute set a broker
+    position carries. Shared by the same-cycle fill registration, the gate view,
+    and the test doubles, so they cannot drift apart."""
+    return SimpleNamespace(
+        symbol=symbol, qty=qty, market_value=market_value,
+        avg_entry_price=avg_entry_price,
+        current_price=avg_entry_price if current_price is None else current_price,
+        unrealized_plpc=0.0, unrealized_pl=0.0,
+    )
+
+
+def _gate_view(ctx: EntryContext) -> dict:
+    """Positions as the entry gates should see them this cycle: held positions plus
+    zero-value placeholders for pending buys (submitted, not yet filled).
+
+    Returns a copy. ctx.positions never receives pending entries, so the exit path
+    cannot see them. Pending symbols then count in the position cap, the sector
+    limits, and the correlation gate.
+    """
+    view = dict(ctx.positions)
+    for sym in ctx.buy_order_syms:
+        if sym not in view:
+            view[sym] = position_placeholder(sym, qty=0.0, market_value=0.0, avg_entry_price=0.0)
+    return view
+
+
 def _handle_entry(
     con: sqlite3.Connection, client: AlpacaClient, risk: RiskManager,
     symbol: str, ctx: EntryContext,
@@ -206,7 +234,8 @@ def _handle_entry(
         return available_cash
 
     # Gate 7 — Correlation: avoid adding a position highly correlated with existing holdings.
-    _corr_ok, _corr_reason = _passes_correlation_gate(symbol, ctx.positions, ctx.bars_map)
+    _gate_pos = _gate_view(ctx)  # ADR-080 A1: held + pending, used by every gate below
+    _corr_ok, _corr_reason = _passes_correlation_gate(symbol, _gate_pos, ctx.bars_map)
     if not _corr_ok:
         recorder.reject("correlation", _corr_reason)
         return available_cash
@@ -295,7 +324,7 @@ def _handle_entry(
     if _sym_sector not in ("Unknown", "Broad_ETF"):
         _sector_val = sum(
             float(getattr(pos, "market_value", 0) or 0)
-            for sym, pos in ctx.positions.items()
+            for sym, pos in _gate_pos.items()
             if SECTOR_MAP.get(sym, "Unknown") == _sym_sector
         )
         _sector_pct = _sector_val / ctx.portfolio_value if ctx.portfolio_value > 0 else 0
@@ -319,11 +348,8 @@ def _handle_entry(
         recorder.reject("cash_reserve_min", _reason)
         return available_cash
     _managed = ctx.pool.tradeable_cash if ctx.pool else None
-    # ADR-080 A1: pending buys (submitted, not yet in positions) count toward the cap
-    _pending = len(ctx.buy_order_syms - set(ctx.positions))
     if not risk.approve_buy(symbol, notional, ctx.portfolio_value,
-                            ctx.portfolio_value, ctx.positions, managed_capital=_managed,
-                            pending_count=_pending):
+                            ctx.portfolio_value, _gate_pos, managed_capital=_managed):
         _reason = "risk.approve_buy() declined (portfolio-level risk check)"  # was previously silent
         logger.info(f"BUY {symbol} skipped — {_reason}")
         recorder.reject("risk_manager_approval", _reason)
@@ -357,9 +383,11 @@ def _handle_entry(
             # ADR-080 §1: register the confirmed fill before any fallible write, so a
             # DB/ledger exception below cannot leave the cap and sector gates blind to it
             ctx.buy_order_syms.discard(symbol)  # order is now filled, not pending
-            ctx.positions[symbol] = SimpleNamespace(
-                symbol=symbol, qty=fill_shares, market_value=notional,
-                avg_entry_price=fill_price, unrealized_plpc=0.0,
+            # Partial fills: the broker holds only filled_qty, so size the gate state by it.
+            # (The DB row above still records the requested notional; pre-existing, see ADR notes.)
+            ctx.positions[symbol] = position_placeholder(
+                symbol, qty=filled_qty, market_value=filled_qty * fill_price,
+                avg_entry_price=fill_price,
             )
             _drivers = ctx.xgb.explain(ctx.latest)
             recorder.record_executed(notional, fill_price, fill_shares,

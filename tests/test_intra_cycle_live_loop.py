@@ -12,6 +12,7 @@ import pandas as pd
 import bot._main_market as mk
 import bot._main_prep as prep
 import bot.main as m
+from bot._main_cycle import position_placeholder
 from bot.trust_ledger.connection import get_ledger_conn as _real_ledger
 from config import ENTRY_REGIMES
 
@@ -108,8 +109,8 @@ def test_live_loop_places_a_buy(tmp_path, monkeypatch):
 def test_live_loop_respects_position_cap(tmp_path, monkeypatch):
     _hermetic(monkeypatch, tmp_path, ["AAPL", "MSFT", "NVDA"])
     client = _Client()
-    pos = {s: SimpleNamespace(symbol=s, qty=10, market_value=1000.0, avg_entry_price=100.0,
-                              unrealized_plpc=0.0, current_price=100.0) for s in NON_TECH}
+    pos = {s: position_placeholder(s, qty=10, market_value=1000.0, avg_entry_price=100.0)
+           for s in NON_TECH}
     client.get_positions = lambda: pos
     m.run("paper", _client=client, _regime_clf=_Regime(), _xgb=_XGB(), _lstm=_LSTM())
     assert len(client.buys) <= 1, f"cap breached in live loop: {client.buys}"

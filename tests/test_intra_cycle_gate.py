@@ -2,14 +2,14 @@
 position cap and per-sector cap, even though each entry is evaluated against
 the same per-cycle positions snapshot the loop in bot/main.py passes down.
 
-This test must FAIL on the current code (the snapshot is never updated after a
-buy fills) and PASS once the fix from ADR-080 lands.
+Regression guard: it failed before the ADR-080 fix (the snapshot was never
+updated after a buy fills) and must keep passing.
 """
 from __future__ import annotations
 
 import pytest
 
-from bot._main_cycle import _handle_entry, EntryContext
+from bot._main_cycle import _handle_entry, EntryContext, position_placeholder
 from bot.risk.risk_manager import RiskManager
 from config import MAX_POSITIONS, MAX_SECTOR_POSITIONS, SECTOR_MAP
 
@@ -49,15 +49,10 @@ class _NoDriversXgb:
 
 
 def _held_positions(symbols):
-    """Open-position placeholders with the attributes the gates read."""
-    class _Pos:
-        def __init__(self, sym):
-            self.symbol = sym
-            self.qty = 10
-            self.market_value = 1_000.0
-            self.avg_entry_price = 100.0
-            self.unrealized_plpc = 0.0
-    return {s: _Pos(s) for s in symbols}
+    """Open positions built by the production placeholder factory, so the test
+    doubles carry the same attribute set the gates see in production."""
+    return {s: position_placeholder(s, qty=10, market_value=1_000.0, avg_entry_price=100.0)
+            for s in symbols}
 
 
 def test_same_cycle_buys_respect_position_and_sector_caps(trades_db, ledger_conn, chain):
@@ -206,3 +201,20 @@ def test_fill_registered_even_if_trade_log_write_fails(trades_db, ledger_conn, c
     )
     _handle_entry(trades_db, client=client, risk=risk, symbol="MSFT", ctx=ctx2)
     assert client.buys == ["AAPL"], f"later symbol not blocked after failed write: {client.buys}"
+
+
+def test_pending_same_sector_order_counts_toward_sector_limit(trades_db, ledger_conn, chain):
+    """ADR-080 review: a same-sector buy still pending (submitted, unfilled) must
+    count toward MAX_SECTOR_POSITIONS. NVDA held + AAPL pending = 2 Technology;
+    MSFT must be blocked by the sector limit, not allowed on a stale count of 1."""
+    positions = _held_positions(["NVDA"])
+    client = _CountingFillClient()
+    ctx = _minimal_entry_ctx(
+        ledger_conn, chain,
+        positions=positions, buy_order_syms={"AAPL"},
+        available_cash=50_000.0, tradeable_capital=50_000.0, portfolio_value=100_000.0,
+        xgb=_NoDriversXgb(),
+    )
+    _handle_entry(trades_db, client=client, risk=RiskManager(), symbol="MSFT", ctx=ctx)
+    assert client.buys == [], f"pending same-sector order ignored by sector limit: {client.buys}"
+    assert "AAPL" not in positions  # pending never leaks into the held-positions dict

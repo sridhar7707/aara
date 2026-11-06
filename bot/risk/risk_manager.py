@@ -255,7 +255,6 @@ class RiskManager:
         current_value: float,
         open_positions: dict,        # full dict {symbol: position_obj} for sector check
         managed_capital: float | None = None,
-        pending_count: int = 0,      # ADR-080 A1: submitted-but-unfilled buys this cycle
     ) -> bool:
         if self.halted:
             logger.warning("Trading halted — buy blocked.")
@@ -275,7 +274,7 @@ class RiskManager:
                 f"(sized from {src}=${sizing_base:.2f})."
             )
             return False
-        if len(open_positions) + pending_count >= MAX_POSITIONS:
+        if len(open_positions) >= MAX_POSITIONS:
             logger.warning(f"Max {MAX_POSITIONS} open positions reached — buy blocked.")
             return False
         if not self.sector_check(symbol, open_positions):
