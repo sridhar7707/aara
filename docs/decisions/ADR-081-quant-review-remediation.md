@@ -189,3 +189,33 @@ Scratch scripts are in the session scratchpad, not in the repository.
 **Consequence for live gates:** about 77% of holdout predictions clear the live `XGB_MIN_CONFIDENCE` of 0.52. The gate would no longer select candidates. Any deployment of a retrained model therefore needs the threshold reconsidered together with the model. That is a trading decision and is not made here.
 
 **Not done, and why:** no model is deployed or uploaded to HuggingFace. The live bot still loads the HF model trained on the old labels. Improving the features is a research task, not a bug fix.
+
+## Rolling-origin validation, five folds (2026-11-06)
+
+**Setup:** five test windows (2014–16, 2017–19, 2019–21, 2022–23, 2024–26). Training is expanding and ends 21 bars before each test window. Early stopping uses the last 15% of each training window. Excess-over-SPY target. Models: the 22-feature base set, base plus 12-1 momentum, and momentum alone.
+
+**Results (test AUC by fold):**
+
+| Model | 2014–16 | 2017–19 | 2019–21 | 2022–23 | 2024–26 | Mean |
+|---|---|---|---|---|---|---|
+| base22 | 0.505 | 0.504 | 0.518 | 0.513 | 0.523 | 0.513 |
+| base22 + momentum | 0.502 | 0.522 | 0.514 | 0.519 | 0.531 | 0.518 |
+| momentum alone | 0.500 | 0.531 | 0.489 | 0.521 | 0.522 | 0.513 |
+
+**Cross-sectional decile spread** (top minus bottom decile, 21-day excess return, daily averages):
+- Momentum alone: +1.20%, +0.15%, +1.61%, +0.55%, +2.65%. Positive in every fold.
+- base22: −0.39%, −0.34%, +1.54%, +0.22%, +0.55%.
+
+**Correction to the t-statistics.** The t-stats computed on daily spreads treat overlapping 21-day returns as independent, which overstates significance by about √21. Corrected, momentum's t-stats are about 1.0, 0.1, 0.8, 0.3 and 1.6. None is significant at 2.
+
+**Threshold check:** the live 0.52 gate passed between 24% and 97% of candidates across folds, depending on the period. It does not select consistently, so changing the threshold cannot produce a reliable edge with this model.
+
+**Conclusions**
+1. The XGB model has no reliable out-of-sample skill on this target. Mean AUC is 0.513.
+2. Momentum has a positive sign in every fold, but its significance does not survive the overlap correction. It is a candidate, not a finding.
+3. No threshold change is justified. The threshold is not the problem; the model has no skill to threshold.
+4. The live bot's entry logic depends on a model that has not been validated under the corrected label. This is the most important open risk.
+
+**Recommended decisions (owner):**
+- Whether model-driven entries should be suspended until a candidate passes a corrected multi-fold test.
+- Whether to pursue new data sources (fundamentals, earnings, validated sentiment) before any further feature research on price data.
