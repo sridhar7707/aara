@@ -148,6 +148,25 @@ A local retrain on the corrected pipeline was run from the worktree. Nothing was
 
 - **2026-11-06 — Accepted by ksri77** ("yes fix all"). Implemented Tiers 1–4 where listed above. Tier 1 retrain shows holdout AUC 0.510 with early stopping at tree 0.
 
+## Feature research: cross-sectional IC, 2026-11-06
+
+**Target:** 21-day forward return minus SPY's, cross-sectionally ranked each day. Score = mean daily rank IC (Spearman), by period. Selection on train and validation only. Holdout reported once. t-stat uses every 21st day to allow for overlapping labels.
+
+**Candidates tested (10 features, 45 symbols, 2008–2026-07):** 12-1 momentum, 1-month and 1-week reversal, 63-day low volatility, 52-week high proximity, 252-day beta, 126-day relative strength, 63-day volume z-score, residual volatility, distance from 200-day MA.
+
+**Results at 21 days (holdout IC / t):**
+- 12-1 momentum: +0.050 / 0.94. Positive in all three periods, and at 5, 10 and 63 days.
+- Low volatility and low beta: negative IC in train and holdout. High-risk names outperformed in this sample, which is the reverse of the textbook effect.
+- Everything else: |IC| below 0.03 and |t| below 1.7 on holdout.
+- No feature has holdout |t| ≥ 2. With 10 candidates, a single t of 2 is not strong evidence after correction for multiple tests.
+
+**Adding 12-1 momentum to the XGB feature set:** holdout AUC 0.523 → 0.535. Holdout log loss 0.6952 → 0.6951. Still above the no-skill value of 0.693. Univariate AUC 0.506 (val) to 0.524 (holdout).
+
+**Conclusion:** no robust new feature has been found. Momentum is the strongest candidate, and its effect is small. It needs rolling-origin validation across several folds before it can be trusted. It is not added to the live feature set.
+
+**Next:** (1) rolling-origin test of 12-1 momentum, and of a model with it, across five or more folds. (2) New data sources, since OHLCV alone appears to carry little signal for this target. Candidates are earnings and fundamentals, and sentiment with a validated history. (3) Threshold decision, once a candidate shows multi-fold skill.
+
+Scratch scripts are in the session scratchpad, not in the repository.
 ## XGB investigation: tree-0 early stop (2026-11-06)
 
 **Question:** why did XGB early stopping halt at tree 0 on the corrected per-symbol labels?
