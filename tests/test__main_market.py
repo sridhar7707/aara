@@ -284,7 +284,17 @@ def test_min_volume_ratio_gate_unchanged():
 
     cycle_src = (Path(__file__).parent.parent / "bot" / "_main_cycle.py").read_text(encoding="utf-8")
     lines = cycle_src.splitlines()
-    assert lines[172] == "    if ctx.volume_ratio < MIN_VOLUME_RATIO:"  # line 173 (1-indexed)
+    # Located by content, not line number. Order matters: Gate 2 must sit after
+    # Gate 1 (regime) and before the order submission it guards.
+    def _index(text):
+        hits = [i for i, ln in enumerate(lines) if ln.strip().startswith(text)]
+        assert len(hits) == 1, f"expected exactly one line starting with {text!r}, found {len(hits)}"
+        return hits[0]
+    gate1 = _index("if ctx.regime_name not in ENTRY_REGIMES:")
+    gate2 = _index("if ctx.volume_ratio < MIN_VOLUME_RATIO:")
+    submit = _index("result = client.buy(")
+    assert lines[gate2] == "    if ctx.volume_ratio < MIN_VOLUME_RATIO:"
+    assert gate1 < gate2 < submit, "Gate 2 volume check moved relative to Gate 1 or order submission"
 
 
 def test_fetch_symbol_spy_rs_trim_before_close_derivation(monkeypatch):

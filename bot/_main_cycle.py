@@ -7,6 +7,7 @@ import os
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -137,6 +138,34 @@ def _report_execution_outcome_safe(
         logger.warning(f"Sentinel execution-outcome reporting failed for {symbol}: {e}")
 
 
+def position_placeholder(symbol: str, qty: float, market_value: float,
+                         avg_entry_price: float, current_price: float | None = None) -> SimpleNamespace:
+    """In-cycle stand-in for a position, with the same attribute set a broker
+    position carries. Shared by the same-cycle fill registration, the gate view,
+    and the test doubles, so they cannot drift apart."""
+    return SimpleNamespace(
+        symbol=symbol, qty=qty, market_value=market_value,
+        avg_entry_price=avg_entry_price,
+        current_price=avg_entry_price if current_price is None else current_price,
+        unrealized_plpc=0.0, unrealized_pl=0.0,
+    )
+
+
+def _gate_view(ctx: EntryContext) -> dict:
+    """Positions as the entry gates should see them this cycle: held positions plus
+    zero-value placeholders for pending buys (submitted, not yet filled).
+
+    Returns a copy. ctx.positions never receives pending entries, so the exit path
+    cannot see them. Pending symbols then count in the position cap, the sector
+    limits, and the correlation gate.
+    """
+    view = dict(ctx.positions)
+    for sym in ctx.buy_order_syms:
+        if sym not in view:
+            view[sym] = position_placeholder(sym, qty=0.0, market_value=0.0, avg_entry_price=0.0)
+    return view
+
+
 def _handle_entry(
     con: sqlite3.Connection, client: AlpacaClient, risk: RiskManager,
     symbol: str, ctx: EntryContext,
@@ -205,7 +234,8 @@ def _handle_entry(
         return available_cash
 
     # Gate 7 — Correlation: avoid adding a position highly correlated with existing holdings.
-    _corr_ok, _corr_reason = _passes_correlation_gate(symbol, ctx.positions, ctx.bars_map)
+    _gate_pos = _gate_view(ctx)  # ADR-080 A1: held + pending, used by every gate below
+    _corr_ok, _corr_reason = _passes_correlation_gate(symbol, _gate_pos, ctx.bars_map)
     if not _corr_ok:
         recorder.reject("correlation", _corr_reason)
         return available_cash
@@ -294,7 +324,7 @@ def _handle_entry(
     if _sym_sector not in ("Unknown", "Broad_ETF"):
         _sector_val = sum(
             float(getattr(pos, "market_value", 0) or 0)
-            for sym, pos in ctx.positions.items()
+            for sym, pos in _gate_pos.items()
             if SECTOR_MAP.get(sym, "Unknown") == _sym_sector
         )
         _sector_pct = _sector_val / ctx.portfolio_value if ctx.portfolio_value > 0 else 0
@@ -319,7 +349,7 @@ def _handle_entry(
         return available_cash
     _managed = ctx.pool.tradeable_cash if ctx.pool else None
     if not risk.approve_buy(symbol, notional, ctx.portfolio_value,
-                            ctx.portfolio_value, ctx.positions, managed_capital=_managed):
+                            ctx.portfolio_value, _gate_pos, managed_capital=_managed):
         _reason = "risk.approve_buy() declined (portfolio-level risk check)"  # was previously silent
         logger.info(f"BUY {symbol} skipped — {_reason}")
         recorder.reject("risk_manager_approval", _reason)
@@ -350,6 +380,15 @@ def _handle_entry(
                     f"({slippage_bps:+.1f} bps vs limit ${ctx.current_price:.2f})"
                 )
             fill_shares = notional / fill_price
+            # ADR-080 §1: register the confirmed fill before any fallible write, so a
+            # DB/ledger exception below cannot leave the cap and sector gates blind to it
+            ctx.buy_order_syms.discard(symbol)  # order is now filled, not pending
+            # Partial fills: the broker holds only filled_qty, so size the gate state by it.
+            # (The DB row above still records the requested notional; pre-existing, see ADR notes.)
+            ctx.positions[symbol] = position_placeholder(
+                symbol, qty=filled_qty, market_value=filled_qty * fill_price,
+                avg_entry_price=fill_price,
+            )
             _drivers = ctx.xgb.explain(ctx.latest)
             recorder.record_executed(notional, fill_price, fill_shares,
                                      stop_pct, tp_target_pct, rr_ratio, xgb_drivers=_drivers)
@@ -361,7 +400,7 @@ def _handle_entry(
                 _existing_sv = sum(
                     float(getattr(p, "market_value", 0) or 0)
                     for s2, p in ctx.positions.items()
-                    if SECTOR_MAP.get(s2, "") == _sym_sector_tg
+                    if SECTOR_MAP.get(s2, "") == _sym_sector_tg and s2 != symbol  # fill already registered
                 )
                 _sect_pct_tg = (_existing_sv + notional) / ctx.portfolio_value * 100
             _cash_pct_tg = ((available_cash - notional) / ctx.portfolio_value * 100
@@ -413,7 +452,6 @@ def _handle_entry(
                         confidence=int(ctx.xgb_prob * 100), status="executed")
             _upsert_position_state(con, symbol, fill_price, fill_price, ctx.current_atr, fill_shares)
             available_cash -= notional
-            ctx.buy_order_syms.discard(symbol)  # order is now filled, not pending
             _report_execution_outcome_safe(
                 ctx.trust_conn, symbol, "BUY", "EXECUTED",
                 side="buy", outcome="FILLED", is_paper=_is_paper_execution,
@@ -422,6 +460,11 @@ def _handle_entry(
             )
         else:
             _fail_reason = "order submitted but did not fill within timeout"
+            # Fail closed: wait_for_fill() attempts a cancel but returns 0 whether or not
+            # the cancel succeeded, so the order may still be live at the broker. Keep the
+            # symbol pending for the rest of this cycle. Cost: one cap slot until the next
+            # cycle re-reads open orders. Cancel-result detail is a known gap (ADR-080 review notes).
+            ctx.buy_order_syms.add(symbol)
             logger.warning(f"BUY {symbol} order did not fill — position state NOT recorded")
             recorder.record_order_not_filled(_fail_reason)
             _report_execution_outcome_safe(

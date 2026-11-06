@@ -378,7 +378,7 @@ def test_record_decision_safe_absence_fallback_uses_write_decision_events_own_id
 def test_risk_manager_approve_buy_call_site_in_main_cycle_is_unchanged():
     src = (_REPO_ROOT / "bot" / "_main_cycle.py").read_text(encoding="utf-8")
     assert "if not risk.approve_buy(symbol, notional, ctx.portfolio_value," in src
-    assert "ctx.portfolio_value, ctx.positions, managed_capital=_managed):" in src
+    assert "ctx.portfolio_value, _gate_pos, managed_capital=_managed):" in src  # ADR-080 A1 gate view
 
 
 def test_entry_context_has_no_sentinel_decision_id_field():

@@ -106,3 +106,42 @@ Live path: `trade.yml` → `bot/main.py --mode paper --loop`. The change only af
 
 - **2026-11-05 — Proposed.** Found by a fresh `bot/` audit and verified by reading `bot/main.py`: the position snapshot is fetched once per cycle and never refreshed after buys fill.
 - **2026-11-05 — Accepted by ksri77.** Implementation to follow in an isolated worktree per §3, starting with the reproduction test in §5.1 (must fail on current code).
+- **2026-11-05 — Amendment A1 accepted by ksri77.** Scope extended to `bot/_main_cycle.py` and `approve_buy(pending_count)`.
+- **2026-11-06 — Implemented on branch `worktree-intra-cycle-gate` (PR #5).** §5.1–§5.4 tests pass with the xfail removed; full suite green. Review notes below record the accepted gaps; the owner decides on them before or after merge.
+
+---
+
+## Amendment A1 (Accepted by ksri77, 2026-11-05)
+
+**Status:** Accepted by ksri77 on 2026-11-05. Implementation note: the cap count is computed in `_handle_entry` (`bot/_main_cycle.py`) from `buy_order_syms` and `positions`, not passed in from `bot/main.py`. The fill registration lives in `_handle_entry` too, so `bot/main.py` carries no change from this ADR.
+
+**Why:** Two findings from the implementation worktree (`intra-cycle-gate`):
+
+1. The fill is recorded in `_handle_entry` (`bot/_main_cycle.py`), which §1 does not name. The §5.1 reproduction calls `_handle_entry` directly, so it can only pass if that file is in scope. (History: the first fill-registration commit `330ca18` was in `bot/main.py`; it was moved to `bot/_main_cycle.py` in `6308198`, so `bot/main.py` has no net change.)
+2. §1 bullet 2 (count submitted-but-unfilled buys toward the cap) cannot be implemented by adding pending symbols to the `positions` dict. `_handle_exits` reads that same dict, so a pending buy would be evaluated for stops and exits with no real position behind it. The clean design is a separate input to the cap check.
+
+**Amended scope (additions to §1 only; §2–§7 unchanged):**
+
+- **Add** `bot/_main_cycle.py`: `_handle_entry` may register a fill in `ctx.positions`. Limited to that one assignment after a recorded fill. No gate logic changes.
+- **Superseded 2026-11-06:** the `pending_count` argument was removed. `_handle_entry` now builds a gate view (`_gate_view`): held positions plus zero-value placeholders for pending buys. The cap, sector, and correlation checks all read that view. `ctx.positions` never receives pending entries. `risk_manager.approve_buy` is back to its original signature. (`bot/main.py` is not changed by this amendment.)
+- Pending symbols are **never** inserted into `positions`, so `_handle_exits` is unaffected.
+
+**Explicitly still not touched:** gate thresholds, exit and trailing-stop logic, ADR-075 reconciliation, workflows.
+
+**Acceptance criteria:** §5.1 repro must pass with the marker removed; §5.2 (correlated pair) and §5.3 (pending order counts toward the cap, via the gate view) must pass; §5.4 no-double-count must pass; full suite green.
+
+**Rollback:** revert the amendment's commits. The pre-amendment code paths are restored by reverting `bot/_main_cycle.py` and `bot/risk/risk_manager.py`.
+
+### Review notes (2026-11-05, for the Architecture Owner; not accepted)
+
+Found in code review of PR #5. Each item is either fixed in the branch or recorded as a known gap.
+
+- **Decided (fail closed):** a timed-out buy stays pending for the rest of the cycle. `wait_for_fill()` attempts a cancel but returns 0 whether or not the cancel succeeded, so the order may still be live. Keeping the symbol pending costs one cap slot until the next cycle; dropping it could let a live order breach the cap. The cost is accepted.
+- **Fixed:** the Telegram sector figure counted the just-filled position twice. Cosmetic only; the alert is currently a no-op.
+- **Fixed (2026-11-06):** pending same-sector orders were invisible to the sector limit and Gate 8c. The gate view now includes them, and `test_pending_same_sector_order_counts_toward_sector_limit` covers it.
+- **Documented (2026-11-06):** `get_open_order_symbols` returns all open buys at the broker, not only this cycle's. A stale open buy therefore holds a cap and sector slot until it fills or is cancelled. This is conservative, and it is covered by the pending-order tests.
+- **Known gap, needs ADR amendment A2:** `wait_for_fill()` returns 0 for rejected or expired orders as well as for timeouts. Those are terminal, so the symbol is kept pending for one cycle when it need not be. Fixing it means `wait_for_fill` returning the order's terminal state, which changes the broker client and needs an owner decision.
+- **Fixed (2026-11-06):** partial fills on timeout now size the gate state by the filled quantity, not the requested notional. The DB row still records the requested notional; that mismatch predates this change.
+- **Known gap, out of scope:** `bot/execution/alpaca_client.py` `wait_for_fill()` reads `filled_qty` before cancelling. A fill that lands between that read and the cancel is returned as 0 and not recorded this cycle. Fixing it means changing the broker client, which needs its own ADR.
+- **Known gap, pre-existing:** if a DB or ledger write after the fill registration raises, `main.py`'s per-symbol handler keeps the pre-buy cash figure. The registration itself is unchanged.
+- **Design note, deferred:** placeholder objects sit in the broker-snapshot dict. A separate per-cycle "filled this cycle" set would be cleaner and is the preferred design if this grows.
