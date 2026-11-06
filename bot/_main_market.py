@@ -167,8 +167,10 @@ def _is_near_earnings(con, symbol: str) -> bool:
                 if near:
                     logger.info(f"Earnings guard: {symbol} — {nearest} within {EARNINGS_WINDOW_DAYS}d")
     except Exception as e:
-        logger.warning(f"Earnings check failed for {symbol} — assuming safe: {e}")
-        near = False
+        # ADR-081 2.1: an unknown earnings date is not a safe one. Block this cycle,
+        # and do not cache the failure, so the next cycle retries.
+        logger.warning(f"Earnings check failed for {symbol} — blocking entries this cycle: {e}")
+        return True
     con.execute(
         "INSERT OR REPLACE INTO earnings_cache (symbol, near_earnings, cached_at) VALUES (?,?,?)",
         (symbol, int(near), datetime.now(timezone.utc).isoformat())
@@ -206,6 +208,8 @@ def _prefetch_earnings_parallel(con, symbols: list[str]) -> dict[str, bool]:
     if not stale:
         return {s: result.get(s, False) for s in symbols}
 
+    failed: set[str] = set()  # ADR-081 2.1: symbols whose lookup raised; never cached
+
     def _fetch_one(symbol: str) -> tuple[str, bool]:
         try:
             import yfinance as yf
@@ -223,8 +227,10 @@ def _prefetch_earnings_parallel(con, symbols: list[str]) -> dict[str, bool]:
                 logger.info(f"Earnings guard: {symbol} — {nearest} within {EARNINGS_WINDOW_DAYS}d")
             return symbol, near
         except Exception as e:
-            logger.warning(f"Earnings prefetch failed for {symbol}: {e}")
-            return symbol, False
+            # ADR-081 2.1: unknown is not safe. Block, and keep the failure out of the cache.
+            logger.warning(f"Earnings prefetch failed for {symbol} — blocking entries this cycle: {e}")
+            failed.add(symbol)
+            return symbol, True
 
     logger.info(f"Earnings prefetch: {len(stale)} cache misses — fetching in parallel")
     with ThreadPoolExecutor(max_workers=min(len(stale), 8)) as pool:
@@ -233,7 +239,7 @@ def _prefetch_earnings_parallel(con, symbols: list[str]) -> dict[str, bool]:
     ts = datetime.now(timezone.utc).isoformat()
     con.executemany(
         "INSERT OR REPLACE INTO earnings_cache (symbol, near_earnings, cached_at) VALUES (?,?,?)",
-        [(sym, int(near), ts) for sym, near in fresh.items()],
+        [(sym, int(near), ts) for sym, near in fresh.items() if sym not in failed],
     )
     con.commit()
     result.update(fresh)

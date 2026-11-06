@@ -276,12 +276,12 @@ def test_kelly_fraction_returns_default_when_all_wins(db):
     assert result == BUY_FRACTION
 
 
-def test_kelly_fraction_returns_default_when_all_losses(db):
-    from bot.strategy.ensemble import BUY_FRACTION
+def test_kelly_fraction_all_losses_sizes_to_zero(db):
+    # ADR-081 2.5 follow-up: 15 losing trades and no win is a negative edge -> no entry.
     for _ in range(15):
         _insert_sell(db, "AAPL", -0.05)
     result = _kelly_fraction(db, "AAPL")
-    assert result == BUY_FRACTION
+    assert result == 0.0
 
 
 def test_kelly_fraction_positive_edge_is_bounded(db):
@@ -295,14 +295,14 @@ def test_kelly_fraction_positive_edge_is_bounded(db):
     assert 0.02 <= result <= KELLY_FRACTION_MAX
 
 
-def test_kelly_fraction_minimum_floor(db):
-    # Negative edge → Kelly would be negative, but clamped to 0.02
+def test_kelly_fraction_negative_edge_sizes_to_zero(db):
+    # ADR-081 2.5: a negative edge sizes to zero. It was previously clamped to a 2% floor.
     for _ in range(5):
         _insert_sell(db, "TSLA", 0.01)
     for _ in range(10):
         _insert_sell(db, "TSLA", -0.10)
     result = _kelly_fraction(db, "TSLA")
-    assert result >= 0.02
+    assert result == 0.0
 
 
 def test_kelly_fraction_excludes_sell_reconcile(db):

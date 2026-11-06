@@ -19,6 +19,33 @@ FORWARD_PERIODS = 21   # 1-month target — aligned with MAX_HOLD_DAYS=45 medium
 MIN_MOVE_PCT    = 0.003  # require ≥0.3% move to label as "up" — filters 5-min microstructure noise
 
 
+def forward_target(close: pd.Series) -> pd.Series:
+    """Binary target for ONE symbol: 1 if the close FORWARD_PERIODS bars ahead is at
+    least MIN_MOVE_PCT higher. Must be applied per symbol before frames are combined
+    (ADR-081 1.1): on a combined frame the shift crosses tickers."""
+    fwd = (close.shift(-FORWARD_PERIODS) - close) / close
+    return (fwd > MIN_MOVE_PCT).astype(int)
+
+
+def time_split(df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Three-way time split (ADR-081 1.2 / 1.3). Rows must be sorted by date.
+
+    train: first 70% of rows; val: next 15% (early stopping only);
+    holdout: last 15% (reported AUC and calibration only).
+    A purge of FORWARD_PERIODS unique dates sits before each boundary, so a label
+    whose window overlaps the next segment does not leak into the earlier one.
+    """
+    dates = pd.Index(sorted(df.index.unique()))
+    k_val = dates.searchsorted(df.index[int(len(df) * 0.70)])
+    k_hold = dates.searchsorted(df.index[int(len(df) * 0.85)])
+    train_end = dates[max(k_val - FORWARD_PERIODS, 0)]
+    val_end = dates[max(k_hold - FORWARD_PERIODS, 0)]
+    train = df[df.index < train_end]
+    val = df[(df.index >= dates[k_val]) & (df.index < val_end)]
+    holdout = df[df.index >= dates[k_hold]]
+    return train, val, holdout
+
+
 def _expected_calibration_error(probs: np.ndarray, labels: np.ndarray, n_bins: int = 10) -> float:
     """Standard binned ECE: weighted mean |predicted - actual| across equal-width bins."""
     probs = np.asarray(probs, dtype=float)
@@ -48,10 +75,10 @@ class XGBPredictor:
         self.last_prediction_is_fallback: bool = False
         self._calibration = None  # ADR-076 — observation-only calibrated probability
         # Calibration-quality metrics (ADR-076), populated by train() for
-        # scripts/train_model.py's validation_report.json. Computed on the
-        # same X_val/y_val the calibrator is fit on (no third split exists
-        # in this project's data volume) — an in-sample-relative-to-fit
-        # metric, not a held-out one; reported as such, not hidden.
+        # scripts/train_model.py's validation_report.json. Since ADR-081 1.2 these
+        # are computed on the HOLDOUT segment, which early stopping never sees.
+        # The calibrator is fit on the holdout as well, so calibration metrics are
+        # in-sample for the calibrator; reported as such.
         self.calibration_brier_raw: float | None = None
         self.calibration_brier_calibrated: float | None = None
         self.calibration_ece: float | None = None
@@ -115,16 +142,13 @@ class XGBPredictor:
             return
 
         df = df.copy()
+        # ADR-081 1.1: the target must already be per-symbol (train_model.load_combined).
+        # Refuse to build it here on a combined frame, where the shift crosses tickers.
         if "target" not in df.columns:
-            future_return = (df["close"].shift(-FORWARD_PERIODS) - df["close"]) / df["close"]
-            df["target"] = (future_return > MIN_MOVE_PCT).astype(int)
+            raise ValueError("XGBPredictor.train needs a per-symbol 'target' column "
+                             "(use forward_target() before combining symbols)")
         df.dropna(inplace=True)
-
-        # Temporal split — train only on the first 80% so the model never sees
-        # future prices during training (prevents lookahead bias / overfitting).
-        split_idx = int(len(df) * 0.8)
-        train_df = df.iloc[:split_idx]
-        val_df = df.iloc[split_idx:]
+        train_df, val_df, hold_df = time_split(df)
 
         mask = train_df[FEATURE_COLS].notna().all(axis=1)
         X = train_df.loc[mask, FEATURE_COLS]
@@ -133,6 +157,10 @@ class XGBPredictor:
         val_mask = val_df[FEATURE_COLS].notna().all(axis=1)
         X_val = val_df.loc[val_mask, FEATURE_COLS]
         y_val = val_df.loc[val_mask, "target"]
+
+        hold_mask = hold_df[FEATURE_COLS].notna().all(axis=1)
+        X_hold = hold_df.loc[hold_mask, FEATURE_COLS]
+        y_hold = hold_df.loc[hold_mask, "target"]
 
         self.model = XGBClassifier(
             n_estimators=1000,         # high ceiling — early stopping finds the right count
@@ -152,9 +180,10 @@ class XGBPredictor:
         best_trees = self.model.best_iteration
         logger.info(f"XGBoost early stopped at tree {best_trees}")
 
-        if len(X_val) > 0:
-            val_proba = self.model.predict_proba(X_val)[:, 1]
-            val_auc   = float(roc_auc_score(y_val, val_proba))
+        if len(X_hold) > 0:
+            # Reported AUC and calibration use the holdout only (ADR-081 1.2).
+            val_proba = self.model.predict_proba(X_hold)[:, 1]
+            val_auc   = float(roc_auc_score(y_hold, val_proba))
             self.val_auc = val_auc
             if val_auc < 0.52:
                 logger.warning(
@@ -162,14 +191,14 @@ class XGBPredictor:
                     "model may have degraded. Review training data before deploying."
                 )
             else:
-                logger.info(f"XGBoost val AUC-ROC (holdout 20%): {val_auc:.3f}")
+                logger.info(f"XGBoost val AUC-ROC (holdout 15%, n={len(X_hold)}, effective n≈{len(X_hold) // FORWARD_PERIODS}): {val_auc:.3f}")
 
             try:
-                self._calibration = fit_conservative_calibration(val_proba, y_val.values)
+                self._calibration = fit_conservative_calibration(val_proba, y_hold.values)
                 calibrated_val = self._calibration.predict(val_proba)
-                self.calibration_brier_raw = float(np.mean((val_proba - y_val.values) ** 2))
-                self.calibration_brier_calibrated = float(np.mean((calibrated_val - y_val.values) ** 2))
-                self.calibration_ece = _expected_calibration_error(calibrated_val, y_val.values)
+                self.calibration_brier_raw = float(np.mean((val_proba - y_hold.values) ** 2))
+                self.calibration_brier_calibrated = float(np.mean((calibrated_val - y_hold.values) ** 2))
+                self.calibration_ece = _expected_calibration_error(calibrated_val, y_hold.values)
                 logger.info(
                     "XGBoost calibration model fit (ADR-076, observation-only) — "
                     f"brier raw={self.calibration_brier_raw:.4f} "
