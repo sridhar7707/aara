@@ -20,7 +20,7 @@ from bot.strategy.ensemble import BUY_FRACTION, ensemble_confidence
 from config import (
     ATR_MAX_STOP_PCT, ATR_MIN_STOP_PCT, ATR_STOP_MULTIPLIER,
     CASH_USE_FRACTION,
-    ENTRY_REGIMES, KELLY_FRACTION_MAX,
+    ENTRY_REGIMES, KELLY_FRACTION_MAX, MODEL_ENTRIES_ENABLED,
     MAX_POSITION_DRIFT_PCT, MAX_POSITION_PCT,
     MAX_RISK_PER_TRADE_PCT, MAX_SECTOR_EXPOSURE_PCT,
     MIN_CASH_RESERVE_PCT, MIN_RR_RATIO, MIN_TP_PCT,
@@ -184,6 +184,12 @@ def _handle_entry(
         lstm_val_loss=getattr(ctx.lstm, "val_loss", None),
         risk=risk, news_data_timestamp=ctx.news_data_timestamp,
     )
+
+    # Gate -1 — ADR-081 step 1: model-driven entries suspended (see config.MODEL_ENTRIES_ENABLED)
+    if not MODEL_ENTRIES_ENABLED:
+        _log_buy_skip(symbol, "model-driven entries suspended (ADR-081)")
+        recorder.reject("model_entries_suspended", "model-driven entries suspended (ADR-081)")
+        return available_cash
 
     # Gate 0 — VIX emergency halt: set by the macro module (threshold MACRO_HALT_VIX in config.py;
     # ADR-081 4.1 corrected a stale "VIX >= 40" comment here)

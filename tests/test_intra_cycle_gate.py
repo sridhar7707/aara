@@ -218,3 +218,18 @@ def test_pending_same_sector_order_counts_toward_sector_limit(trades_db, ledger_
     _handle_entry(trades_db, client=client, risk=RiskManager(), symbol="MSFT", ctx=ctx)
     assert client.buys == [], f"pending same-sector order ignored by sector limit: {client.buys}"
     assert "AAPL" not in positions  # pending never leaks into the held-positions dict
+
+
+@pytest.mark.model_entries_default
+def test_model_entries_suspended_by_default_blocks_every_buy(trades_db, ledger_conn, chain):
+    """ADR-081 step 1: with the production default, no model-driven buy is placed."""
+    import bot._main_cycle as mc
+    assert mc.MODEL_ENTRIES_ENABLED is False
+    client = _CountingFillClient()
+    ctx = _minimal_entry_ctx(
+        ledger_conn, chain,
+        positions={}, available_cash=50_000.0, tradeable_capital=50_000.0, portfolio_value=100_000.0,
+        xgb=_NoDriversXgb(),
+    )
+    _handle_entry(trades_db, client=client, risk=RiskManager(), symbol="AAPL", ctx=ctx)
+    assert client.buys == []
