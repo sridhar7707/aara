@@ -231,3 +231,37 @@ Owner instruction: follow the recommended order, starting with suspending model-
 - Re-enabling entries requires an accepted ADR and a validated model.
 
 Steps 2 to 4 of the recommended order, which are stop tuning, the data change and the statistical criteria, are not started.
+
+## Direction step (a): ETF trend filter, 2026-11-07
+
+**Universe:** XLC, XLE, XLF, XLI, XLK, XLP, XLV, XLY, GLD, TLT, QQQ, IWM. Monthly rebalance. Each ETF is held when its month-end close is above its 10-month average, equal-weighted, otherwise cash. Cost 10 bps per unit of turnover. Benchmark SPY buy-and-hold.
+
+**Pre-registered return criterion (applied first):** positive net excess return over SPY in at least four of five folds, and monthly Newey-West t of at least 2.
+
+**Result: KILL on the return criterion.**
+- Full-period excess return −0.6% a year (NW t −0.20). Positive in only one of five folds (2022–23).
+
+**Risk result, reported but not pre-registered:**
+- Maximum drawdown −25% against SPY's −51%.
+- Annualised volatility 13.2% against 15.5%.
+- Full-period Sharpe 0.83 against 0.75.
+
+This is the risk-control profile the strategy was designed for. It was not the criterion that was pre-registered, so it cannot be counted as a pass. A separate risk criterion must be registered before it is tested, and any test on this same data is in-sample for that criterion. The rule itself is a published, low-parameter rule, so its risk profile is a credible candidate for the risk layer. It is not yet a validated alpha source.
+
+## Direction step (b): SEC EDGAR coverage, 2026-11-07
+
+Checked the 45-symbol universe against the SEC companyfacts API, which stamps each fact with its filing date.
+- 31 individual stocks, of which 30 have key facts (net income, revenue, equity, diluted EPS). Median history 17 years; 93% have at least 10 years.
+- 14 symbols are ETFs or trusts with no operating-company filings. These are expected gaps.
+
+**Findings:**
+1. **Coverage is good, and filing dates give point-in-time data.** This resolves the data blocker from the earlier step, for the individual stocks.
+2. **The universe is too small.** About 30 stocks cannot support a cross-sectional factor test with meaningful power. The next test needs the S&P 500.
+3. **Mapping error found: XOM.** The ticker map returned a CIK with two filings, which does not match Exxon Mobil. CIKs must be checked against the company name, not taken from the ticker alone. This must be fixed before XOM is used.
+
+## Next steps (not yet done)
+
+1. Fix the CIK mapping with a name check, and document the method.
+2. Build the S&P 500 universe. A point-in-time membership list is needed to avoid survivorship bias. Until one is available, any result is a biased upper bound and is labelled that way.
+3. Pull EDGAR facts for the full universe, and build filing-date-aligned factors: quality, value, and earnings revisions where the data allows.
+4. Pre-register the risk criterion for the trend rule, and test it on a longer ETF history where one exists.
