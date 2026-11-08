@@ -20,6 +20,10 @@ import numpy as np
 import pandas as pd
 
 LOG_DIR = Path("data/forward_log")
+
+
+class SkipDay(Exception):
+    """An expected, non-error refusal: weekend, stale bar, incomplete day, or already logged."""
 MEMBERS_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 ETFS = ["XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLV", "XLY", "GLD", "TLT", "QQQ", "IWM"]
 BENCH = "SPY"
@@ -76,10 +80,10 @@ def snapshot(today: str | None = None, members: list[str] | None = None) -> str:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     prices_path, scores_path = LOG_DIR / "prices.csv", LOG_DIR / "scores.csv"
     if today in _logged_dates(scores_path):
-        raise SystemExit(f"{today} is already logged; the log is append-only.")
+        raise SkipDay(f"{today} is already logged; the log is append-only.")
 
     if pd.Timestamp(today).weekday() >= 5:
-        raise SystemExit(f"{today} is a weekend; no trading-day snapshot.")
+        raise SkipDay(f"{today} is a weekend; no trading-day snapshot.")
     members = members or current_members()
 
     # Validate everything before writing anything, so a refused day leaves no trace.
@@ -87,10 +91,10 @@ def snapshot(today: str | None = None, members: list[str] | None = None) -> str:
     closes = closes.dropna(axis=1, thresh=MIN_HISTORY)
     if closes.empty or closes.index[-1].date().isoformat() != today:
         latest = closes.index[-1].date() if not closes.empty else "none"
-        raise SystemExit(f"latest price bar is {latest}, not {today}; not logging a stale day.")
+        raise SkipDay(f"latest price bar is {latest}, not {today}; not logging a stale day.")
     covered = sum(1 for m in members if m in closes.columns)
     if covered < 0.95 * len(members):
-        raise SystemExit(f"only {covered}/{len(members)} members have prices; refusing an incomplete day.")
+        raise SkipDay(f"only {covered}/{len(members)} members have prices; refusing an incomplete day.")
 
     (LOG_DIR / "members").mkdir(exist_ok=True)
     (LOG_DIR / "members" / f"{today}.txt").write_text("\n".join(members), encoding="utf-8")
@@ -142,7 +146,11 @@ def main(argv: list[str]) -> int:
         print(__doc__)
         return 2
     if argv[1] == "snapshot":
-        print(snapshot())
+        try:
+            print(snapshot())
+        except SkipDay as e:
+            print(f"SKIP: {e}")   # expected: exit 0, so the scheduled job does not show as failed
+        return 0
     else:
         r = evaluate()
         print(r.get("status"), r.get("reasons", ""), f"days={r.get('days')}")

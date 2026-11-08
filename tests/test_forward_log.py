@@ -37,7 +37,7 @@ def test_snapshot_refuses_a_date_already_logged(tmp_path, monkeypatch):
     (tmp_path).mkdir(exist_ok=True)
     pd.DataFrame({"date": ["2026-11-06"], "symbol": ["A"], "score_momentum": [0.1], "trend_on": [None]}).to_csv(
         tmp_path / "scores.csv", index=False)
-    with pytest.raises(SystemExit, match="append-only"):
+    with pytest.raises(fl.SkipDay, match="append-only"):
         fl.snapshot(today="2026-11-06", members=["A"])
 
 
