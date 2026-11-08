@@ -9,8 +9,13 @@ import pytest
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "secret_scan.py"
 
 
+# Git hooks export GIT_DIR / GIT_INDEX_FILE. If they leak in, these tests would stage files
+# in the real repository's index. Each test must touch only its own temporary repository.
+_CLEAN_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def _git(repo, *args):
-    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, env=_CLEAN_ENV)
 
 
 @pytest.fixture
@@ -22,7 +27,7 @@ def repo(tmp_path):
 
 
 def _scan(cwd):
-    env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(Path(cwd).parent)}
+    env = {**_CLEAN_ENV, "GIT_CEILING_DIRECTORIES": str(Path(cwd).parent)}
     return subprocess.run([sys.executable, str(SCRIPT)], cwd=cwd, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=60)
 
