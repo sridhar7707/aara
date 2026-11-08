@@ -10,6 +10,9 @@ already held or has an open order; the sleeve exceeds 10% of equity or the buys 
 --execute is also refused until SHARED_ACCOUNT_EXECUTE_APPROVED is set (ADR-085 open item 1), before 16:30
 New York time, and if the run log already has an execute row (started, executed or failed) for the month.
 Orders carry a deterministic client_order_id; a "started" row is written to the run log before the first submit.
+Measurement (quant review finding 3): every run row carries sleeve_value (overlay market value now) and
+account_equity. Every execute run first records fills for earlier "submitted" orders into fills.csv
+(append only; an order is re-checked until it reaches a terminal status, then never again).
 """
 from __future__ import annotations
 
@@ -36,6 +39,8 @@ SHARED_ACCOUNT_EXECUTE_APPROVED = False
 LOG_DIR = Path("data/etf_paper")
 RUNS = LOG_DIR / "runs_v2.csv"   # runs.csv had an older 6-column header and is no longer read (C3)
 ORDERS = LOG_DIR / "orders.csv"
+FILLS = LOG_DIR / "fills.csv"
+TERMINAL_STATUSES = {"filled", "canceled", "expired", "rejected"}   # a fill row with one of these is final
 HALT_FILE = Path(__file__).resolve().parent.parent / "data" / "HALT_TRADING"  # same file bot/main.py checks
 HISTORY_DAYS = 400
 EXECUTE_NOT_BEFORE = time(16, 30)
@@ -97,6 +102,12 @@ def _account() -> AccountState:
 def _append(path: Path, row: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     new = not path.exists()
+    if not new:
+        with path.open(newline="", encoding="utf-8") as f:
+            header = next(csv.reader(f), [])
+        if header != list(row):
+            raise RuntimeError(f"{path} header {header} does not match the row {list(row)}; "
+                               "refusing to append misaligned columns")
     with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(row))
         if new:
@@ -105,11 +116,54 @@ def _append(path: Path, row: dict) -> None:
 
 
 def _run_row(mode: str, as_of, sleeve: float, cash: float, status: str, error: str,
-             weights: dict, plan: list[dict]) -> dict:
+             weights: dict, plan: list[dict], sleeve_value: float, account_equity: float) -> dict:
     return {"run_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "mode": mode,
             "as_of": str(as_of), "sleeve": round(sleeve, 2), "cash": round(cash, 2), "status": status,
             "error": error, "held": ";".join(sorted(weights)),
-            "orders": ";".join(f"{p['side']}:{p['symbol']}" for p in plan)}
+            "orders": ";".join(f"{p['side']}:{p['symbol']}" for p in plan),
+            "sleeve_value": round(sleeve_value, 2), "account_equity": round(account_equity, 2)}
+
+
+def _enum_text(value) -> str:
+    """'OrderStatus.FILLED' / enum / 'filled' -> 'filled'."""
+    text = str(getattr(value, "value", value))
+    return text.rsplit(".", 1)[-1].lower()
+
+
+def _record_fills(client) -> None:
+    """Append a fills.csv row for each earlier 'submitted' order that has no final fill recorded.
+
+    Append only. A failed lookup is logged to stderr and skipped; this step never blocks a rebalance.
+    An order whose latest status is not terminal (e.g. still accepted) is looked up again next time.
+    """
+    try:
+        if not ORDERS.exists():
+            return
+        orders = pd.read_csv(ORDERS, dtype=str, keep_default_na=False)
+        submitted = orders[(orders["status"] == "submitted") & (orders["order_id"] != "")]
+        final: set[str] = set()
+        if FILLS.exists():
+            fills = pd.read_csv(FILLS, dtype=str, keep_default_na=False)
+            final = set(fills.loc[fills["status"].isin(TERMINAL_STATUSES), "order_id"])
+    except Exception as exc:
+        print(f"WARNING: fills step skipped, cannot read the order/fill logs ({type(exc).__name__}: {exc})",
+              file=sys.stderr)
+        return
+    for _, o in submitted.drop_duplicates("order_id").iterrows():
+        oid = o["order_id"]
+        if oid in final:
+            continue
+        try:
+            order = client.get_order_by_id(oid)
+            _append(FILLS, {
+                "order_id": oid, "symbol": o["symbol"], "side": o["side"],
+                "filled_qty": getattr(order, "filled_qty", None) or 0,
+                "filled_avg_price": getattr(order, "filled_avg_price", None) or "",
+                "status": _enum_text(order.status),
+                "checked_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+        except Exception as exc:
+            print(f"WARNING: fill lookup failed for order {oid} ({o['side']} {o['symbol']}): "
+                  f"{type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def _already_executed(month: str) -> bool:
@@ -214,6 +268,8 @@ def main(argv: list[str]) -> int:
             raise SystemExit(f"already executed for {month}; one rebalance per month.")
 
     state = _account()   # read-only, identical in dry run and execute
+    if args.execute:
+        _record_fills(state.client)   # before the safety refusals: pending orders are what they would trip on
     _refuse_if_unsafe(state, args.sleeve)
 
     prices = {s: float(closes[s].iloc[-1]) for s in closes.columns}
@@ -235,11 +291,14 @@ def main(argv: list[str]) -> int:
 
     mode = "execute" if args.execute else "dry_run"
     status, error = "dry_run", ""
+    sleeve_value, equity = float(sum(state.values.values())), state.equity
     if args.execute:
-        _append(RUNS, _run_row(mode, as_of, args.sleeve, state.cash, "started", "", weights, plan))
+        _append(RUNS, _run_row(mode, as_of, args.sleeve, state.cash, "started", "", weights, plan,
+                               sleeve_value, equity))
         status, error = _execute_plan(state.client, plan, month, as_of)
         _verify_after(state.client, args.sleeve)
-    _append(RUNS, _run_row(mode, as_of, args.sleeve, state.cash, status, error, weights, plan))
+    _append(RUNS, _run_row(mode, as_of, args.sleeve, state.cash, status, error, weights, plan,
+                           sleeve_value, equity))
     return 1 if status == "failed" else 0
 
 

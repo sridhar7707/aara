@@ -22,6 +22,7 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(rb, "LOG_DIR", tmp_path)
     monkeypatch.setattr(rb, "RUNS", tmp_path / "runs_v2.csv")
     monkeypatch.setattr(rb, "ORDERS", tmp_path / "orders.csv")
+    monkeypatch.setattr(rb, "FILLS", tmp_path / "fills.csv")
     monkeypatch.setattr(rb, "HALT_FILE", tmp_path / "HALT_TRADING")
     monkeypatch.setattr(rb, "ALPACA_BASE_URL", ep.PAPER_URL)
     monkeypatch.setattr(rb, "SHARED_ACCOUNT_EXECUTE_APPROVED", True)
