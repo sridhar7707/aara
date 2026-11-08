@@ -4,7 +4,8 @@ name: Forward-test log (ADR-082)
 # recorded as SKIP by the script and exit 0, so only real errors fail this job.
 on:
   schedule:
-    - cron: "0 23 * * 1-5"      # 19:00 EDT / 18:00 EST, Monday to Friday (UTC)
+    - cron: "0 23 * * 1-5"      # 19:00 EDT / 18:00 EST, Monday to Friday (UTC): first attempt
+    - cron: "0 2 * * 2-6"       # retry after midnight UTC, for a late bar; a day already logged is SKIP
   workflow_dispatch:
 
 # One snapshot at a time. Never cancel a running snapshot: a half-written day is worse than a late one.

@@ -23,7 +23,11 @@ LOG_DIR = Path("data/forward_log")
 
 
 class SkipDay(Exception):
-    """An expected, non-error refusal: weekend, stale bar, incomplete day, or already logged."""
+    """An expected, non-error refusal: weekend, stale bar (holiday or not yet published), or already logged."""
+
+
+class SnapshotError(Exception):
+    """A real failure: empty or incomplete data, or a half-written log. Exits 1 so the job turns red."""
 MEMBERS_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 ETFS = ["XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLV", "XLY", "GLD", "TLT", "QQQ", "IWM"]
 BENCH = "SPY"
@@ -31,6 +35,7 @@ MOM_LOOKBACK, MOM_SKIP = 252, 21     # 12-1 momentum
 TREND_WINDOW = 210                  # proxy for a 10-month moving average
 HORIZON = 21                        # forward window, trading days
 MIN_HISTORY = MOM_LOOKBACK + 1
+MAX_HORIZON_CALENDAR_DAYS = 35   # 21 trading days span 29-31 calendar days; more means a gap
 
 
 def momentum_score(closes: pd.DataFrame) -> pd.Series:
@@ -79,7 +84,11 @@ def snapshot(today: str | None = None, members: list[str] | None = None) -> str:
     today = today or pd.Timestamp.now(tz="America/New_York").date().isoformat()
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     prices_path, scores_path = LOG_DIR / "prices.csv", LOG_DIR / "scores.csv"
-    if today in _logged_dates(scores_path):
+    in_scores = today in _logged_dates(scores_path)
+    in_prices = today in _logged_dates(prices_path)
+    if in_scores != in_prices:
+        raise SnapshotError(f"{today} is in one log file but not the other; the log needs manual repair.")
+    if in_scores:
         raise SkipDay(f"{today} is already logged; the log is append-only.")
 
     if pd.Timestamp(today).weekday() >= 5:
@@ -88,13 +97,19 @@ def snapshot(today: str | None = None, members: list[str] | None = None) -> str:
 
     # Validate everything before writing anything, so a refused day leaves no trace.
     closes = _download_closes(sorted(set(members) | set(ETFS) | {BENCH}))
+    if closes.empty:
+        raise SnapshotError("price download returned no data (rate limit or outage); this is an error, not a skip.")
+    if closes.index[-1].date().isoformat() != today:
+        # Expected on market holidays, and on runs before the bar is published (the workflow retries).
+        raise SkipDay(f"latest price bar is {closes.index[-1].date()}, not {today}; not logging a stale day.")
+    # Completeness is checked on TODAY's row, not just on the index: a partial final bar must not be logged.
     closes = closes.dropna(axis=1, thresh=MIN_HISTORY)
-    if closes.empty or closes.index[-1].date().isoformat() != today:
-        latest = closes.index[-1].date() if not closes.empty else "none"
-        raise SkipDay(f"latest price bar is {latest}, not {today}; not logging a stale day.")
-    covered = sum(1 for m in members if m in closes.columns)
+    last_ok = closes.iloc[-1].notna()
+    covered = sum(1 for m in members if m in closes.columns and bool(last_ok.get(m, False)))
     if covered < 0.95 * len(members):
-        raise SkipDay(f"only {covered}/{len(members)} members have prices; refusing an incomplete day.")
+        raise SnapshotError(f"only {covered}/{len(members)} members have today's price; refusing an incomplete day.")
+    if not bool(last_ok.get(BENCH, False)):
+        raise SnapshotError("benchmark (SPY) has no price today; refusing the day.")
 
     (LOG_DIR / "members").mkdir(exist_ok=True)
     (LOG_DIR / "members" / f"{today}.txt").write_text("\n".join(members), encoding="utf-8")
@@ -121,6 +136,11 @@ def evaluate(horizon: int = HORIZON) -> dict:
     scores = pd.read_csv(LOG_DIR / "scores.csv", parse_dates=["date"])
     px = prices.pivot_table(index="date", columns="symbol", values="close").sort_index()
     fwd = px.shift(-horizon) / px - 1
+    # A row shift is only a 21-trading-day window if no days are missing. Mask any forward
+    # return whose window spans more than the calendar span of a normal 21-day horizon.
+    dates = pd.Series(px.index, index=px.index)
+    span = (dates.shift(-horizon) - dates).dt.days
+    fwd = fwd.where(span.le(MAX_HORIZON_CALENDAR_DAYS), np.nan)
     bench = fwd[BENCH] if BENCH in fwd else None
     fwd = fwd.sub(bench, axis=0) if bench is not None else fwd
     a = scores.dropna(subset=["score_momentum"]).pivot_table(index="date", columns="symbol", values="score_momentum")
@@ -150,6 +170,9 @@ def main(argv: list[str]) -> int:
             print(snapshot())
         except SkipDay as e:
             print(f"SKIP: {e}")   # expected: exit 0, so the scheduled job does not show as failed
+        except SnapshotError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            return 1              # real failure: the job turns red and someone looks
         return 0
     else:
         r = evaluate()
