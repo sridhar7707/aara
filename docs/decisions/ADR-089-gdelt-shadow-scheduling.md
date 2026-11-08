@@ -1,6 +1,6 @@
 # ADR-089: Scheduled GDELT Shadow Collection
 
-**Status:** Proposed. Not accepted. The runner script exists; no schedule has been added.
+**Status:** Accepted by ksri77 on 2026-11-08. Implemented: `.github/workflows/gdelt_shadow.yml` (on-demand, triggered by the external cron service like the other workflows), with the output kept as a 90-day artifact.
 **Decision Type:** Narrow ADR-002 exception, prospective. Adds a scheduled, read-only data collection. No trading decision reads its output.
 **Related:** ADR-086 (data-source licensing remediation), ADR-052 (backtest quality gate before any model use).
 

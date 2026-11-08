@@ -14,6 +14,29 @@ import bot.monitor.telegram_bot as tg
 from bot.execution.alpaca_client import AlpacaClient
 from bot.risk.risk_manager import RiskManager
 from bot._main_db import _get_macro_from_db, _record_snapshot, _save_risk_state
+from bot._main_reconcile import _fetch_positions_for_reconcile
+
+
+def write_heartbeat_if_consistent(
+    con: sqlite3.Connection, client: AlpacaClient, positions: dict,
+    real_portfolio_value: float, real_available_cash: float,
+) -> bool:
+    """Write the heartbeat snapshot unless it would contradict the database (ADR-088).
+
+    A single empty positions read, while the database still holds open positions, is
+    re-verified first (the same rule the reconcile step applies). If it is still empty,
+    the snapshot is skipped and the reason is logged. Returns True when a snapshot was written.
+    """
+    live = positions or _fetch_positions_for_reconcile(client, con)
+    db_expects = con.execute("SELECT 1 FROM position_state LIMIT 1").fetchone() is not None
+    if not live and db_expects:
+        _logger.warning(
+            "Heartbeat snapshot skipped: positions read empty while the database holds open "
+            "positions (ADR-088). Not recording a value that contradicts the database."
+        )
+        return False
+    _record_snapshot(con, real_portfolio_value, real_available_cash, len(live))
+    return True
 from bot.db.macro_cache import (
     get_macro_halt_reason as _get_macro_halt_reason_from_db,
     REASON_DATA_UNAVAILABLE,
@@ -68,7 +91,7 @@ def prepare_cycle_context(
     )
     # Heartbeat snapshot — always stores the REAL account value so the dashboard
     # portfolio total is correct regardless of PAPER_SIM_CAPITAL.
-    _record_snapshot(con, real_portfolio_value, real_available_cash, len(positions))
+    write_heartbeat_if_consistent(con, client, positions, real_portfolio_value, real_available_cash)
     if sell_order_syms:
         _logger.warning(
             f"Open sell orders detected for {len(sell_order_syms)} symbol(s): {sell_order_syms} "

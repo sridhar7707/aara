@@ -1,6 +1,6 @@
 # ADR-087: Retire the Finnhub Analyst Factor
 
-**Status:** Proposed. Not accepted. Implementation waits for the owner's acceptance.
+**Status:** Accepted by ksri77 on 2026-11-08. Pending: removal of the `FINNHUB_API_KEY` secret. The secret-store deletion was denied by the permission system on 2026-11-08; the owner runs `gh secret delete FINNHUB_API_KEY`. Until then the factor stays live.
 **Decision Type:** Narrow data-source licensing change. Removes one screener factor. Does not change any governed trading value.
 **Related:** ADR-086 (data-source licensing remediation).
 

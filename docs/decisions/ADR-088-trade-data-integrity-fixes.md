@@ -1,6 +1,6 @@
 # ADR-088: Trade-Data Integrity Fixes and Disclosure
 
-**Status:** Proposed. Not accepted. No code has changed.
+**Status:** Accepted by ksri77 on 2026-11-08. Implemented: snapshot guard (`bot/_main_prep.py`, `write_heartbeat_if_consistent`, tests in `tests/test_snapshot_guard.py`). Journal item revised below: no code change needed.
 **Decision Type:** Narrow ADR-002 exception, prospective, for three defects found in production data on 2026-11-08. Does not change any governed trading value.
 **Related:** ADR-002 (frozen paths), ADR-071 (single write path), ADR-046 (derived views only), ADR-074 (degraded LSTM weight transfer).
 
@@ -15,7 +15,7 @@
 ## 2. Decision (proposed)
 
 1. **Snapshot guard.** Before writing a snapshot, re-verify an empty positions read against the database, using the existing reconcile re-verification. Do not write a snapshot that contradicts the database without a logged reason.
-2. **Journal coverage.** Write a journal row for every closing sell, including `SELL_STOP` and `SELL_TIME_EXIT`, with an explicit "no matching open BUY" reason where none exists.
+2. **Journal coverage: no code change.** Revised after checking the code. Every exit path (`_main_positions.py`, sell, reconcile and gap-down) already calls `close_entry`, which always writes a row. The journal's first write was 2026-08-21, and the 12 sells with no journal row all happened before that date. The gap is historical. It is disclosed, and no backfill is made without a separate decision, because the journal is an analysis table, not the ledger.
 3. **Degraded period: disclose, do not rewrite.** The ledger is append-only (ADR-046). Affected decisions are annotated in analysis documents as "degraded LSTM output recorded". No ledger row is changed.
 4. **Tests.** Each fix has a test that reproduces the defect with a fake positions read and a fake journal write.
 
