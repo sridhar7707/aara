@@ -185,3 +185,7 @@ REDDIT_USER_AGENT = os.getenv("REDDIT_USER_AGENT", "ai-trading-bot/1.0")
 # Register at https://finnhub.io (free, no credit card). Add as GitHub secret FINNHUB_API_KEY.
 # Without it the screener still runs; analyst factor is simply skipped.
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
+
+# ADR-085: symbols held by the ETF trend overlay (paper path, bot/execution/etf_paper.py).
+# The stock bot skips them: no universe entry, no adoption into position state, no exits.
+ETF_OVERLAY_SYMBOLS = frozenset({"XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLV", "XLY", "GLD", "TLT", "QQQ", "IWM"})

@@ -15,6 +15,7 @@ from loguru import logger
 from bot.core.error_logger import log_exception
 
 from config import (
+    ETF_OVERLAY_SYMBOLS,
     SYMBOLS, TRADE_DB_PATH,
     MARKET_OPEN_BUFFER_MINS, MARKET_CLOSE_BUFFER_MINS,
     EARNINGS_WINDOW_DAYS,
@@ -47,7 +48,7 @@ from bot._main_db import (
     RiskSnapshot,
     _anchor_daily_start, _enable_wal_mode,
     _load_risk_state, _log_recommendation, _log_signal, _record_snapshot,
-    _save_risk_state, _week_key, log_trade,
+    _save_risk_state, _week_key, log_trade, position_state_cost_basis,
     init_db as _init_db_core,
 )
 
@@ -82,6 +83,7 @@ from bot._main_cycle import (
     _handle_exits, _handle_entry,
 )
 from bot._main_prep import prepare_cycle_context
+from bot._main_overlay import alert_exit_unevaluated, exit_view, stock_held_overlay_symbols
 from bot.capital.pool import (
     load_active_pool as _load_pool, compute_tradeable_capital, reconcile_pool,
 )
@@ -103,6 +105,7 @@ _HALT_FILE        = "data/HALT_TRADING"
 _last_hf_sync: float = 0.0
 _HF_SYNC_INTERVAL: float = 900
 _stop_fired_today: set[str] = set()
+_unprotected_alerted: set[str] = set()   # exit-only symbols already alerted today
 _stop_fired_date: str = ""
 _sym_errors: dict[str, int] = {}
 _SYM_ERROR_SKIP_THRESHOLD = 5   # skip a symbol after this many consecutive failures
@@ -127,6 +130,7 @@ def run(
     today_str = date.today().isoformat()
     if _stop_fired_date != today_str:
         _stop_fired_today = set()
+        _unprotected_alerted.clear()
         _stop_fired_date = today_str
     client = _client if _client is not None else get_executor()
     if not _is_market_hours(client.api):
@@ -141,6 +145,8 @@ def run(
     _active_manifest_id = get_active_pointer(trust_conn)
 
     active_symbols, _universe_payload = _load_today_universe()
+    # ADR-085: ETF-overlay symbols belong to the ETF paper path, not the stock bot.
+    active_symbols = [s for s in active_symbols if s not in ETF_OVERLAY_SYMBOLS]
     _import_screener_picks(con, _universe_payload)
 
     rs: RiskSnapshot = _load_risk_state(con)
@@ -282,12 +288,13 @@ def run(
     # found. invested_amount reconciles against position_state's own cost
     # basis (just trued up above), not mark-to-market -- see pool.py's
     # reconcile_pool() docstring for why.
-    _real_invested_cost_basis = sum(
-        float(r[0]) * float(r[1])
-        for r in con.execute("SELECT entry_price, shares FROM position_state").fetchall()
-    )
+    _real_invested_cost_basis = position_state_cost_basis(con)
     if reconcile_pool(con, _capital_pool.id, real_available_cash, _real_invested_cost_basis):
         _capital_pool = _load_pool(con, initial_amount=_tradeable_capital)
+
+    # ADR-085 A1: overlay names the stock bot holds are managed by EXIT rules only (never entries).
+    exit_only = stock_held_overlay_symbols(con, positions)
+    active_symbols = active_symbols + [s for s in exit_only if s not in active_symbols]
 
     (buy_order_syms, sell_order_syms, macro_score, macro_cap, macro_halt,
      bars_map, sentiments, spy_5bar_return, vs_spy_today, earnings_map,
@@ -300,18 +307,24 @@ def run(
 
     # ── Per-symbol decision loop ──────────────────────────────────────────────
     for symbol in active_symbols:
-        if _sym_errors.get(symbol, 0) >= _SYM_ERROR_SKIP_THRESHOLD:
+        if symbol not in exit_only and _sym_errors.get(symbol, 0) >= _SYM_ERROR_SKIP_THRESHOLD:
             logger.warning(
                 f"{symbol}: skipping — {_sym_errors[symbol]} consecutive failures "
                 "(possible feed or API bug; reset by restarting the bot)"
             )
             continue
         try:
+            _exit_only = symbol in exit_only
             bars_5m, bars_daily = bars_map.get(symbol, (pd.DataFrame(), pd.DataFrame()))
             # Use daily bars for XGB/LSTM/regime (matches training data; never < 60 rows).
             # Fall back to 5-min only when daily fetch fails.
             sig_bars = bars_daily if not bars_daily.empty else bars_5m
             if sig_bars.empty:
+                if _exit_only:
+                    logger.warning(f"{symbol}: exit-only overlay holding has no bars -- "
+                                   "stop protection NOT evaluated this cycle")
+                    alert_exit_unevaluated(symbol, "no price bars", _unprotected_alerted, tg._send)
+                    continue
                 # No persisted record of this previously (silent continue) --
                 # now counted the same as a processing failure so a symbol
                 # with no data for 5 straight cycles gets a candidate_evaluation_event
@@ -350,32 +363,35 @@ def run(
             # Decision Intelligence Phase 1A — candidate_evaluation_events, written
             # once per (symbol, trading day) per phase1a_requirements.md Section 4.1.
             _models_ok = xgb.model is not None and lstm.model is not None and not lstm.is_degraded
-            record_candidate_safe(trust_conn, symbol, today_str, _universe_payload,
-                                  data_available=True, required_models_available=_models_ok,
-                                  evaluation_completed=True)
+            if not _exit_only:
+                record_candidate_safe(trust_conn, symbol, today_str, _universe_payload,
+                                      data_available=True, required_models_available=_models_ok,
+                                      evaluation_completed=True)
 
             # Log every evaluated signal so the dashboard can show live model
             # output even on cycles where no trade fires.
-            _log_signal(con, symbol, xgb_prob, lstm_prob, sentiment,
-                        macro_score, regime_name, action_str,
-                        xgb_calibrated_prob=xgb_calibrated)
+            if not _exit_only:
+                _log_signal(con, symbol, xgb_prob, lstm_prob, sentiment,
+                            macro_score, regime_name, action_str,
+                            xgb_calibrated_prob=xgb_calibrated)
 
             # Record per-symbol recommendation for every cycle so Rec History widget
             # shows what the bot was thinking even when no trade fires.
-            try:
-                from database.services.analytics_service import analytics_service as _as
-                _ens_conf = ensemble_confidence(xgb_prob, lstm_prob, sentiment, macro_score)
-                _as.save_recommendation(symbol, action_str, float(_ens_conf),
+            if not _exit_only:
+                try:
+                    from database.services.analytics_service import analytics_service as _as
+                    _ens_conf = ensemble_confidence(xgb_prob, lstm_prob, sentiment, macro_score)
+                    _as.save_recommendation(symbol, action_str, float(_ens_conf),
+                                            price=current_price)
+                    _log_recommendation(con, symbol, action_str, float(_ens_conf),
                                         price=current_price)
-                _log_recommendation(con, symbol, action_str, float(_ens_conf),
-                                    price=current_price)
-            except Exception as _re:
-                logger.debug(f"save_recommendation({symbol}): {_re}")
+                except Exception as _re:
+                    logger.debug(f"save_recommendation({symbol}): {_re}")
 
             # ── High-confidence signal gate (user-facing signals) ─────────────
             # Fires independently of the bot's position/cash gates so users get
             # the signal even when the bot itself can't trade (e.g. no cash).
-            if action == 1 and not macro_halt and regime_name in ENTRY_REGIMES:
+            if action == 1 and not macro_halt and regime_name in ENTRY_REGIMES and not _exit_only:
                 _sg_passed, _sg_meta = check_signal_gate(
                     symbol, xgb_prob, lstm_prob, macro_score,
                     bars_daily, volume_ratio, vs_spy_today,
@@ -394,10 +410,14 @@ def run(
                 xgb_prob=xgb_prob, lstm_prob=lstm_prob, sentiment=sentiment, macro_score=macro_score,
                 risk=risk, news_data_timestamp=news_data_timestamp,
             )
-            if _handle_exits(con, client, risk, symbol, positions, sell_order_syms,
+            if _handle_exits(con, client, risk, symbol,
+                             exit_view(con, symbol, positions, current_price) if _exit_only else positions,
+                             sell_order_syms,
                              current_price, current_atr, regime_name, portfolio_value,
                              action, pdt_exempt, _stop_fired_today, pool=_capital_pool,
                              ledger_ctx=_exit_ledger_ctx):
+                continue
+            if _exit_only:   # ADR-085 A1: exit rules only; never reach the entry path
                 continue
 
             # ── Entry gates (applied in order of cheapness) ───────────────────
@@ -442,7 +462,9 @@ def run(
                     f"{symbol} has failed {_sym_errors[symbol]} consecutive cycles "
                     f"— possible feed or feature bug"
                 )
-            if _sym_errors[symbol] >= _SYM_ERROR_SKIP_THRESHOLD:
+            if symbol in exit_only:   # never skipped; the exit is retried next cycle, and the operator told
+                alert_exit_unevaluated(symbol, f"error: {e}", _unprotected_alerted, tg._send)
+            elif _sym_errors[symbol] >= _SYM_ERROR_SKIP_THRESHOLD:
                 record_candidate_safe(
                     trust_conn, symbol, today_str, _universe_payload,
                     data_available=False, required_models_available=False,
