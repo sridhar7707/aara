@@ -39,10 +39,12 @@ DOWNLOAD_GAP_SECONDS = 1.0  # polite pacing between file downloads
 # source cannot score them. Financial-expert selection; ml-expert to verify before use.
 SHADOW_ALIASES: dict[str, list[str]] = {
     "MSFT": ["microsoft", "microsoft corporation"],
+    # DIS: coarse proxy. "disney" also covers film, parks and streaming coverage.
     "DIS": ["disney"],
     "AXP": ["american express"],
     "BLK": ["blackrock", "blackrock inc"],
-    "GOOGL": ["google"],
+    # GOOGL: GKG tags Alphabet as "google"; "alphabet" is the parent name.
+    "GOOGL": ["google", "alphabet", "alphabet inc"],
     "SBUX": ["starbucks"],
     "BA": ["boeing"],
 }
