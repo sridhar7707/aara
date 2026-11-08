@@ -27,3 +27,13 @@
 ## 4. Acceptance
 
 Owner: __________________ Date: __________
+
+## 5. Revision, 2026-11-08 (after quant review)
+
+The snapshot skip described in section 2.1 was **rejected** and replaced:
+
+- The writer now always records the real account value, so no point is dropped. The skip removed the deepest-drawdown readings, which biased max drawdown and Sharpe. The quant review (approve with changes) found this, and that the skip ran after reconcile had already cleared the database, so it did not prevent the phantom SELL_RECONCILE rows.
+- The open-position count comes from the live read. If that read is empty while the database holds open positions, the database count is written and a warning is logged.
+- The duplicate broker re-verify is removed, because the cycle already re-verifies an empty read earlier.
+
+**Still open:** the phantom SELL_RECONCILE rows. Fixing them needs the verified-positions decision to run before `_reconcile_positions` in `bot/main.py`, which is a frozen path. That change is drafted as a separate ADR item and is not implemented.

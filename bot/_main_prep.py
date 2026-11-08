@@ -14,31 +14,28 @@ import bot.monitor.telegram_bot as tg
 from bot.execution.alpaca_client import AlpacaClient
 from bot.risk.risk_manager import RiskManager
 from bot._main_db import _get_macro_from_db, _record_snapshot, _save_risk_state
-from bot._main_reconcile import _fetch_positions_for_reconcile
 
 
 def write_heartbeat_if_consistent(
     con: sqlite3.Connection, client: AlpacaClient, positions: dict,
     real_portfolio_value: float, real_available_cash: float,
 ) -> bool:
-    """Write the heartbeat snapshot unless it would contradict the database (ADR-088).
+    """Record the real account value on every cycle (ADR-088, revised 2026-11-08).
 
-    A single empty positions read, while the database still holds open positions, is
-    re-verified first (the same rule the reconcile step applies). If it is still empty,
-    the snapshot is skipped and the reason is logged. Returns True when a snapshot was written.
+    Skipping snapshots was rejected: the skipped points are the deepest-drawdown readings,
+    so skipping them biases max drawdown and Sharpe. The value is always written. The
+    open-position count comes from the live read; if that read is empty while the database
+    holds open positions, the database count is written and the mismatch is logged.
+    Returns True (kept for the caller's signature).
     """
-    db_expects = con.execute("SELECT 1 FROM position_state LIMIT 1").fetchone() is not None
-    live = positions
-    if not live and db_expects:
-        # Only re-verify when the database expects open positions (the helper calls the API).
-        live = _fetch_positions_for_reconcile(client, con)
-    if not live and db_expects:
+    db_count = con.execute("SELECT COUNT(*) FROM position_state").fetchone()[0]
+    open_count = len(positions) if positions else db_count
+    if not positions and db_count:
         _logger.warning(
-            "Heartbeat snapshot skipped: positions read empty while the database holds open "
-            "positions (ADR-088). Not recording a value that contradicts the database."
+            f"Heartbeat: positions read empty while the database holds {db_count} open "
+            "position(s); recording the account value with the database count (ADR-088)."
         )
-        return False
-    _record_snapshot(con, real_portfolio_value, real_available_cash, len(live))
+    _record_snapshot(con, real_portfolio_value, real_available_cash, open_count)
     return True
 from bot.db.macro_cache import (
     get_macro_halt_reason as _get_macro_halt_reason_from_db,
