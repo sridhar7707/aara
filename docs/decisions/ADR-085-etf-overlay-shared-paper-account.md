@@ -22,3 +22,18 @@ The owner chose one Alpaca paper account for both the stock bot and the ETF over
 
 ## Rollback
 Revert the commit. Positions held on the paper account are then adopted again by the stock bot, so close them first.
+
+## Review findings and status (2026-11-07)
+
+Found by `/code-review` on the overlay branch. Fixed in this change:
+- **Whole-account sizing.** The runner used total account equity and all positions. It now manages only a fixed `--sleeve` and only overlay symbols.
+- **NaN prices.** A NaN last close was read as off-trend, and a NaN price reached an order. Both now refuse the run.
+- **Sell sizing.** A full exit was sized from dollars divided by the yfinance price. It now sells the actual held quantity, including residual dust.
+- **Partial runs.** Orders went out with no per-order record. Each order is now logged as submitted, a failure stops the run and is logged, and a failed execute blocks a re-run that month until a person checks.
+- **Intraday bars.** Execute is refused before 16:30 New York time, and when the latest bar is not today's.
+- **Buying power.** The plan refuses buys that exceed available cash.
+
+Open, and blocking any `--execute` on the shared account until resolved:
+1. **Stock-bot capital is computed on the whole shared account** (`bot/main.py` cash and portfolio value). Overlay holdings are counted as stock-bot capital. Stock entries are suspended, so the impact is limited today, but it must be fixed before stock entries return. Needs a design decision: subtract the sleeve, or split the account.
+2. **Pre-existing overlay rows in `position_state`.** Any overlay symbol adopted before ADR-085 stays in state and counts in invested-capital calculations. Check and clear these by hand before the first execute.
+3. **Line limits (pre-existing).** `bot/main.py` and `bot/_main_positions.py` are over 500 lines before this change. Their unused imports (56 in `bot/main.py`) were already present; the lint hook now reports them on every commit that touches those files.

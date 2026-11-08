@@ -1,104 +1,149 @@
-"""ADR-083 runner: month-end rebalance of the ETF trend overlay on the PAPER account.
+"""ADR-083 / ADR-085 runner: month-end rebalance of the ETF trend overlay on the shared PAPER account.
 
-    python scripts/etf_paper_rebalance.py                 # dry run, needs no keys
-    python scripts/etf_paper_rebalance.py --equity 10000  # dry run with a stated equity
-    python scripts/etf_paper_rebalance.py --execute       # submit paper orders (uses the paper account keys)
+    python scripts/etf_paper_rebalance.py --sleeve 5000                # dry run (default), reads no account
+    python scripts/etf_paper_rebalance.py --sleeve 5000 --execute      # submit paper orders
 
-Dry run is the default. Nothing is submitted without --execute. The endpoint guard refuses
-any URL other than the paper endpoint, before any call is made.
+--sleeve is the dollars the overlay manages. Only overlay symbols are planned or counted.
+--execute is refused before 16:30 New York time, so the month-end decision uses the final close,
+and refused if the paper log already has an execute for the same month (one rebalance a month).
+Every order is written to the order log as it is submitted, so a failure mid-run is on record.
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root, as in other scripts
-from bot.execution.etf_paper import ETF_UNIVERSE, assert_paper_endpoint, plan_orders, trend_targets
+from bot.execution.etf_paper import ETF_UNIVERSE, assert_paper_endpoint, plan_orders, trend_targets  # noqa: E402
 
-LOG = Path("data/etf_paper/runs.csv")
+LOG_DIR = Path("data/etf_paper")
+RUNS = LOG_DIR / "runs.csv"
+ORDERS = LOG_DIR / "orders.csv"
 HISTORY_DAYS = 400
+EXECUTE_NOT_BEFORE = time(16, 30)
+NY = ZoneInfo("America/New_York")
 
 
 def _closes() -> pd.DataFrame:
     import yfinance as yf
     raw = yf.download(ETF_UNIVERSE, period=f"{HISTORY_DAYS}d", interval="1d", progress=False,
                       auto_adjust=True, group_by="ticker", threads=True)
-    return pd.DataFrame({s: raw[s]["Close"] for s in ETF_UNIVERSE if s in raw.columns.get_level_values(0)}).sort_index()
+    frames = {}
+    for s in ETF_UNIVERSE:
+        try:
+            frames[s] = raw[s]["Close"]
+        except KeyError:
+            continue
+    return pd.DataFrame(frames).sort_index()
 
 
-def _account(url: str):
+def _account():
     from alpaca.trading.client import TradingClient
     from config import ALPACA_KEY, ALPACA_SECRET
-    key, secret = ALPACA_KEY, ALPACA_SECRET   # shared paper account, ADR-085
-    if not key or not secret:
+    if not ALPACA_KEY or not ALPACA_SECRET:
         raise SystemExit("ALPACA_KEY / ALPACA_SECRET not set (paper account).")
-    client = TradingClient(key, secret, paper=True)
-    equity = float(client.get_account().equity)
-    values = {p.symbol: float(p.market_value) for p in client.get_all_positions()}
-    return client, equity, values
+    client = TradingClient(ALPACA_KEY, ALPACA_SECRET, paper=True)
+    acct = client.get_account()
+    overlay = [p for p in client.get_all_positions() if p.symbol in ETF_UNIVERSE]
+    values = {p.symbol: float(p.market_value) for p in overlay}
+    qty = {p.symbol: float(p.qty) for p in overlay}
+    return client, float(acct.cash), values, qty
 
 
-def _log(row: dict) -> None:
-    LOG.parent.mkdir(parents=True, exist_ok=True)
-    new = not LOG.exists()
-    with LOG.open("a", newline="", encoding="utf-8") as f:
+def _append(path: Path, row: dict) -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    new = not path.exists()
+    with path.open("a", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(row))
         if new:
             w.writeheader()
         w.writerow(row)
 
 
+def _already_executed(month: str) -> bool:
+    if not RUNS.exists():
+        return False
+    rows = pd.read_csv(RUNS)
+    done = rows[(rows["mode"] == "execute") & (rows["as_of"].astype(str).str[:7] == month)]
+    return not done.empty
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--sleeve", type=float, required=True, help="dollars the overlay manages")
     ap.add_argument("--execute", action="store_true", help="submit paper orders")
-    ap.add_argument("--equity", type=float, default=None, help="dry-run only: equity to plan against")
     args = ap.parse_args(argv[1:])
 
     from config import ALPACA_BASE_URL
-    url = ALPACA_BASE_URL
-    assert_paper_endpoint(url)
+    assert_paper_endpoint(ALPACA_BASE_URL)
 
+    now_ny = datetime.now(NY)
     closes = _closes()
+    as_of = closes.index[-1].date()
+    if args.execute:
+        if now_ny.time() < EXECUTE_NOT_BEFORE:
+            raise SystemExit(f"refusing to execute before {EXECUTE_NOT_BEFORE:%H:%M} New York time "
+                             f"(now {now_ny:%H:%M}); run after the close.")
+        if as_of != now_ny.date():
+            raise SystemExit(f"latest bar is {as_of}, not today ({now_ny.date()}); no final close yet.")
+        if _already_executed(str(as_of)[:7]):
+            raise SystemExit(f"already executed for {str(as_of)[:7]}; one rebalance per month.")
+
     prices = {s: float(closes[s].iloc[-1]) for s in closes.columns}
     weights = trend_targets(closes)
 
     if args.execute:
-        client, equity, current = _account(url)
+        client, cash, current, current_qty = _account()
     else:
-        if args.equity is None:
-            print("Dry run needs --equity (no account is read). Example: --equity 10000")
-            return 2
-        client, equity, current = None, args.equity, {}
+        client, cash, current, current_qty = None, args.sleeve, {}, {}
 
-    plan = plan_orders(equity, current, weights, prices)
-    print(f"as of {closes.index[-1].date()} | equity {equity:,.2f} | held by rule: {sorted(weights)}")
+    plan = plan_orders(args.sleeve, current, current_qty, weights, prices, cash_available=cash)
+    print(f"as of {as_of} | sleeve ${args.sleeve:,.2f} | held by rule: {sorted(weights)} | cash ${cash:,.2f}")
     for p in plan:
         amount = f"qty {p['qty']}" if p["side"] == "sell" else f"notional {p['notional']:,.2f}"
         print(f"  {p['side']:4s} {p['symbol']:4s} {amount}")
     if not plan:
         print("  no trades needed")
 
+    status, error = ("dry_run", "")
     if args.execute:
         from alpaca.trading.enums import OrderSide, TimeInForce
         from alpaca.trading.requests import MarketOrderRequest
+        status = "executed"
         for p in plan:
-            if p["side"] == "sell":
-                req = MarketOrderRequest(symbol=p["symbol"], qty=p["qty"], side=OrderSide.SELL, time_in_force=TimeInForce.DAY)
-            else:
-                req = MarketOrderRequest(symbol=p["symbol"], notional=p["notional"], side=OrderSide.BUY, time_in_force=TimeInForce.DAY)
-            order = client.submit_order(order_data=req)
-            print(f"  submitted {p['side']} {p['symbol']}: order {order.id}")
-            p["order_id"] = str(order.id)
+            try:
+                if p["side"] == "sell":
+                    req = MarketOrderRequest(symbol=p["symbol"], qty=p["qty"], side=OrderSide.SELL,
+                                             time_in_force=TimeInForce.DAY)
+                else:
+                    req = MarketOrderRequest(symbol=p["symbol"], notional=p["notional"], side=OrderSide.BUY,
+                                             time_in_force=TimeInForce.DAY)
+                order = client.submit_order(order_data=req)
+                _append(ORDERS, {"run_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                 "as_of": str(as_of), "symbol": p["symbol"], "side": p["side"],
+                                 "notional": p["notional"], "qty": p["qty"], "order_id": str(order.id),
+                                 "status": "submitted"})
+                print(f"  submitted {p['side']} {p['symbol']}: order {order.id}")
+            except Exception as exc:  # stop on the first failure; the order log shows what went out
+                status, error = "failed", f"{p['side']} {p['symbol']}: {type(exc).__name__}: {exc}"
+                _append(ORDERS, {"run_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                                 "as_of": str(as_of), "symbol": p["symbol"], "side": p["side"],
+                                 "notional": p["notional"], "qty": p["qty"], "order_id": "",
+                                 "status": f"error: {exc}"})
+                print(f"  FAILED {error}", file=sys.stderr)
+                break
 
-    _log({"run_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "mode": "execute" if args.execute else "dry_run",
-          "as_of": str(closes.index[-1].date()), "equity": round(equity, 2),
-          "held": ";".join(sorted(weights)), "orders": ";".join(f"{p['side']}:{p['symbol']}" for p in plan)})
-    return 0
+    _append(RUNS, {"run_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "mode": "execute" if args.execute else "dry_run",
+                   "as_of": str(as_of), "sleeve": round(args.sleeve, 2), "cash": round(cash, 2), "status": status,
+                   "error": error, "held": ";".join(sorted(weights)),
+                   "orders": ";".join(f"{p['side']}:{p['symbol']}" for p in plan)})
+    return 1 if status == "failed" else 0
 
 
 if __name__ == "__main__":
