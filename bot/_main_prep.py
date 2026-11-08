@@ -27,8 +27,11 @@ def write_heartbeat_if_consistent(
     re-verified first (the same rule the reconcile step applies). If it is still empty,
     the snapshot is skipped and the reason is logged. Returns True when a snapshot was written.
     """
-    live = positions or _fetch_positions_for_reconcile(client, con)
     db_expects = con.execute("SELECT 1 FROM position_state LIMIT 1").fetchone() is not None
+    live = positions
+    if not live and db_expects:
+        # Only re-verify when the database expects open positions (the helper calls the API).
+        live = _fetch_positions_for_reconcile(client, con)
     if not live and db_expects:
         _logger.warning(
             "Heartbeat snapshot skipped: positions read empty while the database holds open "
