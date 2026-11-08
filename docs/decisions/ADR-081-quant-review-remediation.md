@@ -273,3 +273,21 @@ Fold detail: 2014–16 strategy −12.6% vs SPY −8.5% (larger, the one fold wh
 - Steps 1 and 4 done. Step 2 membership done; the unbiased test is blocked on a licensed price source. Step 3 coverage done; the factor test is not yet run.
 - The factor test on current members alone would be survivorship-biased and is not run. It waits on the data decision.
 - Decision needed from the owner: whether to license point-in-time prices with delisted securities (a paid vendor). Without it, factor research can only produce biased results.
+## Steps 2–4 of the recommended order (2026-11-07)
+
+**Step 2, stop tuning.** No further hyperparameter or feature search on the XGB model. Nothing further is run on the current feature set.
+
+**Step 4, statistical criteria, pre-registered.** Implemented in `scripts/validate_signal.py`, tested in `tests/test_validate_signal.py`. A signal PASSES only if all hold:
+- at least five out-of-sample folds;
+- full-period Newey-West t-statistic of the daily rank IC at or above 2.0, with lag 20 for the 21-day overlap;
+- top-minus-bottom decile spread, net of a 20 bp round-trip cost, positive in at least four of five folds.
+Otherwise the verdict is KILL. Criteria are fixed in code and may change only by ADR.
+
+**Verdict on 12-1 momentum, five folds, pre-registered rule:** KILL.
+- Net decile spread positive in 4 of 5 folds (2014–16 +1.00%, 2017–19 −0.05%, 2019–21 +1.41%, 2022–23 +0.35%, 2024–26 +2.45%).
+- Full-period NW t = 1.80, below 2.0.
+- This is the corrected statistic. Momentum does not pass, although it is the strongest candidate found.
+
+**Step 3, change the data: blocked.** The signal families most likely to carry 1–3 month edge (earnings surprise and revisions, valuation, quality) need point-in-time history: what was known on each date, not today's values. The repository has no such data, and free sources such as yfinance give current fundamentals, not history. Validating any of these needs a data-vendor decision and possibly a budget. That decision is the owner's.
+
+**Status:** steps 2 and 4 done; step 3 blocked on the data decision; the merge of this harness PR is held until all steps are done, as instructed.
