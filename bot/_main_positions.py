@@ -439,6 +439,10 @@ def _handle_exits(
 
     if pos_state:
         new_hwm = max(pos_state.high_water_mark, current_price)
+        if pos_state.shares is not None and pos_qty < pos_state.shares - 1e-9:
+            logger.warning(
+                f"{symbol}: position_state.shares rewritten {pos_state.shares} -> {pos_qty} (lower); "
+                f"inputs: {getattr(positions[symbol], 'clamp_inputs', 'broker qty only; no trades clamp')}")
         if new_hwm > pos_state.high_water_mark or pos_state.shares != pos_qty:
             _upsert_position_state(con, symbol, entry_price, new_hwm, current_atr, pos_qty)
         hwm = new_hwm

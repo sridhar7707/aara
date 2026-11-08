@@ -7,8 +7,9 @@
 Both modes read the account read-only (cash, equity, holdings, open orders) and refuse if it cannot be read.
 Refusals, in both modes: data/HALT_TRADING exists; the account is trading_blocked; an overlay symbol is
 already held or has an open order; the sleeve exceeds 10% of equity or the buys breach the cash reserve.
---execute is also refused until SHARED_ACCOUNT_EXECUTE_APPROVED is set (ADR-085 open item 1), before 16:30
-New York time, and if the run log already has an execute row (started, executed or failed) for the month.
+--execute is also refused: while the stock bot's position_state has a row for any overlay name, or its database
+cannot be read (ADR-085 A1 D3); until SHARED_ACCOUNT_EXECUTE_APPROVED is set (ADR-085 open item 1); before 16:30
+New York time; and if the run log already has an execute row (started, executed or failed) for the month.
 Orders carry a deterministic client_order_id; a "started" row is written to the run log before the first submit.
 Measurement (quant review finding 3): every run row carries sleeve_value (overlay market value now) and
 account_equity. Every execute run first records fills for earlier "submitted" orders into fills.csv
@@ -18,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sqlite3
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, time, timezone
@@ -31,7 +33,7 @@ from bot.execution.etf_paper import (  # noqa: E402
     ETF_UNIVERSE, assert_paper_endpoint, check_sleeve, client_order_id, overlay_symbols_in,
     overlay_value_ok, plan_orders, trend_targets,
 )
-from config import ALPACA_BASE_URL, MIN_CASH_RESERVE_PCT  # noqa: E402
+from config import ALPACA_BASE_URL, MIN_CASH_RESERVE_PCT, TRADE_DB_PATH  # noqa: E402
 
 # ADR-085 open item 1: the owner must accept running the overlay on the shared account before this is True.
 SHARED_ACCOUNT_EXECUTE_APPROVED = False
@@ -41,6 +43,7 @@ RUNS = LOG_DIR / "runs_v2.csv"   # runs.csv had an older 6-column header and is 
 ORDERS = LOG_DIR / "orders.csv"
 FILLS = LOG_DIR / "fills.csv"
 TERMINAL_STATUSES = {"filled", "canceled", "expired", "rejected"}   # a fill row with one of these is final
+STOCK_DB = Path(__file__).resolve().parent.parent / TRADE_DB_PATH   # the stock bot's database (position_state)
 HALT_FILE = Path(__file__).resolve().parent.parent / "data" / "HALT_TRADING"  # same file bot/main.py checks
 HISTORY_DAYS = 400
 EXECUTE_NOT_BEFORE = time(16, 30)
@@ -193,6 +196,31 @@ def _refuse_if_unsafe(state: AccountState, sleeve: float) -> None:
                          f"1.05 x the sleeve ${sleeve:,.2f}.")
 
 
+def _refuse_if_stock_bot_holds_overlay() -> None:
+    """ADR-085 A1 D3: refuse --execute while the stock bot has a position_state row for ANY overlay name.
+
+    Fail closed: if the stock database is missing or unreadable, the check cannot pass, so the run is refused.
+    Open overlay orders are refused separately by _refuse_if_unsafe.
+    """
+    if not STOCK_DB.exists():
+        raise SystemExit(f"refusing to execute: stock database {STOCK_DB} not found; "
+                         "cannot confirm the stock bot holds no overlay name (ADR-085 A1 D3).")
+    marks = ",".join("?" * len(ETF_UNIVERSE))
+    try:
+        con = sqlite3.connect(f"file:{STOCK_DB.as_posix()}?mode=ro", uri=True)
+        try:
+            rows = con.execute(f"SELECT symbol FROM position_state WHERE symbol IN ({marks})",
+                               list(ETF_UNIVERSE)).fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error as exc:
+        raise SystemExit(f"refusing to execute: cannot read position_state from {STOCK_DB} "
+                         f"({type(exc).__name__}: {exc}).")
+    if rows:
+        raise SystemExit(f"refusing to execute: the stock bot has position_state rows for overlay names "
+                         f"{sorted(r[0] for r in rows)}; they must exit first (ADR-085 A1 D3).")
+
+
 def _execute_plan(client, plan: list[dict], month: str, as_of) -> tuple[str, str]:
     """Submit the plan. Returns (status, error). Stops on the first failed submit.
 
@@ -253,6 +281,8 @@ def main(argv: list[str]) -> int:
                          "(set SHARED_ACCOUNT_EXECUTE_APPROVED in this script).")
     if HALT_FILE.exists():
         raise SystemExit(f"refusing: {HALT_FILE} exists (emergency halt). Delete it to resume.")
+    if args.execute:
+        _refuse_if_stock_bot_holds_overlay()
 
     now_ny = datetime.now(NY)
     closes = _closes()

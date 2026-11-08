@@ -225,3 +225,29 @@ def _anchor_daily_start(con: sqlite3.Connection) -> tuple[float | None, str]:
         return float(row[1]), f"trade from {row[0][:10]}"
 
     return None, f"no data for {prior_start} — starting fresh"
+
+
+def position_state_cost_basis(con: sqlite3.Connection) -> float:
+    """Sum of entry_price * shares over position_state, skipping unusable rows.
+
+    A NULL or non-numeric entry_price or shares would otherwise raise and abort the whole cycle,
+    including exits for every other position. The row is skipped with an ERROR naming the symbol
+    and field; it is never defaulted to 0, which would silently understate the invested amount.
+    """
+    total = 0.0
+    for symbol, entry, shares in con.execute("SELECT symbol, entry_price, shares FROM position_state").fetchall():
+        try:
+            total += float(entry) * float(shares)
+        except (TypeError, ValueError):
+            bad = [n for n, v in (("entry_price", entry), ("shares", shares)) if v is None or not _is_number(v)]
+            logger.error(f"position_state[{symbol}]: unusable {'/'.join(bad) or 'values'} "
+                         f"(entry_price={entry!r}, shares={shares!r}) -- row skipped in invested cost basis")
+    return total
+
+
+def _is_number(value) -> bool:
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False

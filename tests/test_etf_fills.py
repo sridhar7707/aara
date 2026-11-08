@@ -1,5 +1,6 @@
 """Forward-test measurement for the ETF overlay runner: fills.csv and the sleeve_value/account_equity columns."""
 import importlib.util
+import sqlite3
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,6 +27,12 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(rb, "HALT_FILE", tmp_path / "HALT_TRADING")
     monkeypatch.setattr(rb, "ALPACA_BASE_URL", ep.PAPER_URL)
     monkeypatch.setattr(rb, "SHARED_ACCOUNT_EXECUTE_APPROVED", True)
+    stock_db = tmp_path / "stock_trades.db"   # ADR-085 A1 D3: an empty position_state, so the check passes
+    con = sqlite3.connect(stock_db)
+    con.execute("CREATE TABLE position_state (symbol TEXT PRIMARY KEY, entry_price REAL, shares REAL)")
+    con.commit()
+    con.close()
+    monkeypatch.setattr(rb, "STOCK_DB", stock_db)
 
 
 class FakeClient:
