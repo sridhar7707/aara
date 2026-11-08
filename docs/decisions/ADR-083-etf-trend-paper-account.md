@@ -10,7 +10,7 @@ The ETF trend overlay (ADR-082 rule B, ADR-081 risk criterion) is the only candi
 
 1. **Dedicated paper account.** The overlay runs on its own Alpaca paper account, with its own keys (`ETF_PAPER_KEY`, `ETF_PAPER_SECRET`). It must never share the account used by the stock bot. The stock bot's position reconciliation would otherwise read ETF holdings as unknown positions and act on them.
 2. **Paper endpoint guard.** The runner refuses to start unless the base URL is exactly `https://paper-api.alpaca.markets`. Any other value, including the live endpoint, raises an error before any call is made.
-3. **Rule, fixed.** Universe: XLC, XLE, XLF, XLI, XLK, XLP, XLV, XLY, GLD, TLT, QQQ, IWM. On the last trading day of each month, hold each ETF whose close is above its 210-trading-day mean, equal-weighted, and hold cash for the rest of the account. Positions below $25 of target value are not traded.
+3. **Rule, fixed.** Universe: XLC, XLE, XLF, XLI, XLK, XLP, XLV, XLY, GLD, TLT, QQQ, IWM. On the last trading day of each month, hold each ETF whose close is above its 210-trading-day mean, equal-weighted among the held ETFs (the tested rule). If none is held, the target is all cash. This matches the backtest in ADR-082 exactly. Positions below $25 of target value are not traded.
 4. **Dry run by default.** The runner prints the planned orders and submits nothing unless run with `--execute`.
 5. **Order sequence.** Sells first, then buys, so cash is available for the buys. Market orders.
 6. **Logging.** Each run appends the plan, the orders and the account equity to `data/etf_paper/runs.csv`. The file is git-ignored, append-only, and reviewed against SPY.
