@@ -62,3 +62,12 @@ Disable the workflow. The data branch remains as the record of every row written
 ## Acceptance
 - Accepted by ksri77 on 2026-11-08 for sections 1, 2, 3, 5, 6 and the concurrency rule.
 - Section 4 (publication): **Option A, chosen by the owner on 2026-11-08** ("publishing the sleeve dollar value: I'd say no"). Dollar figures never go to the public branch.
+
+## Status note: daily job deferred (owner, 2026-11-08)
+The owner chose to skip the private store for now. Option A still keeps dollar values off the public branch, and without a private store the daily job has nowhere durable to keep them. The daily job is therefore **deferred and not built**.
+
+Measurement for the verdict is unaffected: ADR-086 scores on month-end data, and the runner records the sleeve value at each rebalance in the local run log.
+
+**Before the daily job is built, two points must be resolved:**
+1. Public-repo workflow artifacts can be downloadable by anyone with read access. The read job must not emit dollar values into an artifact at all. Only indexed figures may leave the job.
+2. A daily index needs a previous value to compute returns from. That value cannot be stored publicly as dollars. The design must derive returns without storing dollars, or store them in the private location the owner has chosen.
