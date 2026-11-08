@@ -242,3 +242,34 @@ The trend rule (10-month average, equal weight among held ETFs, cash otherwise, 
 3. In at least three of five folds, the strategy's maximum drawdown is smaller than SPY's over the same fold.
 
 Caveat stated in advance: the test runs on the same ETF history used earlier, so a PASS is in-sample evidence for a risk overlay. It is not a validated alpha source, and it does not license deployment by itself.
+
+## Results of the next-direction steps (2026-11-07)
+
+**1. CIK mapping, verified.** Each stock's CIK was checked against its SEC submissions record, which must list the ticker. 29 of 29 individual stocks verified.
+- **Correction to the earlier entry:** XOM is not a mapping error. CIK 2115436 is ExxonMobil Holdings Corp, the successor holding company, and it carries the XOM ticker. The predecessor, Exxon Mobil Corp (CIK 34088), no longer has a ticker. History before the reorganisation must be taken from 34088 and joined to 2115436.
+
+**2. Point-in-time S&P 500 membership.** Reconstructed from the current constituent list and Wikipedia's historical change table, working backwards.
+- 503 current constituents. The reconstruction gives 506 members for 2019, which matches the index's share-class count.
+- 722 tickers were members at some year-end from 2015 to 2026. 219 are no longer in the index.
+- **Price data is the binding constraint.** Of the 219 removed names, yfinance has any price history for 103, 94 for at least two years, and 83 for at least ten years. About half of the historical universe cannot be priced from free data. Any test on the full historical universe is therefore survivorship-biased. An unbiased test needs a licensed source with delisted-security prices.
+
+**3. EDGAR fundamentals, current members.** 502 of 503 have key facts (net income, revenue, equity, diluted EPS), with filing dates for point-in-time use. Median history 16.3 years; 89% have at least 10 years; 81% have at least 15.
+- Removed companies are also in EDGAR, so fundamentals exist for most of the historical universe even where prices do not. Returns are the gap, not fundamentals.
+
+**4. Risk criterion, pre-registered above, tested.** The ETF trend overlay vs SPY, same data as before.
+
+| Condition | Result | Pass |
+|---|---|---|
+| 1. Full-period max drawdown ≤ 60% of SPY's | −25.2% vs −50.8%, ratio 0.50 | Yes |
+| 2. Full-period Sharpe ≥ SPY's | 0.83 vs 0.75 | Yes |
+| 3. Smaller drawdown in ≥ 3 of 5 folds | 4 of 5 | Yes |
+
+Fold detail: 2014–16 strategy −12.6% vs SPY −8.5% (larger, the one fold where the overlay lost more). 2017–19 −12.0% vs −13.5%. 2019–21 −10.3% vs −19.4%. 2022–23 −12.2% vs −20.2%. 2024–26 −6.6% vs −7.6%.
+
+**Verdict: PASS on the pre-registered risk criterion, in-sample.** The overlay reduces drawdown in this history, but it lost more than SPY in 2014–16, so it is regime-dependent. It is a candidate for the risk layer and needs forward paper-trading evidence before any use with real capital.
+
+## Status
+
+- Steps 1 and 4 done. Step 2 membership done; the unbiased test is blocked on a licensed price source. Step 3 coverage done; the factor test is not yet run.
+- The factor test on current members alone would be survivorship-biased and is not run. It waits on the data decision.
+- Decision needed from the owner: whether to license point-in-time prices with delisted securities (a paid vendor). Without it, factor research can only produce biased results.
