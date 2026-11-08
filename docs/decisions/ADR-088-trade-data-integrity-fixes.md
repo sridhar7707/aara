@@ -37,3 +37,9 @@ The snapshot skip described in section 2.1 was **rejected** and replaced:
 - The duplicate broker re-verify is removed, because the cycle already re-verifies an empty read earlier.
 
 **Still open:** the phantom SELL_RECONCILE rows. Fixing them needs the verified-positions decision to run before `_reconcile_positions` in `bot/main.py`, which is a frozen path. That change is drafted as a separate ADR item and is not implemented.
+
+## 6. Correction, 2026-11-08 (point 1 of the quant review)
+
+Section 5 said reconcile runs before the guard and so cannot be protected. That is only partly right. In `bot/main.py`, `positions` comes from `_fetch_positions_for_reconcile` (line 272), which re-verifies an empty read, and `_reconcile_positions` is called with that same verified read (line 283). Reconcile therefore does not act on an unverified empty read.
+
+The residual risk is a broker outage that lasts longer than the re-verify window (three attempts, about 8 seconds in total). That window is a trading decision, not a code defect, and is now proposed in ADR-091.
