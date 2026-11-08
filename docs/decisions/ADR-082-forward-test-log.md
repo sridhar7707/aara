@@ -28,3 +28,9 @@ Obtain an unbiased test of two candidate signals on data that did not exist when
 - No rule is changed during the window. A change requires a new ADR and restarts the clock.
 - Model-driven entries stay suspended (ADR-081 step 1) throughout. This ADR does not re-enable them.
 - No real capital is involved in this test.
+
+## Implementation record (2026-11-07)
+- First snapshot: **2026-11-06** (the last trading day before this record; 7 November 2026 is a Saturday). Logged 513 prices, 500 momentum scores and 12 trend signals.
+- The review date stays **2027-11-07**, as fixed above. That is one day more than twelve months from the first snapshot. The extra day is deliberate: it lets the review include the full twelve months of closes.
+- Snapshots must run on every trading day. A missed day is not lost: membership can be rebuilt from the change table, and the score is a function of closes, so a missed day can be backfilled under the same rules and must be recorded as a backfill.
+- A snapshot is refused if the price bar is stale, if the day is a weekend, if fewer than 95% of members have prices, or if the date is already logged. A refused day leaves no files.
