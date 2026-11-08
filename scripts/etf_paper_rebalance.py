@@ -2,7 +2,7 @@
 
     python scripts/etf_paper_rebalance.py                 # dry run, needs no keys
     python scripts/etf_paper_rebalance.py --equity 10000  # dry run with a stated equity
-    python scripts/etf_paper_rebalance.py --execute       # submit paper orders (needs ETF_PAPER_KEY/SECRET)
+    python scripts/etf_paper_rebalance.py --execute       # submit paper orders (uses the paper account keys)
 
 Dry run is the default. Nothing is submitted without --execute. The endpoint guard refuses
 any URL other than the paper endpoint, before any call is made.
@@ -34,9 +34,10 @@ def _closes() -> pd.DataFrame:
 
 def _account(url: str):
     from alpaca.trading.client import TradingClient
-    key, secret = os.getenv("ETF_PAPER_KEY", ""), os.getenv("ETF_PAPER_SECRET", "")
+    from config import ALPACA_KEY, ALPACA_SECRET
+    key, secret = ALPACA_KEY, ALPACA_SECRET   # shared paper account, ADR-085
     if not key or not secret:
-        raise SystemExit("ETF_PAPER_KEY / ETF_PAPER_SECRET not set. Use a dedicated paper account (ADR-083).")
+        raise SystemExit("ALPACA_KEY / ALPACA_SECRET not set (paper account).")
     client = TradingClient(key, secret, paper=True)
     equity = float(client.get_account().equity)
     values = {p.symbol: float(p.market_value) for p in client.get_all_positions()}
@@ -59,7 +60,8 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--equity", type=float, default=None, help="dry-run only: equity to plan against")
     args = ap.parse_args(argv[1:])
 
-    url = os.getenv("ETF_PAPER_BASE_URL", PAPER_URL)
+    from config import ALPACA_BASE_URL
+    url = ALPACA_BASE_URL
     assert_paper_endpoint(url)
 
     closes = _closes()

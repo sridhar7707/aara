@@ -15,6 +15,7 @@ from loguru import logger
 from bot.core.error_logger import log_exception
 
 from config import (
+    ETF_OVERLAY_SYMBOLS,
     SYMBOLS, TRADE_DB_PATH,
     MARKET_OPEN_BUFFER_MINS, MARKET_CLOSE_BUFFER_MINS,
     EARNINGS_WINDOW_DAYS,
@@ -141,6 +142,8 @@ def run(
     _active_manifest_id = get_active_pointer(trust_conn)
 
     active_symbols, _universe_payload = _load_today_universe()
+    # ADR-085: ETF-overlay symbols belong to the ETF paper path, not the stock bot.
+    active_symbols = [s for s in active_symbols if s not in ETF_OVERLAY_SYMBOLS]
     _import_screener_picks(con, _universe_payload)
 
     rs: RiskSnapshot = _load_risk_state(con)

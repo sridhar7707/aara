@@ -8,7 +8,8 @@ from __future__ import annotations
 import pandas as pd
 
 PAPER_URL = "https://paper-api.alpaca.markets"
-ETF_UNIVERSE = ["XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLV", "XLY", "GLD", "TLT", "QQQ", "IWM"]
+from config import ETF_OVERLAY_SYMBOLS  # single source for the overlay universe (ADR-085)
+ETF_UNIVERSE = sorted(ETF_OVERLAY_SYMBOLS)
 TREND_WINDOW = 210     # trading-day mean, proxy for the 10-month average (ADR-082)
 MIN_TRADE = 25.0       # dollars; smaller differences are not traded
 

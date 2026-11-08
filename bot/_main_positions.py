@@ -14,6 +14,7 @@ from bot.execution.alpaca_client import AlpacaClient
 from bot.risk.risk_manager import RiskManager, _business_days_between
 import bot.monitor.telegram_bot as tg
 from config import (
+    ETF_OVERLAY_SYMBOLS,
     ATR_TP_MULTIPLIER, GAP_DOWN_FLOOR_PCT, TRAILING_STOP_ARM_PCT,
     CORRELATION_THRESHOLD,
     MAX_HOLD_DAYS, PDT_MAX_DAY_TRADES, PDT_WINDOW_DAYS,
@@ -230,6 +231,8 @@ def _reconcile_positions(con: sqlite3.Connection, alpaca_positions: dict,
             )
         _delete_position_state(con, sym)
     for sym, pos in alpaca_positions.items():
+        if sym in ETF_OVERLAY_SYMBOLS:
+            continue  # ADR-085: never adopt the ETF overlay's holdings into stock position state
         if sym not in db_syms:
             entry = float(getattr(pos, "avg_entry_price", 0) or 0)
             qty   = float(getattr(pos, "qty", 0) or 0)
