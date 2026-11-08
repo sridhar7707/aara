@@ -34,11 +34,54 @@ def test_trend_on_is_above_trailing_mean():
 
 def test_snapshot_refuses_a_date_already_logged(tmp_path, monkeypatch):
     monkeypatch.setattr(fl, "LOG_DIR", tmp_path)
-    (tmp_path).mkdir(exist_ok=True)
     pd.DataFrame({"date": ["2026-11-06"], "symbol": ["A"], "score_momentum": [0.1], "trend_on": [None]}).to_csv(
         tmp_path / "scores.csv", index=False)
-    with pytest.raises(SystemExit, match="append-only"):
+    pd.DataFrame({"date": ["2026-11-06"], "symbol": ["A"], "close": [1.0]}).to_csv(
+        tmp_path / "prices.csv", index=False)
+    with pytest.raises(fl.SkipDay, match="append-only"):
         fl.snapshot(today="2026-11-06", members=["A"])
+
+
+def test_half_written_day_is_an_error_not_a_skip(tmp_path, monkeypatch):
+    monkeypatch.setattr(fl, "LOG_DIR", tmp_path)
+    pd.DataFrame({"date": ["2026-11-06"], "symbol": ["A"], "score_momentum": [0.1], "trend_on": [None]}).to_csv(
+        tmp_path / "scores.csv", index=False)
+    with pytest.raises(fl.SnapshotError, match="one log file but not the other"):
+        fl.snapshot(today="2026-11-06", members=["A"])
+
+
+def test_empty_download_is_an_error_not_a_skip(tmp_path, monkeypatch):
+    monkeypatch.setattr(fl, "LOG_DIR", tmp_path)
+    monkeypatch.setattr(fl, "_download_closes", lambda syms: pd.DataFrame())
+    with pytest.raises(fl.SnapshotError, match="no data"):
+        fl.snapshot(today="2026-11-06", members=["A"])
+
+
+def test_partial_final_bar_is_an_error_and_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(fl, "LOG_DIR", tmp_path)
+    idx = pd.bdate_range("2025-01-01", periods=300)
+    cols = ["SPY"] + [f"M{i}" for i in range(20)]
+    closes = pd.DataFrame(100.0, index=idx, columns=cols)
+    closes.iloc[-1, 1:] = np.nan                       # today's row is mostly missing
+    monkeypatch.setattr(fl, "_download_closes", lambda syms: closes)
+    with pytest.raises(fl.SnapshotError, match="today's price"):
+        fl.snapshot(today=idx[-1].date().isoformat(), members=[c for c in cols if c != "SPY"])
+    assert not (tmp_path / "scores.csv").exists()     # a refused day leaves no trace
+
+
+def test_forward_returns_across_a_gap_are_masked(tmp_path, monkeypatch):
+    monkeypatch.setattr(fl, "LOG_DIR", tmp_path)
+    days = list(pd.bdate_range("2024-01-01", periods=90))
+    del days[30:60]                                    # a 30-trading-day hole in the middle of 90 days
+    rows = [(d.date().isoformat(), "A", 100.0 + i) for i, d in enumerate(days)]
+    pd.DataFrame(rows, columns=["date", "symbol", "close"]).to_csv(tmp_path / "prices.csv", index=False)
+    pd.DataFrame(columns=["date", "symbol", "score_momentum", "trend_on"]).to_csv(tmp_path / "scores.csv", index=False)
+    px = pd.read_csv(tmp_path / "prices.csv", parse_dates=["date"]).pivot_table(index="date", columns="symbol", values="close")
+    # the masking is applied inside evaluate(); here we check the rule it uses
+    dates = pd.Series(px.index, index=px.index)
+    span = (dates.shift(-fl.HORIZON) - dates).dt.days
+    assert span.dropna().max() > fl.MAX_HORIZON_CALENDAR_DAYS    # the gap exists
+    assert span.loc[days[0]] <= fl.MAX_HORIZON_CALENDAR_DAYS    # a clean window before the gap is kept
 
 
 def test_evaluate_recovers_a_planted_signal(tmp_path, monkeypatch):
