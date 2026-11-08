@@ -93,3 +93,47 @@ def test_plan_requires_a_valid_price_for_every_trade():
         ep.plan_orders(10_000.0, {}, {}, {"XLK": 0.5}, {}, cash_available=10_000.0)
     with pytest.raises(ValueError, match="no valid price"):
         ep.plan_orders(10_000.0, {}, {}, {"XLK": 0.5}, {"XLK": float("nan")}, cash_available=10_000.0)
+
+
+# --- C2/C4/C5/C6 pure parts ---
+
+def test_client_order_id_is_deterministic_per_month_symbol_side():
+    assert ep.client_order_id("2026-11", "XLK", "buy") == "etf-2026-11-XLK-buy"
+    assert ep.client_order_id("2026-11", "XLK", "sell") != ep.client_order_id("2026-11", "XLK", "buy")
+
+
+def test_check_sleeve_passes_within_limits():
+    ep.check_sleeve(sleeve=1_000.0, equity=10_000.0, cash_after_buys=5_000.0, reserve_pct=0.10)
+    ep.check_sleeve(sleeve=1_000.0, equity=10_000.0, cash_after_buys=1_000.0, reserve_pct=0.10)  # exactly at limits
+
+
+def test_check_sleeve_refuses_sleeve_above_ten_percent_of_equity():
+    with pytest.raises(ValueError, match="exceeds"):
+        ep.check_sleeve(sleeve=1_000.01, equity=10_000.0, cash_after_buys=5_000.0, reserve_pct=0.10)
+
+
+def test_check_sleeve_refuses_cash_below_reserve():
+    with pytest.raises(ValueError, match="reserve"):
+        ep.check_sleeve(sleeve=500.0, equity=10_000.0, cash_after_buys=999.0, reserve_pct=0.10)
+
+
+def test_check_sleeve_refuses_invalid_equity():
+    for bad in (0.0, -5.0, float("nan")):
+        with pytest.raises(ValueError, match="equity"):
+            ep.check_sleeve(sleeve=1.0, equity=bad, cash_after_buys=1_000.0, reserve_pct=0.10)
+
+
+def test_overlay_value_ok_allows_up_to_five_percent_over_sleeve():
+    assert ep.overlay_value_ok({}, 1_000.0)
+    assert ep.overlay_value_ok({"XLK": 600.0, "QQQ": 450.0}, 1_000.0)       # 1050 == limit
+    assert not ep.overlay_value_ok({"XLK": 600.0, "QQQ": 451.0}, 1_000.0)
+
+
+def test_overlay_value_ok_false_on_bad_numbers():
+    assert not ep.overlay_value_ok({"XLK": float("nan")}, 1_000.0)
+    assert not ep.overlay_value_ok({"XLK": 1.0}, 0.0)
+
+
+def test_overlay_symbols_in_filters_to_the_universe_and_sorts():
+    assert ep.overlay_symbols_in(["AAPL", "XLK", "GLD", "TSLA"]) == ["GLD", "XLK"]
+    assert ep.overlay_symbols_in([]) == []
