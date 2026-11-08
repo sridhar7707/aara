@@ -65,3 +65,18 @@ def _isolate_scheduler_dbs(tmp_path, monkeypatch):
             return _real(db_path)
 
         monkeypatch.setattr(mod, "_conn", _redirected)
+
+
+# ADR-081 step 1: model-driven entries are suspended in production (config.MODEL_ENTRIES_ENABLED).
+# Entry-path tests exercise the gates behind that switch, so they run with entries enabled.
+# A test marked `model_entries_default` keeps the production default and checks the suspension.
+@pytest.fixture(autouse=True)
+def _enable_model_entries_for_gate_tests(request, monkeypatch):
+    if request.node.get_closest_marker("model_entries_default"):
+        return
+    import bot._main_cycle as _mc
+    monkeypatch.setattr(_mc, "MODEL_ENTRIES_ENABLED", True)
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "model_entries_default: keep the production MODEL_ENTRIES_ENABLED default")

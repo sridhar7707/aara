@@ -219,3 +219,15 @@ Scratch scripts are in the session scratchpad, not in the repository.
 **Recommended decisions (owner):**
 - Whether model-driven entries should be suspended until a candidate passes a corrected multi-fold test.
 - Whether to pursue new data sources (fundamentals, earnings, validated sentiment) before any further feature research on price data.
+
+## Step 1 taken: model-driven entries suspended (2026-11-07)
+
+Owner instruction: follow the recommended order, starting with suspending model-driven entries.
+
+- `config.MODEL_ENTRIES_ENABLED = False`, hard-coded. It is not an environment variable, because environment overrides of risk settings were flagged by the architecture review.
+- `bot/_main_cycle.py` `_handle_entry` returns before any gate when the flag is off, and records `model_entries_suspended` in the decision ledger.
+- Exits, stop-losses, trailing stops, position limits and the reconciliation path are unchanged.
+- Entry-path tests run with entries enabled through an autouse fixture in `tests/conftest.py`. One test, marked `model_entries_default`, checks that the production default blocks every buy.
+- Re-enabling entries requires an accepted ADR and a validated model.
+
+Steps 2 to 4 of the recommended order, which are stop tuning, the data change and the statistical criteria, are not started.

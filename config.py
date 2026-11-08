@@ -72,6 +72,10 @@ DAILY_LOSS_WARNING_PCT = DAILY_LOSS_LIMIT_PCT * 0.50          # warn at 50% of d
 WEEKLY_LOSS_LIMIT_PCT = float(os.getenv("WEEKLY_LOSS_LIMIT_PCT", 0.10))  # 10% weekly circuit breaker
 PORTFOLIO_DRAWDOWN_LIMIT_PCT = float(os.getenv("PORTFOLIO_DRAWDOWN_LIMIT_PCT", 0.12))  # 12% from all-time high
 MACRO_HALT_VIX = float(os.getenv("MACRO_HALT_VIX", 28.0))    # halt all new buys above this VIX level
+# ADR-081 step 1: model-driven entries are suspended. The XGB model shows no reliable
+# out-of-sample skill (mean AUC 0.513 over five folds). Exits, stops and position limits
+# are unaffected. Hard-coded, not an env var: re-enabling needs an accepted ADR.
+MODEL_ENTRIES_ENABLED = False
 MAX_RISK_PER_TRADE_PCT  = float(os.getenv("MAX_RISK_PER_TRADE_PCT",  0.015))  # max 1.5% of portfolio at risk per trade
 MIN_RR_RATIO            = float(os.getenv("MIN_RR_RATIO",            1.0))    # 1× R:R for 1-week holds (was 1.5 for 3-week; tighter targets need looser gate)
 MIN_TP_PCT              = float(os.getenv("MIN_TP_PCT",              0.01))   # 1% TP floor for short-term swing trades (was 5% for 3-week momentum holds)
