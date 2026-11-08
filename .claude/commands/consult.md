@@ -15,10 +15,12 @@ Send these Agent calls in a **single message** so they run concurrently. Give ea
 2. `architect`: Where does this belong, what does it touch (callers, boundaries, ADRs, frozen paths), and what is the smallest correct design?
 3. `ml-expert`: Does this involve the learning model, labels, features, thresholds, or calibration? If not, say "not applicable" and stop there. If yes, judge leakage, validation, and baselines.
 4. `developer`: What would implementing this take (files, tests, risk of breakage)? Do not edit anything. Give the plan and the test you would add.
+5. `risk-officer`: Does this touch sizing, limits, execution, exposure, or the kill switch? If not, say "not applicable". If yes, give a verdict (APPROVE, CONDITIONS, or VETO) with the worst-case loss.
+6. `data-engineer`: Does this touch data sources, storage, sync, or input features? If not, say "not applicable". If yes, give a verdict (SAFE, CONDITIONS, or UNSAFE) with the data at risk.
 
 If the request touches `bot/strategy/`, `bot/risk/`, or `scripts/train_model.py`, also run `quant-reviewer` on the relevant diff or files.
 
-Do not run more than five subagents in total.
+Run only the roles that apply, not all six. Do not run more than five subagents in total: if six would apply, pick the five most relevant and say which one you dropped. A risk-officer VETO overrides every other role's recommendation.
 
 ## Step 2: Merge into one answer
 

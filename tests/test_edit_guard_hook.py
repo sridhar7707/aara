@@ -90,6 +90,27 @@ def test_module_exercised_by_differently_named_test_counts_as_tested(project):
     assert "No test file" not in ctx
 
 
+def test_risk_path_routes_to_risk_officer(project):
+    rel = _write(project, "bot/risk/limits.py", "VALUE = 1\n")
+    _write(project, "tests/test_limits.py", "import limits\n")
+    ctx = edit_guard.evaluate(_payload("PostToolUse", "Edit", rel, project), project)["hookSpecificOutput"]["additionalContext"]
+    assert "risk-officer" in ctx
+
+
+def test_data_path_routes_to_data_engineer(project):
+    rel = _write(project, "bot/db/store.py", "VALUE = 1\n")
+    _write(project, "tests/test_store.py", "import store\n")
+    ctx = edit_guard.evaluate(_payload("PostToolUse", "Edit", rel, project), project)["hookSpecificOutput"]["additionalContext"]
+    assert "data-engineer" in ctx
+
+
+def test_unrelated_path_gets_no_specialist_routing(project):
+    rel = _write(project, "scripts/tool.py", "VALUE = 1\n")
+    _write(project, "tests/test_tool.py", "import tool\n")
+    ctx = edit_guard.evaluate(_payload("PostToolUse", "Edit", rel, project), project)["hookSpecificOutput"]["additionalContext"]
+    assert "risk-officer" not in ctx and "data-engineer" not in ctx
+
+
 def test_post_clean_file_with_test_only_logs_decision(project):
     rel = _write(project, "scripts/tool.py", "VALUE = 1\n")
     _write(project, "tests/test_tool.py", "def test_x():\n    pass\n")

@@ -34,6 +34,16 @@ TESTED_PREFIXES = ("bot/", "scripts/", "analytics/", "backtest/", "sentinel_engi
 # Strategy / risk / ML code: the quant-reviewer pass applies before commit.
 QUANT_PREFIXES = ("bot/strategy/", "bot/risk/", "scripts/train_model.py")
 
+# Changes that move money or limits: route to the risk-officer while editing.
+RISK_PREFIXES = ("bot/risk/", "bot/execution/", "bot/capital/")
+
+# Changes to data sources, storage, and sync: route to the data-engineer.
+DATA_PREFIXES = (
+    "bot/db/", "database/", "bot/_main_db.py", "bot/_main_reconcile.py",
+    "bot/strategy/features.py", "bot/strategy/macro.py", "bot/strategy/sentiment.py",
+    "bot/strategy/reddit_sentiment.py", "bot/trust_ledger/",
+)
+
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit"}
 
 # Standing instruction: every change is a recorded decision, not a silent action.
@@ -124,6 +134,10 @@ def _python_notes(rel: str, root: Path) -> list[str]:
 
     if rel.startswith(QUANT_PREFIXES):
         notes.append(f"{rel} is strategy/risk/ML code: consult the quant-reviewer agent before committing.")
+    if rel.startswith(RISK_PREFIXES):
+        notes.append(f"{rel} changes money or limits: the risk-officer must approve (it can veto).")
+    if rel.startswith(DATA_PREFIXES):
+        notes.append(f"{rel} touches data or storage: the data-engineer must check sync, writes, and point-in-time safety.")
 
     return notes
 

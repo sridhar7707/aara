@@ -14,10 +14,13 @@ import sys
 
 PROTOCOL = (
     "DECISION RULE (standing): For implementation, strategy/ML, or architecture requests, "
-    "decide through the matching role (architect, developer, ml-expert, stock-strategist) "
-    "via the Agent tool before editing. State each decision as: DECIDED: <choice> | WHY: <evidence> "
-    "| ROLE: <who> | REVERSIBLE: yes/no. Read-only questions and small reversible edits get one "
-    "DECIDED line and no subagent. Stop and ask if roles disagree, evidence is weak, the action is "
+    "decide through the matching role via the Agent tool before editing: architect (design, ADRs), "
+    "developer (plan and tests), ml-expert (models, labels, thresholds), stock-strategist (performance, "
+    "stops, targets, sizing), risk-officer (sizing, limits, execution, kill switch; can VETO), "
+    "data-engineer (ingestion, caching, storage, sync, input features). "
+    "State each decision as: DECIDED: <choice> | WHY: <evidence> | ROLE: <who> | REVERSIBLE: yes/no. "
+    "Read-only questions and small reversible edits get one DECIDED line and no subagent. "
+    "Stop and ask if roles disagree, a risk-officer VETO stands, evidence is weak, the action is "
     "hard to reverse or outward-facing, or it touches stop_loss, daily_loss_limit, max_position, "
     "the XGB threshold, or a frozen path without an ADR."
 )
