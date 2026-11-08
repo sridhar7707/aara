@@ -17,7 +17,7 @@ PROTOCOL = (
     "requests, consult the one or two roles that apply via the Agent tool before editing: architect, "
     "developer, ml-expert, stock-strategist, risk-officer (can VETO), data-engineer, compliance-advisor "
     "(customer text, pricing, signals), product-manager (scope), security-reviewer (auth, secrets, config, "
-    "workflows), qa-tester (failure cases), go-to-market (launch, pricing), support-docs (guides). "
+    "workflows), qa-tester (failure cases), ui-ux-expert (screens, what users see), go-to-market (launch, pricing), support-docs (guides). "
     "State each decision as: DECIDED: <choice> | WHY: <evidence> | ROLE: <who> | REVERSIBLE: yes/no. "
     "Read-only questions and small reversible edits get one DECIDED line and no subagent. "
     "Stop and ask the owner if roles disagree, a VETO stands, evidence is weak, the action is hard to "
