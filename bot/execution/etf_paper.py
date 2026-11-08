@@ -3,6 +3,10 @@
 Pure functions only: the rule, order planning and the endpoint guard. No network, no
 imports from scripts/. The runner in scripts/etf_paper_rebalance.py does the I/O.
 
+The rule is the tested one (scripts/backtest_etf_trend.py): on month-end closes, an ETF is held when
+its month-end close is strictly above the mean of its last TREND_MONTHS (10) month-end closes, the
+current one included. Month-end closes are the last available daily close of each calendar month.
+
 The overlay manages a fixed SLEEVE of dollars, not the whole account. Only overlay
 symbols are planned, and only their holdings are counted against the sleeve.
 """
@@ -16,7 +20,7 @@ from config import ETF_OVERLAY_SYMBOLS  # single source for the overlay universe
 
 PAPER_URL = "https://paper-api.alpaca.markets"
 ETF_UNIVERSE = sorted(ETF_OVERLAY_SYMBOLS)
-TREND_WINDOW = 210     # trading-day mean, proxy for the 10-month average (ADR-082)
+TREND_MONTHS = 10      # rolling mean of the last 10 month-end closes, current included (ADR-082 tested rule)
 MIN_TRADE = 25.0       # dollars; smaller differences are not traded (full exits always are)
 SLEEVE_MAX_EQUITY_PCT = 0.10      # the overlay sleeve may not exceed this share of account equity (C4)
 OVERLAY_VALUE_TOLERANCE = 1.05    # overlay holdings above this multiple of the sleeve are a fault (C5)
@@ -28,25 +32,38 @@ def assert_paper_endpoint(url: str) -> None:
         raise RuntimeError(f"refusing to run: base URL {url!r} is not the paper endpoint {PAPER_URL!r}")
 
 
+def month_end_closes(closes: pd.DataFrame) -> pd.DataFrame:
+    """Last available close of each calendar month, one row per month (the backtest's resample("ME").last())."""
+    if not isinstance(closes.index, pd.DatetimeIndex):
+        raise ValueError("closes must be indexed by date to derive month-end closes")
+    closes = closes.sort_index()
+    return closes.groupby(closes.index.to_period("M")).last()
+
+
 def trend_targets(closes: pd.DataFrame) -> dict[str, float]:
-    """Target weights from the last row of closes.
+    """Target weights from daily closes, using the tested 10-month month-end rule.
 
     Every ETF in the universe must have a valid last close; a missing or NaN close is an
-    error, never silently treated as off-trend. An ETF whose last close is above its
-    TREND_WINDOW mean is held, equal-weighted among the held ETFs (the tested rule). If
-    none is held, the target is all cash.
+    error, never silently treated as off-trend. An ETF is held when its latest month-end
+    close is strictly above the mean of its last TREND_MONTHS month-end closes (current
+    included); an ETF with fewer than TREND_MONTHS month-end closes is not held. Held ETFs
+    are equal-weighted. If none is held, the target is all cash. Fewer than TREND_MONTHS
+    month-ends in total is an error.
     """
-    if len(closes) < TREND_WINDOW:
-        raise ValueError(f"need {TREND_WINDOW} closes, have {len(closes)}")
     missing = [s for s in ETF_UNIVERSE if s not in closes.columns]
     if missing:
         raise ValueError(f"no price history for {missing}; refusing to plan a partial universe")
+    if len(closes) == 0:
+        raise ValueError("no closes; refusing to plan")
     last = closes[ETF_UNIVERSE].iloc[-1]
     bad = [s for s in ETF_UNIVERSE if not math.isfinite(float(last[s]))]
     if bad:
         raise ValueError(f"invalid last close for {bad}; refusing to plan on bad data")
-    on = [s for s in ETF_UNIVERSE
-          if last[s] > closes[s].iloc[-TREND_WINDOW:].mean()]
+    monthly = month_end_closes(closes[ETF_UNIVERSE])
+    if len(monthly) < TREND_MONTHS:
+        raise ValueError(f"need {TREND_MONTHS} month-end closes, have {len(monthly)}")
+    mean = monthly.rolling(TREND_MONTHS).mean().iloc[-1]   # NaN (fewer than 10 valid month-ends) compares False
+    on = [s for s in ETF_UNIVERSE if monthly[s].iloc[-1] > mean[s]]
     if not on:
         return {}
     share = 1.0 / len(on)

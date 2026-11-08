@@ -42,6 +42,8 @@ Open, and blocking any `--execute` on the shared account until resolved:
 
 **Status:** Accepted by ksri77 on 2026-11-07 ("yes please draft and accept"). Supersedes decision 3 of this ADR (the stock bot never manages overlay names). Decisions 1, 2 and 4 stand.
 
+**Status log:** 2026-11-08: the live rule in `bot/execution/etf_paper.py` was aligned to the tested 10-month month-end definition (`TREND_MONTHS = 10`, replacing the 210-daily-close proxy); C3 is met on the rule-definition point.
+
 **Why:** the risk review (APPROVE WITH CONDITIONS) and the quant review (blocking finding 1) found that overlay names the stock bot already holds lost their stop-loss, trailing stop, time exit and signal sell when the overlay names were removed from the stock loop. That is a risk-control regression. It is restored by this amendment.
 
 **Decisions**
@@ -72,7 +74,7 @@ Open, and blocking any `--execute` on the shared account until resolved:
 **Conditions still open (gate any `--execute`)**
 - **C1:** D2 audit complete, and the production database checked for overlay-named rows.
 - **C2:** the implementation above passes its tests and a risk-officer review.
-- **C3:** the rule question is settled (see ADR-085 review notes): the live rule must match the tested 10-month month-end definition, or the 210-day rule needs its own pre-registration.
+- **C3:** the rule question is settled (see ADR-085 review notes): the live rule must match the tested 10-month month-end definition, or the 210-day rule needs its own pre-registration. Met 2026-11-08: the live rule now is the tested definition.
 - **C4:** the measurement gap is closed: sleeve value and fills recorded per run.
 
 **Line limits:** `bot/main.py` (504 lines) and `bot/_main_positions.py` (548 lines) are already over the project limit. The change adds lines there, so the logic goes in `bot/_main_overlay.py`.

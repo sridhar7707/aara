@@ -12,8 +12,8 @@ It NEEDS the raw price CSVs (data/raw/<SYMBOL>.csv for the 12 ETFs and SPY; firs
 DEFINITION THAT WAS TESTED (do not edit to match anything else; change it only as a new, labelled test):
   - Frequency: MONTHLY. Closes are month-end closes (daily closes resampled with .resample("ME").last()).
   - Trend window: 10 MONTHS, a rolling mean of the last 10 month-end closes, current month-end included.
-    It is NOT a 210-trading-day mean of daily closes. bot/execution/etf_paper.py uses TREND_WINDOW = 210
-    daily closes as a proxy for this; that proxy was NOT what this backtest tested.
+    It is NOT a 210-trading-day mean of daily closes. bot/execution/etf_paper.py formerly used a 210-daily-close
+    proxy (TREND_WINDOW); it was aligned to this definition on 2026-11-08 (TREND_MONTHS = 10).
   - Signal: an ETF is held for month t+1 when its month-end close at t is strictly above its 10-month mean
     (signal.shift(1): decided at month-end t, earns month t+1). A mean that is still NaN (fewer than 10
     month-ends) counts as not held.

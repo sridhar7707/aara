@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from bot.execution import etf_paper as ep
+from scripts import backtest_etf_trend as bt
 
 
 def _closes(up=(), down=(), n=300):
@@ -57,6 +58,85 @@ def test_trend_targets_refuses_a_nan_last_close():
     c.iloc[-1, c.columns.get_loc("QQQ")] = np.nan
     with pytest.raises(ValueError, match="invalid last close"):
         ep.trend_targets(c)
+
+
+# --- the tested 10-month month-end rule (scripts/backtest_etf_trend.py) ---
+
+def _month_end_series(month_ends, filler, idx):
+    """Daily series on idx: every day `filler` except each calendar month's last day, set from month_ends."""
+    s = pd.Series(float(filler), index=idx)
+    last_days = s.groupby(idx.to_period("M")).tail(1).index
+    assert len(last_days) == len(month_ends)
+    s.loc[last_days] = list(month_ends)
+    return s
+
+
+def _flat_universe(idx, value=100.0):
+    return pd.DataFrame({s: np.full(len(idx), value) for s in ep.ETF_UNIVERSE}, index=idx)
+
+
+def test_trend_months_is_ten():
+    assert ep.TREND_MONTHS == 10 == bt.TREND_MONTHS
+    assert not hasattr(ep, "TREND_WINDOW")
+
+
+def test_month_end_mean_is_used_not_the_daily_mean():
+    idx = pd.bdate_range("2024-01-01", "2024-10-31")           # 10 calendar months, >210 trading days
+    assert len(idx) >= 210
+    c = _flat_universe(idx)
+    rising = [100.0 + i for i in range(10)]                    # month-ends rise: last 109 > mean 104.5
+    c["XLK"] = _month_end_series(rising, filler=1000.0, idx=idx)           # daily mean far above the last close
+    c["QQQ"] = _month_end_series(rising[::-1], filler=1.0, idx=idx)        # month-ends fall; daily mean far below
+    # the old daily rule would decide the opposite way for both
+    assert c["XLK"].iloc[-1] < c["XLK"].iloc[-210:].mean()
+    assert c["QQQ"].iloc[-1] > c["QQQ"].iloc[-210:].mean()
+    assert ep.trend_targets(c) == {"XLK": 1.0}
+
+
+def test_strictly_above_is_required_equal_is_not_held():
+    idx = pd.bdate_range("2024-01-01", "2024-12-31")
+    c = _flat_universe(idx, 100.0)                             # last close == 10-month mean exactly
+    assert ep.trend_targets(c) == {}
+    c["GLD"] = _month_end_series([100.0] * 11 + [100.5], filler=100.0, idx=idx)   # 100.5 > mean 100.05
+    assert ep.trend_targets(c) == {"GLD": 1.0}
+
+
+def test_fewer_than_ten_month_ends_raises_even_with_many_daily_closes():
+    idx = pd.date_range("2024-01-01", "2024-09-30", freq="D")  # 9 months, 274 daily rows (> 210)
+    assert len(idx) > 210
+    with pytest.raises(ValueError, match="10 month-end closes, have 9"):
+        ep.trend_targets(_flat_universe(idx))
+
+
+def test_an_etf_with_fewer_than_ten_month_ends_is_not_held():
+    idx = pd.bdate_range("2024-01-01", "2024-12-31")
+    c = _full_universe_closes(up=("QQQ",), n=len(idx)).set_index(idx)
+    new = pd.Series(np.linspace(50, 150, len(idx)), index=idx)
+    new[idx < "2024-05-01"] = np.nan                            # only 8 month-ends of history
+    c["XLK"] = new
+    assert ep.trend_targets(c) == {"QQQ": 1.0}
+
+
+def test_matches_the_backtest_rule_on_a_fixed_synthetic_series():
+    # scripts/backtest_etf_trend.py computes the signal inline inside strategy_returns (no importable rule
+    # function), so its two signal lines are replicated here:
+    #   m = px.resample("ME").last();  sig = (m > m.rolling(bt.TREND_MONTHS).mean())
+    rng = np.random.default_rng(20261108)
+    idx = pd.bdate_range("2022-01-03", "2024-12-31")
+    px = pd.DataFrame(100 * np.exp(np.cumsum(rng.normal(0.0004, 0.012, (len(idx), len(bt.ETFS))), axis=0)),
+                      index=idx, columns=bt.ETFS)
+    m = px.resample("ME").last()
+    sig = m > m.rolling(bt.TREND_MONTHS).mean()
+    held_sets = set()
+    for month_end in m.index[bt.TREND_MONTHS - 1:]:
+        daily_cut = px[px.index.to_period("M") <= month_end.to_period("M")]
+        want = sorted(sig.loc[month_end][sig.loc[month_end]].index)
+        got = ep.trend_targets(daily_cut)
+        assert sorted(got) == want, month_end
+        if want:
+            assert all(v == pytest.approx(1.0 / len(want)) for v in got.values())
+        held_sets.add(tuple(want))
+    assert len(held_sets) > 3          # the series is not degenerate: the held set actually changes
 
 
 def test_plan_buys_and_sells_to_target_sells_first():
