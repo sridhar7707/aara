@@ -81,7 +81,7 @@ from bot._main_cycle import (
     EntryContext,
     _handle_exits, _handle_entry,
 )
-from bot._main_prep import prepare_cycle_context
+from bot._main_prep import prepare_cycle_context, sanity_check
 from bot.capital.pool import (
     load_active_pool as _load_pool, compute_tradeable_capital, reconcile_pool,
 )
@@ -201,23 +201,21 @@ def run(
     # Sanity check: reject any reading that is less than half the last known value.
     # Prevents a transient API error or wrong-account connection from triggering a
     # mass SELL_RECONCILE that phantom-closes all held positions in the DB.
-    _last_snap = con.execute(
-        "SELECT portfolio_value FROM portfolio_snapshots "
-        "WHERE portfolio_value > 0 ORDER BY timestamp DESC LIMIT 1"
-    ).fetchone()
+    # ADR-088 revision (quant review): the baseline is the last TRUSTED value, saved only on
+    # cycles that pass this check. A blocked reading therefore never becomes the next baseline.
+    _sanity_blocked, _baseline = sanity_check(con, real_portfolio_value)
     # _sanity_blocked=True: block reconcile (prevents phantom SELL_RECONCILE storm) and
     # new entries (can't size positions without correct account value), but exit management
     # still runs every cycle so stop-losses and gap-down floors are never suppressed.
-    _sanity_blocked = _last_snap and real_portfolio_value < _last_snap[0] * 0.50
     if _sanity_blocked:
         logger.error(
             f"Portfolio value sanity check FAILED: Alpaca reports ${real_portfolio_value:,.2f} "
-            f"but last snapshot was ${_last_snap[0]:,.2f} — drop >50%. "
+            f"but the trusted baseline is ${_baseline:,.2f} — drop >50%. "
             "Likely wrong account or transient API error. Blocking reconcile and new entries."
         )
         tg._send(
             f"🚨 Portfolio value sanity check failed — Alpaca reports ${real_portfolio_value:,.0f} "
-            f"vs last known ${_last_snap[0]:,.0f}. Reconcile + buys blocked. Check API key / account."
+            f"vs trusted baseline ${_baseline:,.0f}. Reconcile + buys blocked. Check API key / account."
         )
 
     logger.info(f"Alpaca connection OK — account value ${real_portfolio_value:,.2f}")

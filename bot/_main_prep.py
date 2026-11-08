@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
-from datetime import date
+from datetime import date, datetime, timezone
 
 import pandas as pd
 from loguru import logger
@@ -162,3 +162,37 @@ def prepare_cycle_context(
     return (buy_order_syms, sell_order_syms, macro_score, macro_cap, macro_halt,
             bars_map, sentiments, spy_5bar_return, vs_spy_today, earnings_map,
             news_data_timestamp)
+
+
+TRUSTED_KEY = "last_trusted_portfolio_value"
+SANITY_DROP_LIMIT = 0.50
+
+
+def load_trusted_value(con: sqlite3.Connection) -> float | None:
+    row = con.execute("SELECT value FROM risk_state WHERE key = ?", (TRUSTED_KEY,)).fetchone()
+    return float(row[0]) if row and row[0] is not None else None
+
+
+def save_trusted_value(con: sqlite3.Connection, value: float) -> None:
+    con.execute(
+        "INSERT INTO risk_state (key, value, updated_at) VALUES (?, ?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+        (TRUSTED_KEY, repr(float(value)), datetime.now(timezone.utc).isoformat()),
+    )
+    con.commit()
+
+
+def sanity_check(con: sqlite3.Connection, real_value: float) -> tuple[bool, float | None]:
+    """Return (blocked, baseline). Baseline = last trusted value, else the latest snapshot
+    (first run only). A blocked reading is never saved, so it cannot become the baseline."""
+    baseline = load_trusted_value(con)
+    if baseline is None:
+        row = con.execute(
+            "SELECT portfolio_value FROM portfolio_snapshots "
+            "WHERE portfolio_value > 0 ORDER BY timestamp DESC LIMIT 1"
+        ).fetchone()
+        baseline = float(row[0]) if row else None
+    blocked = bool(baseline) and real_value < baseline * SANITY_DROP_LIMIT
+    if not blocked:
+        save_trusted_value(con, real_value)
+    return bool(blocked), baseline

@@ -43,3 +43,18 @@ The snapshot skip described in section 2.1 was **rejected** and replaced:
 Section 5 said reconcile runs before the guard and so cannot be protected. That is only partly right. In `bot/main.py`, `positions` comes from `_fetch_positions_for_reconcile` (line 272), which re-verifies an empty read, and `_reconcile_positions` is called with that same verified read (line 283). Reconcile therefore does not act on an unverified empty read.
 
 The residual risk is a broker outage that lasts longer than the re-verify window (three attempts, about 8 seconds in total). That window is a trading decision, not a code defect, and is now proposed in ADR-091.
+
+## 7. Sanity baseline fix, 2026-11-08 (quant review, finding 1)
+
+The revised writer recorded the account value on every cycle, including sanity-blocked cycles. The sanity baseline was the latest snapshot, so a blocked glitch reading became the next cycle's baseline. Reconcile could then unblock on the following cycle. Fixed:
+
+- The baseline is a **trusted value** stored in `risk_state` (`last_trusted_portfolio_value`). It is saved only on cycles that pass the sanity check. A blocked reading is never saved.
+- `sanity_check()` in `bot/_main_prep.py` implements this. `bot/main.py` calls it. Tests: `tests/test_sanity_baseline.py` (6 tests, including the reviewer's 10,000 then 4,000 scenario, stays blocked on every following cycle).
+- Snapshots still record every cycle, so the drawdown series is unchanged by this fix.
+
+### Open review findings (not fixed here)
+
+- **Finding 2:** when reconcile is skipped by the sanity block and positions are empty, the heartbeat writes the database count without flagging it as unverified. Needs an error-level log with the flag. **Open.**
+- **Finding 3:** early returns in `bot/main.py` (account value zero, or a failed account read) write no snapshot, so outage cycles are missing from the drawdown series. Needs a gap count stated next to any drawdown figure. **Open.**
+- **Finding 4:** the dashboard Sharpe (`bot/monitor/_dashboard_performance.py`) annualises with a fixed cadence, but snapshots are now written per cycle. The Sharpe needs daily resampling. This is a change to reported metrics, so it needs the owner's decision. **Open.**
+- **Finding 5:** the weekly baseline (`bot/_main_runner.py`) and the first-snapshot fallback for `reinvest_profits_only` (`bot/capital/pool.py`) read raw snapshots, so they should read the trusted value. **Open.**
