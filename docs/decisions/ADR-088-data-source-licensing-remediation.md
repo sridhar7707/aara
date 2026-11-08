@@ -1,4 +1,4 @@
-# ADR-086: Data-Source Licensing Remediation (yfinance, NewsAPI)
+# ADR-088: Data-Source Licensing Remediation (yfinance, NewsAPI)
 
 **Status:** Accepted by ksri77 on 2026-11-07 (chat instruction). Implementation not yet started. Interim rule: the bot keeps running on the current sources until the switch is complete. Note: NewsAPI on the free Developer plan is not permitted in production; the owner accepted that interim exposure knowingly.
 **Decision Type:** Narrow ADR-002 exception, prospective. Governs which external data sources the trading pipeline may use. It does not change any governed trading value.
