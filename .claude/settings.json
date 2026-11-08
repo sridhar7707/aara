@@ -48,6 +48,13 @@
             "shell": "bash",
             "timeout": 15,
             "statusMessage": "Checking edit (syntax, file size, tests, decision log)..."
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/hooks/claim_check.py\"",
+            "shell": "bash",
+            "timeout": 15,
+            "statusMessage": "Checking customer text for return promises..."
           }
         ]
       }

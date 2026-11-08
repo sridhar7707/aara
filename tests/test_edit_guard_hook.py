@@ -111,6 +111,15 @@ def test_unrelated_path_gets_no_specialist_routing(project):
     assert "risk-officer" not in ctx and "data-engineer" not in ctx
 
 
+def test_customer_and_security_files_get_governance_routing(project):
+    _write(project, "PRODUCT.md", "# product\n")
+    ctx = edit_guard.evaluate(_payload("PostToolUse", "Edit", "PRODUCT.md", project), project)["hookSpecificOutput"]["additionalContext"]
+    assert "compliance-advisor" in ctx
+    rel = _write(project, "config.py", "X = 1\n")
+    ctx = edit_guard.evaluate(_payload("PostToolUse", "Edit", rel, project), project)["hookSpecificOutput"]["additionalContext"]
+    assert "security-reviewer" in ctx
+
+
 def test_post_clean_file_with_test_only_logs_decision(project):
     rel = _write(project, "scripts/tool.py", "VALUE = 1\n")
     _write(project, "tests/test_tool.py", "def test_x():\n    pass\n")

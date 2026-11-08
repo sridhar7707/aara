@@ -37,6 +37,9 @@ QUANT_PREFIXES = ("bot/strategy/", "bot/risk/", "scripts/train_model.py")
 # Changes that move money or limits: route to the risk-officer while editing.
 RISK_PREFIXES = ("bot/risk/", "bot/execution/", "bot/capital/")
 
+# Customer-facing text and UI: route to the compliance-advisor.
+CUSTOMER_PREFIXES = ("PRODUCT.md", "README.md", "applications/", "docs/products/", "docs/aara/")
+
 # Changes to data sources, storage, and sync: route to the data-engineer.
 DATA_PREFIXES = (
     "bot/db/", "database/", "bot/_main_db.py", "bot/_main_reconcile.py",
@@ -107,8 +110,19 @@ def _post(rel: str, root: Path) -> dict | None:
     notes: list[str] = []
     if rel.endswith(".py") and (root / rel).is_file():
         notes.extend(_python_notes(rel, root))
+    notes.extend(_governance_notes(rel))
     notes.append(DECISION_REMINDER)
     return _context("PostToolUse", "edit_guard:\n- " + "\n- ".join(notes))
+
+
+def _governance_notes(rel: str) -> list[str]:
+    """Route customer-facing and security-sensitive files to their reviewers."""
+    notes = []
+    if rel.startswith(CUSTOMER_PREFIXES):
+        notes.append(f"{rel} is customer-facing: compliance-advisor must review wording and disclosures before release.")
+    if "auth" in rel.lower() or rel == "config.py" or rel.startswith(".github/workflows/"):
+        notes.append(f"{rel} is security-sensitive: security-reviewer must check auth, secrets, and permissions.")
+    return notes
 
 
 def _python_notes(rel: str, root: Path) -> list[str]:

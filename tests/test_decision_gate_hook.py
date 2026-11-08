@@ -24,12 +24,13 @@ def test_injects_protocol_on_every_prompt():
     assert "DECISION RULE" in spec["additionalContext"]
 
 
-def test_protocol_names_all_six_roles_and_governed_thresholds():
+def test_protocol_names_all_twelve_roles_and_governed_thresholds():
     ctx = decision_gate.PROTOCOL
     for role in ("architect", "developer", "ml-expert", "stock-strategist",
-                 "risk-officer", "data-engineer"):
+                 "risk-officer", "data-engineer", "compliance-advisor", "product-manager",
+                 "security-reviewer", "qa-tester", "go-to-market", "support-docs"):
         assert role in ctx
-    assert "VETO" in ctx
+    assert "VETO" in ctx and "external release" in ctx
     assert "stop_loss" in ctx and "XGB threshold" in ctx
 
 
