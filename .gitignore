@@ -10061,3 +10061,6 @@ docs/architecture/
 .venv_playwright/Lib/site-packages/plotly-6.9.0.dist-info/REQUESTED
 .venv_playwright/Lib/site-packages/plotly-6.9.0.dist-info/WHEEL
 .venv_playwright/Lib/site-packages/plotly-6.9.0.dist-info/licenses/LICENSE.txt
+
+# ADR-082 forward-test log (append-only data, not code)
+data/forward_log/

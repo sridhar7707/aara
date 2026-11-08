@@ -1,0 +1,65 @@
+name: Forward-test log (ADR-082)
+
+# Daily snapshot after the US close, weekdays only. Holidays and weekends are
+# recorded as SKIP by the script and exit 0, so only real errors fail this job.
+on:
+  schedule:
+    - cron: "0 23 * * 1-5"      # 19:00 EDT / 18:00 EST, Monday to Friday (UTC): first attempt
+    - cron: "0 2 * * 2-6"       # retry after midnight UTC, for a late bar; a day already logged is SKIP
+  workflow_dispatch:
+
+# One snapshot at a time. Never cancel a running snapshot: a half-written day is worse than a late one.
+concurrency:
+  group: forward-log
+  cancel-in-progress: false
+
+permissions:
+  contents: write                # only to push to the forward-log-data branch below
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code (default branch on schedule)
+        uses: actions/checkout@v5
+        with:
+          path: code
+
+      - name: Checkout forward-log data branch (append-only)
+        uses: actions/checkout@v5
+        with:
+          ref: forward-log-data
+          path: logdata
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pandas numpy yfinance requests lxml
+
+      - name: Restore existing log into the code tree
+        run: |
+          mkdir -p code/data
+          if [ -d logdata/forward_log ]; then cp -r logdata/forward_log code/data/; fi
+
+      - name: Take today's snapshot
+        working-directory: code
+        run: python scripts/forward_log.py snapshot
+
+      - name: Commit the log to forward-log-data
+        run: |
+          mkdir -p logdata/forward_log
+          cp -r code/data/forward_log/. logdata/forward_log/
+          cd logdata
+          git config user.name "forward-log-bot"
+          git config user.email "forward-log-bot@users.noreply.github.com"
+          git add forward_log
+          if git diff --cached --quiet; then
+            echo "No new rows (skipped day)."
+          else
+            git commit -m "forward log $(date -u +%F)"
+            git push origin HEAD:forward-log-data
+          fi
