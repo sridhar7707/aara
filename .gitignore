@@ -10066,3 +10066,6 @@ docs/architecture/
 data/etf_paper/
 # ADR-082 forward-test log (append-only data, not code)
 data/forward_log/
+
+# ADR-089 fundamentals reject test cache (raw SEC and price data, not code)
+data/fundamental_test/
