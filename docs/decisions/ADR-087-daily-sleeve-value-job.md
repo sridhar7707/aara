@@ -1,6 +1,6 @@
 # ADR-087: Daily Sleeve Value Job (Read/Write Split, Public-Repo Rules)
 
-**Status:** Accepted by ksri77 on 2026-11-08 ("i approve adr-087"), for the structure, the schema rules, the status enum, the credential rules and the branch protection requirements. The **publication option** (section 4) is open and must be confirmed by the owner before the first row is published.
+**Status:** Accepted by ksri77 on 2026-11-08 ("i approve adr-087"). Publication option A chosen by the owner the same day (section 4).
 **Decision Type:** Extends ADR-084 (workflow) and amends ADR-086 section 1.5 (daily sleeve value). Does not touch trading code, stop logic, sizing, or any limit.
 
 ## Context
@@ -31,7 +31,7 @@ ADR-086 defers a daily sleeve value. A daily job needs the Alpaca paper key. The
 - **Missed days.** A trading day in the last five with no row fails the workflow. No backfill is performed (ADR-084).
 - Daily rows are **supplementary**. They are not a verdict input. The ADR-086 verdict stays on month-end data.
 
-## 4. Publication (OPEN: owner to confirm)
+## 4. Publication (DECIDED: Option A, owner, 2026-11-08)
 Two options. The owner must choose one before the first row is published.
 
 - **Option A (recommended by the reviewers).** Publish to the public data branch only: sleeve value indexed to 100 at the start, daily percentage returns, drawdown, and the SPY comparison on the same basis. No dollar amounts. Raw dollar rows go to a private repository owned by the owner.
@@ -61,4 +61,4 @@ Disable the workflow. The data branch remains as the record of every row written
 
 ## Acceptance
 - Accepted by ksri77 on 2026-11-08 for sections 1, 2, 3, 5, 6 and the concurrency rule.
-- Section 4 (publication): **pending owner choice** (Option A or B).
+- Section 4 (publication): **Option A, chosen by the owner on 2026-11-08** ("publishing the sleeve dollar value: I'd say no"). Dollar figures never go to the public branch.
