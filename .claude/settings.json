@@ -5,10 +5,23 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"c:\\Users\\ksri7\\projects\\ai-trading-bot\" && python tests/ui_tester.py; python tests/requirements_tracker.py --status; python tools/verify_docs.py --path docs --no-surface; true",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/hooks/session_health.py\"",
             "shell": "bash",
-            "timeout": 60,
-            "statusMessage": "Running weekly health checks (ui_tester, requirements_tracker, verify_docs)..."
+            "timeout": 150,
+            "statusMessage": "Checking health (runs weekly, cached otherwise)..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/hooks/decision_gate.py\"",
+            "shell": "bash",
+            "timeout": 10,
+            "statusMessage": "Loading decision rule..."
           }
         ]
       }
@@ -19,31 +32,52 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/post_commit_review.py\"",
-            "if": "Bash(git commit*)",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/hooks/bash_gate.py\" commit_post",
             "shell": "bash",
             "timeout": 60,
             "statusMessage": "Running post-commit lint and review checks..."
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/hooks/edit_guard.py\"",
+            "shell": "bash",
+            "timeout": 15,
+            "statusMessage": "Checking edit (syntax, file size, tests, decision log)..."
           }
         ]
       }
     ],
     "PreToolUse": [
       {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/hooks/edit_guard.py\"",
+            "shell": "bash",
+            "timeout": 15,
+            "statusMessage": "Checking frozen-path rules..."
+          }
+        ]
+      },
+      {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "cd \"c:\\Users\\ksri7\\projects\\ai-trading-bot\" && python tests/requirements_tracker.py 2>/dev/null || true",
-            "if": "Bash(git commit*)",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/hooks/bash_gate.py\" commit_pre",
             "shell": "bash",
             "timeout": 30,
             "statusMessage": "Updating REQUIREMENTS.md before commit..."
           },
           {
             "type": "command",
-            "command": "cd \"c:\\Users\\ksri7\\projects\\ai-trading-bot\" && python scripts/arch_review.py --diff",
-            "if": "Bash(git push*)",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/hooks/bash_gate.py\" push_pre",
             "shell": "bash",
             "timeout": 60,
             "statusMessage": "Running arch + standards review before push..."
