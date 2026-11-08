@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,7 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root, as in other scripts
-from bot.execution.etf_paper import ETF_UNIVERSE, PAPER_URL, assert_paper_endpoint, plan_orders, trend_targets
+from bot.execution.etf_paper import ETF_UNIVERSE, assert_paper_endpoint, plan_orders, trend_targets
 
 LOG = Path("data/etf_paper/runs.csv")
 HISTORY_DAYS = 400
