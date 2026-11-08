@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the GDELT shadow logger over the most recent GKG files (ADR-089).
+"""Run the GDELT shadow logger over the most recent GKG files (ADR-090).
 
 Usage: python scripts/gdelt_shadow_run.py [--files N]
 Default N = 96 (one day of 15-minute files). Output goes to logs/gdelt_shadow.jsonl.
