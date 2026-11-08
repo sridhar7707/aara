@@ -10064,3 +10064,5 @@ docs/architecture/
 
 # ADR-083 paper-run log (append-only data, not code)
 data/etf_paper/
+# ADR-082 forward-test log (append-only data, not code)
+data/forward_log/
