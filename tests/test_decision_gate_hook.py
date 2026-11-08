@@ -28,7 +28,8 @@ def test_protocol_names_all_twelve_roles_and_governed_thresholds():
     ctx = decision_gate.PROTOCOL
     for role in ("architect", "developer", "ml-expert", "stock-strategist",
                  "risk-officer", "data-engineer", "compliance-advisor", "product-manager",
-                 "security-reviewer", "qa-tester", "ui-ux-expert", "go-to-market", "sales-expert", "support-docs"):
+                 "security-reviewer", "qa-tester", "ui-ux-expert", "go-to-market", "sales-expert", "devops-release",
+                 "governance-integrity", "finance-controller", "support-docs"):
         assert role in ctx
     assert "VETO" in ctx and "external release" in ctx
     assert "stop_loss" in ctx and "XGB threshold" in ctx
