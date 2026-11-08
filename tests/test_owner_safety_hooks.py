@@ -1,6 +1,5 @@
 """Tests for owner_brief, claim_check, and secret_scan. Fake secrets are built at runtime."""
 import io
-import json
 import sys
 from datetime import date
 from pathlib import Path
