@@ -11,14 +11,19 @@ already held or has an open order; the sleeve exceeds 10% of equity or the buys 
 cannot be read (ADR-085 A1 D3); until SHARED_ACCOUNT_EXECUTE_APPROVED is set (ADR-085 open item 1); before 16:30
 New York time; and if the run log already has an execute row (started, executed or failed) for the month.
 Orders carry a deterministic client_order_id; a "started" row is written to the run log before the first submit.
-Measurement (quant review finding 3): every run row carries sleeve_value (overlay market value now) and
-account_equity. Every execute run first records fills for earlier "submitted" orders into fills.csv
-(append only; an order is re-checked until it reaches a terminal status, then never again).
+Measurement (quant review finding 3): every invocation that reaches the account read appends a runs_v2.csv row,
+including refusals (status refused, with refusal_reason) and an unreadable account (status unreadable, empty
+sleeve_value/cash/account_equity, exit non-zero). Each row carries sleeve_value (overlay market value now),
+account_equity, cash and held_symbols (overlay names held in the account); see sleeve_summary. Refusals that fire
+before the account read (approval flag, halt file, stock-bot position_state check) write no row. Every execute
+run first records fills for earlier "submitted" orders into fills.csv (append only; an order is re-checked
+until it reaches a terminal status, then never again); a fill row carries submitted_at (orders.csv run_utc) and the broker's filled_at.
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import os
 import sqlite3
 import sys
 from dataclasses import dataclass, field
@@ -43,6 +48,7 @@ RUNS = LOG_DIR / "runs_v2.csv"   # runs.csv had an older 6-column header and is 
 ORDERS = LOG_DIR / "orders.csv"
 FILLS = LOG_DIR / "fills.csv"
 TERMINAL_STATUSES = {"filled", "canceled", "expired", "rejected"}   # a fill row with one of these is final
+EXECUTE_STATUSES = {"started", "executed", "failed"}   # run rows meaning an execute attempt reached the broker
 STOCK_DB = Path(__file__).resolve().parent.parent / TRADE_DB_PATH   # the stock bot's database (position_state)
 HALT_FILE = Path(__file__).resolve().parent.parent / "data" / "HALT_TRADING"  # same file bot/main.py checks
 HISTORY_DAYS = 400
@@ -60,6 +66,21 @@ class AccountState:
     values: dict[str, float] = field(default_factory=dict)
     qty: dict[str, float] = field(default_factory=dict)
     open_order_symbols: list[str] = field(default_factory=list)   # overlay symbols with an open order
+
+
+def redact(text) -> str:
+    """Pure: replace the configured ALPACA_KEY / ALPACA_SECRET values in `text` with "[redacted]".
+
+    Config is read at call time; empty or unset values are skipped. Applied to every exception message that is
+    written to runs_v2.csv / orders.csv or printed to stderr, so a credential echoed by an error never lands there.
+    """
+    import config
+    out = str(text)
+    for name in ("ALPACA_KEY", "ALPACA_SECRET"):
+        value = getattr(config, name, "")
+        if value:
+            out = out.replace(str(value), "[redacted]")
+    return out
 
 
 def _closes() -> pd.DataFrame:
@@ -99,7 +120,7 @@ def _account() -> AccountState:
     try:
         return _read_account(TradingClient(ALPACA_KEY, ALPACA_SECRET, paper=True))
     except Exception as exc:
-        raise SystemExit(f"refusing: cannot read the paper account ({type(exc).__name__}: {exc}).")
+        raise SystemExit(redact(f"refusing: cannot read the paper account ({type(exc).__name__}: {exc})."))
 
 
 def _append(path: Path, row: dict) -> None:
@@ -118,13 +139,80 @@ def _append(path: Path, row: dict) -> None:
         w.writerow(row)
 
 
-def _run_row(mode: str, as_of, sleeve: float, cash: float, status: str, error: str,
-             weights: dict, plan: list[dict], sleeve_value: float, account_equity: float) -> dict:
+def sleeve_summary(account) -> dict:
+    """Pure: what the overlay sleeve is worth right now, from an account snapshot.
+
+    sleeve_value is the sum of market values of overlay positions currently held (0.0 only if none are held).
+    """
+    values = getattr(account, "values", None) or {}
+    return {"sleeve_value": float(sum(values.values())), "account_equity": float(account.equity),
+            "cash": float(account.cash), "held_symbols": sorted(account.held_symbols)}
+
+
+def _money(value) -> object:
+    """Rounded dollars, or '' when the figure is unknown (an unread account is never recorded as 0)."""
+    return "" if value is None else round(float(value), 2)
+
+
+def _run_row(mode: str, as_of, sleeve: float, cash, status: str, error: str,
+             weights: dict, plan: list[dict], sleeve_value, account_equity, *,
+             refusal_reason: str = "", held_symbols=()) -> dict:
+    """One runs_v2.csv row. `held` is what the rule targets; `held_symbols` is what the account holds now.
+
+    New columns are only ever appended after the older ones (see _upgrade_header).
+    """
     return {"run_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"), "mode": mode,
-            "as_of": str(as_of), "sleeve": round(sleeve, 2), "cash": round(cash, 2), "status": status,
+            "as_of": str(as_of), "sleeve": round(sleeve, 2), "cash": _money(cash), "status": status,
             "error": error, "held": ";".join(sorted(weights)),
             "orders": ";".join(f"{p['side']}:{p['symbol']}" for p in plan),
-            "sleeve_value": round(sleeve_value, 2), "account_equity": round(account_equity, 2)}
+            "sleeve_value": _money(sleeve_value), "account_equity": _money(account_equity),
+            "refusal_reason": refusal_reason, "held_symbols": ";".join(sorted(held_symbols))}
+
+
+def _upgrade_header(path: Path, columns: list[str]) -> None:
+    """If `path` has an older header that is a strict prefix of `columns`, pad its rows and rewrite it.
+
+    Only columns appended at the end are migrated; any other mismatch is left for _append to refuse.
+    """
+    if not path.exists():
+        return
+    with path.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.reader(f))
+    if not rows or rows[0] == columns or columns[:len(rows[0])] != rows[0]:
+        return
+    pad = [""] * (len(columns) - len(rows[0]))
+    tmp = path.with_name(path.name + ".tmp")
+    with tmp.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(columns)
+        w.writerows(r + pad for r in rows[1:])
+    os.replace(tmp, path)
+
+
+def _append_log(path: Path, row: dict, *, best_effort: bool = False) -> None:
+    """Append to runs_v2.csv / fills.csv, first padding an older prefix-compatible header.
+
+    best_effort: a failed write is reported on stderr instead of raised (refusals and dry runs must still
+    exit with their own outcome).
+    """
+    try:
+        _upgrade_header(path, list(row))
+        _append(path, row)
+    except Exception as exc:
+        if not best_effort:
+            raise
+        print(redact(f"WARNING: could not write {path} ({type(exc).__name__}: {exc})"), file=sys.stderr)
+
+
+def _exit_reason(exc: SystemExit) -> str:
+    return "" if exc.code is None else redact(exc.code)
+
+
+def _ts(value) -> str:
+    """Broker timestamp (datetime or text or None) -> ISO text, '' when absent."""
+    if value is None or value == "":
+        return ""
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
 
 def _enum_text(value) -> str:
@@ -149,7 +237,7 @@ def _record_fills(client) -> None:
             fills = pd.read_csv(FILLS, dtype=str, keep_default_na=False)
             final = set(fills.loc[fills["status"].isin(TERMINAL_STATUSES), "order_id"])
     except Exception as exc:
-        print(f"WARNING: fills step skipped, cannot read the order/fill logs ({type(exc).__name__}: {exc})",
+        print(redact(f"WARNING: fills step skipped, cannot read the order/fill logs ({type(exc).__name__}: {exc})"),
               file=sys.stderr)
         return
     for _, o in submitted.drop_duplicates("order_id").iterrows():
@@ -158,26 +246,32 @@ def _record_fills(client) -> None:
             continue
         try:
             order = client.get_order_by_id(oid)
-            _append(FILLS, {
+            _append_log(FILLS, {
                 "order_id": oid, "symbol": o["symbol"], "side": o["side"],
                 "filled_qty": getattr(order, "filled_qty", None) or 0,
                 "filled_avg_price": getattr(order, "filled_avg_price", None) or "",
                 "status": _enum_text(order.status),
-                "checked_utc": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+                "checked_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "submitted_at": o["run_utc"],   # when we sent it (orders.csv), not the broker's clock
+                "filled_at": _ts(getattr(order, "filled_at", None))})
         except Exception as exc:
-            print(f"WARNING: fill lookup failed for order {oid} ({o['side']} {o['symbol']}): "
-                  f"{type(exc).__name__}: {exc}", file=sys.stderr)
+            print(redact(f"WARNING: fill lookup failed for order {oid} ({o['side']} {o['symbol']}): "
+                         f"{type(exc).__name__}: {exc}"), file=sys.stderr)
 
 
 def _already_executed(month: str) -> bool:
-    """True if runs_v2.csv has any execute row (started, executed or failed) for the month."""
+    """True if runs_v2.csv has any execute row (started, executed or failed) for the month.
+
+    Refused and unreadable rows are logged for measurement and do not count: nothing reached the broker.
+    """
     if not RUNS.exists():
         return False
     rows = pd.read_csv(RUNS, dtype=str)
-    missing = {"mode", "as_of"} - set(rows.columns)
+    missing = {"mode", "as_of", "status"} - set(rows.columns)
     if missing:
         raise RuntimeError(f"{RUNS} is missing columns {sorted(missing)}; refusing to guess whether this month ran")
-    done = rows[(rows["mode"] == "execute") & (rows["as_of"].astype(str).str[:7] == month)]
+    done = rows[(rows["mode"] == "execute") & rows["status"].isin(EXECUTE_STATUSES)
+                & (rows["as_of"].astype(str).str[:7] == month)]
     return not done.empty
 
 
@@ -242,9 +336,9 @@ def _execute_plan(client, plan: list[dict], month: str, as_of) -> tuple[str, str
                                          time_in_force=TimeInForce.DAY, client_order_id=coid)
             order = client.submit_order(order_data=req)
         except Exception as exc:  # stop on the first failure; the order log shows what went out
-            error = f"{p['side']} {p['symbol']}: {type(exc).__name__}: {exc}"
+            error = redact(f"{p['side']} {p['symbol']}: {type(exc).__name__}: {exc}")
             print(f"  FAILED {error}", file=sys.stderr)
-            _append(ORDERS, {**base, "order_id": "", "status": f"error: {exc}"})
+            _append(ORDERS, {**base, "order_id": "", "status": redact(f"error: {exc}")})
             return "failed", error
         try:
             _append(ORDERS, {**base, "order_id": str(order.id), "status": "submitted"})
@@ -261,8 +355,8 @@ def _verify_after(client, sleeve: float) -> None:
     try:
         fresh = {p.symbol: float(p.market_value) for p in client.get_all_positions() if p.symbol in ETF_UNIVERSE}
     except Exception as exc:
-        print(f"WARNING: post-run position read failed ({type(exc).__name__}: {exc}); "
-              "overlay value not verified.", file=sys.stderr)
+        print(redact(f"WARNING: post-run position read failed ({type(exc).__name__}: {exc}); "
+                     "overlay value not verified."), file=sys.stderr)
         return
     if not overlay_value_ok(fresh, sleeve):
         print(f"WARNING: overlay holdings ${sum(fresh.values()):,.2f} exceed 1.05 x the sleeve ${sleeve:,.2f} "
@@ -281,35 +375,50 @@ def main(argv: list[str]) -> int:
                          "(set SHARED_ACCOUNT_EXECUTE_APPROVED in this script).")
     if HALT_FILE.exists():
         raise SystemExit(f"refusing: {HALT_FILE} exists (emergency halt). Delete it to resume.")
+
     if args.execute:
-        _refuse_if_stock_bot_holds_overlay()
+        _refuse_if_stock_bot_holds_overlay()   # ADR-085 A1 D3: before any data fetch or account read; no run row
 
     now_ny = datetime.now(NY)
     closes = _closes()
     as_of = closes.index[-1].date()
     month = str(as_of)[:7]
-    if args.execute:
-        if now_ny.time() < EXECUTE_NOT_BEFORE:
-            raise SystemExit(f"refusing to execute before {EXECUTE_NOT_BEFORE:%H:%M} New York time "
-                             f"(now {now_ny:%H:%M}); run after the close.")
-        if as_of != now_ny.date():
-            raise SystemExit(f"latest bar is {as_of}, not today ({now_ny.date()}); no final close yet.")
-        if _already_executed(month):
-            raise SystemExit(f"already executed for {month}; one rebalance per month.")
+    mode = "execute" if args.execute else "dry_run"
 
-    state = _account()   # read-only, identical in dry run and execute
-    if args.execute:
-        _record_fills(state.client)   # before the safety refusals: pending orders are what they would trip on
-    _refuse_if_unsafe(state, args.sleeve)
-
-    prices = {s: float(closes[s].iloc[-1]) for s in closes.columns}
-    weights = trend_targets(closes)
-    plan = plan_orders(args.sleeve, state.values, state.qty, weights, prices, cash_available=state.cash)
-    cash_after_buys = state.cash - sum(p["notional"] for p in plan if p["side"] == "buy")
     try:
-        check_sleeve(args.sleeve, state.equity, cash_after_buys, MIN_CASH_RESERVE_PCT)
-    except ValueError as exc:
-        raise SystemExit(f"refusing: {exc}")
+        state = _account()   # read-only, identical in dry run and execute
+    except SystemExit as exc:   # unreadable: record it with no figures (never a 0), then exit non-zero
+        _append_log(RUNS, _run_row(mode, as_of, args.sleeve, None, "unreadable", "", {}, [], None, None,
+                                   refusal_reason=_exit_reason(exc)), best_effort=True)
+        raise
+    summary = sleeve_summary(state)
+    sleeve_value, equity, held_now = summary["sleeve_value"], summary["account_equity"], summary["held_symbols"]
+
+    try:   # every refusal below is logged as a "refused" row before it exits
+        if args.execute:
+            if now_ny.time() < EXECUTE_NOT_BEFORE:
+                raise SystemExit(f"refusing to execute before {EXECUTE_NOT_BEFORE:%H:%M} New York time "
+                                 f"(now {now_ny:%H:%M}); run after the close.")
+            if as_of != now_ny.date():
+                raise SystemExit(f"latest bar is {as_of}, not today ({now_ny.date()}); no final close yet.")
+            if _already_executed(month):
+                raise SystemExit(f"already executed for {month}; one rebalance per month.")
+            _record_fills(state.client)   # before the safety refusals: pending orders are what they would trip on
+        _refuse_if_unsafe(state, args.sleeve)
+
+        prices = {s: float(closes[s].iloc[-1]) for s in closes.columns}
+        weights = trend_targets(closes)
+        plan = plan_orders(args.sleeve, state.values, state.qty, weights, prices, cash_available=state.cash)
+        cash_after_buys = state.cash - sum(p["notional"] for p in plan if p["side"] == "buy")
+        try:
+            check_sleeve(args.sleeve, state.equity, cash_after_buys, MIN_CASH_RESERVE_PCT)
+        except ValueError as exc:
+            raise SystemExit(f"refusing: {exc}")
+    except SystemExit as exc:
+        _append_log(RUNS, _run_row(mode, as_of, args.sleeve, state.cash, "refused", "", {}, [], sleeve_value,
+                                   equity, refusal_reason=_exit_reason(exc), held_symbols=held_now),
+                    best_effort=True)
+        raise
 
     print(f"as of {as_of} | sleeve ${args.sleeve:,.2f} | held by rule: {sorted(weights)} | "
           f"cash ${state.cash:,.2f} | equity ${state.equity:,.2f}")
@@ -319,16 +428,15 @@ def main(argv: list[str]) -> int:
     if not plan:
         print("  no trades needed")
 
-    mode = "execute" if args.execute else "dry_run"
+    def row(st: str, err: str = "") -> dict:
+        return _run_row(mode, as_of, args.sleeve, state.cash, st, err, weights, plan, sleeve_value, equity,
+                        held_symbols=held_now)
     status, error = "dry_run", ""
-    sleeve_value, equity = float(sum(state.values.values())), state.equity
     if args.execute:
-        _append(RUNS, _run_row(mode, as_of, args.sleeve, state.cash, "started", "", weights, plan,
-                               sleeve_value, equity))
+        _append_log(RUNS, row("started"))
         status, error = _execute_plan(state.client, plan, month, as_of)
         _verify_after(state.client, args.sleeve)
-    _append(RUNS, _run_row(mode, as_of, args.sleeve, state.cash, status, error, weights, plan,
-                           sleeve_value, equity))
+    _append_log(RUNS, row(status, error), best_effort=not args.execute)   # a dry run never fails on the write
     return 1 if status == "failed" else 0
 
 
