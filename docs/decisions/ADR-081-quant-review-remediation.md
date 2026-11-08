@@ -231,3 +231,14 @@ Owner instruction: follow the recommended order, starting with suspending model-
 - Re-enabling entries requires an accepted ADR and a validated model.
 
 Steps 2 to 4 of the recommended order, which are stop tuning, the data change and the statistical criteria, are not started.
+
+## Pre-registered risk criterion for the ETF trend rule (2026-11-07)
+
+Written before the test is run, and fixed here. Changes only by ADR.
+
+The trend rule (10-month average, equal weight among held ETFs, cash otherwise, monthly, 10 bps cost) is judged as a risk-control overlay against SPY. A PASS requires all three:
+1. Full-period maximum drawdown no worse than 60% of SPY's maximum drawdown.
+2. Full-period annualised Sharpe at least SPY's.
+3. In at least three of five folds, the strategy's maximum drawdown is smaller than SPY's over the same fold.
+
+Caveat stated in advance: the test runs on the same ETF history used earlier, so a PASS is in-sample evidence for a risk overlay. It is not a validated alpha source, and it does not license deployment by itself.
