@@ -203,6 +203,11 @@ def current_week_key() -> str:
     return date.today().strftime("%G-W%V")
 
 
+def read_anchor(con: sqlite3.Connection, key: str) -> float | None:
+    row = con.execute("SELECT value FROM risk_state WHERE key = ?", (key,)).fetchone()
+    return float(row[0]) if row and row[0] is not None else None
+
+
 def record_trusted_anchors(con: sqlite3.Connection, value: float) -> None:
     """Record once-only anchors from trusted readings (decided 2026-11-09): the first trusted
     value ever (capital pool fallback) and the first trusted value of each ISO week (weekly
