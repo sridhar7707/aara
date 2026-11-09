@@ -188,6 +188,14 @@ _DRILLDOWN_NAV_JS = """
     var tabButton = findRealTab(label);
     if (tabButton) {
       tabButton.click();
+      return;
+    }
+    // Gradio 5 overflows every hidden tab into the "..." dropdown (see bootstrap._TABBED_LAYOUT_CSS).
+    var overflowItem = Array.from(document.querySelectorAll('.overflow-dropdown button')).find(
+      function (btn) { return btn.textContent.trim() === label; }
+    );
+    if (overflowItem) {
+      overflowItem.click();
     }
   }
 
