@@ -11,6 +11,9 @@ except ImportError:
 REDDIT_CLIENT_ID     = os.getenv("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
 REDDIT_USER_AGENT    = os.getenv("REDDIT_USER_AGENT", "ai-trading-bot/1.0")
+# ADR-094 (decided 2026-11-09): Reddit sentiment is paused by default until counsel confirms
+# the use. Set REDDIT_SENTIMENT_ENABLED=1 only after that.
+REDDIT_SENTIMENT_ENABLED = os.getenv("REDDIT_SENTIMENT_ENABLED", "0") == "1"
 
 # Module-level singleton — one OAuth session per process lifetime, not per call.
 _reddit = None
@@ -44,6 +47,8 @@ def get_wsb_sentiment(ticker: str) -> dict:
     Returns {"mentions": 0, "sentiment": 0.0} if Reddit credentials are not configured
     or if credentials are invalid (401 circuit breaker is open).
     """
+    if not REDDIT_SENTIMENT_ENABLED:
+        return {"mentions": 0, "sentiment": 0.0}
     reddit = _get_reddit()
     if reddit is None:
         return {"mentions": 0, "sentiment": 0.0}

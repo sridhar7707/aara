@@ -18,3 +18,7 @@ Both sources are used in a way their terms do not clearly permit, and neither ha
 
 ## Acceptance
 Owner ratification required before the switch.
+
+## Implementation status, 2026-11-09
+- **Reddit pause: implemented.** `REDDIT_SENTIMENT_ENABLED` defaults to off. While off, `get_wsb_sentiment` returns a neutral value without reaching Reddit. Tests: `tests/test_reddit_pause.py`. Re-enable only after counsel confirms.
+- **Price feed switch: not started.** Needs Alpaca bar code, tests against recorded data, and the screener comparison. Deadline: 2026-11-23, or earlier if Alpaca replies.
