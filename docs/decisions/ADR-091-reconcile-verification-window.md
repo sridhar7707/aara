@@ -1,6 +1,6 @@
 # ADR-091: Reconcile Verification Window for Confirmed-Empty Broker Reads
 
-**Status:** Proposed. Not accepted. No code has changed.
+**Status:** Decided 2026-11-09 by the financial expert on the owner's delegation: option B, require a matching broker fill before any SELL_RECONCILE, with option A as the fallback when order history is unavailable. Implementation is not yet started and needs owner acceptance of this ADR before it touches the frozen reconcile path.
 **Decision Type:** Trading-behaviour policy for position reconciliation. Touches a frozen path (`bot/main.py`, `bot/_main_positions.py`). Does not change a governed value.
 **Related:** ADR-088 (section 6), ADR-075 (capital-pool reconciliation), ADR-002.
 
