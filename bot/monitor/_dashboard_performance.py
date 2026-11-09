@@ -64,12 +64,9 @@ def get_performance_metrics(days: int = 60) -> dict:
         return _empty
     rets   = np.diff(vals) / (vals[:-1] + 1e-8)
     distinct_days = len({ts[:10] for ts, _ in pv_rows if ts})
-    qualified = len(rets) >= _MIN_SHARPE_OBS and distinct_days >= _MIN_SHARPE_DAYS
     # Daily-return Sharpe (decided 2026-11-09): independent of how often the bot runs.
     _daily_n = len(daily_returns(pv_rows))
     sharpe = annualised_sharpe(pv_rows, min_days=20) if _daily_n >= 20 else None
-    downside = rets[rets < 0]
-    down_std = float(np.std(downside)) if len(downside) > 1 else 0.0
     sortino = annualised_sortino(pv_rows, min_days=20) if _daily_n >= 20 else None
     peak = vals[0]; max_dd = 0.0
     for v in vals:
