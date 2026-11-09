@@ -46,3 +46,11 @@ def _quiet(get, names, tmp_path):
             super().__init__(g, n, path=tmp_path / "shadow.jsonl", sleep=None)
 
     return _Run(get, names)
+
+
+def test_files_zero_is_refused_not_the_whole_list():
+    # [-0:] is the full list; --files 0 must fail fast before any network call.
+    import pytest
+    with pytest.raises(SystemExit) as exc:
+        runner.main(["--files", "0"])
+    assert exc.value.code == 2

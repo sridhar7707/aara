@@ -19,6 +19,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+# Run as a script (python scripts/forward_log.py), the repo root is not on sys.path, so the
+# scripts package that evaluate() imports cannot be found. Add the root explicitly.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 LOG_DIR = Path("data/forward_log")
 
 

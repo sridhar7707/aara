@@ -11,8 +11,6 @@ from analytics.perf_metrics import annualised_sharpe, annualised_sortino, daily_
 _EMPTY_HINT = ("The bot trades at market open (9:30 AM ET, Mon–Fri). "
                "Data appears here after the first cycle of the day.")
 
-_MIN_SHARPE_OBS  = 20
-_MIN_SHARPE_DAYS = 20
 
 
 def _con():

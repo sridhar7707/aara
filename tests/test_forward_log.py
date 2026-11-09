@@ -105,3 +105,13 @@ def test_evaluate_recovers_a_planted_signal(tmp_path, monkeypatch):
     r = fl.evaluate()
     assert r["days"] > 400
     assert r["full"].mean_ic > 0
+
+
+def test_forward_log_runs_as_a_script_without_module_not_found():
+    # Regression: run directly, the repo root is off sys.path and evaluate() could not import scripts.
+    import subprocess, sys
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    done = subprocess.run([sys.executable, "scripts/forward_log.py", "evaluate"],
+                          cwd=root, capture_output=True, text=True, timeout=300)
+    assert "No module named 'scripts'" not in done.stderr

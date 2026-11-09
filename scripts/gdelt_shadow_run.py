@@ -35,6 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--files", type=int, default=96)
     args = parser.parse_args(argv)
+    if args.files < 1:
+        # [-0:] is the whole list, so 0 would download every GKG file ever published.
+        parser.error("--files must be at least 1")
     master = _get(MASTER_LIST).decode("utf-8", errors="replace")
     urls = gkg_urls_from_index(master)[-args.files:]
     rows = ShadowRun(_get, SHADOW_ALIASES, sleep=time.sleep).run(urls)
