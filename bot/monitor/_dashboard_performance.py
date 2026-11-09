@@ -62,7 +62,6 @@ def get_performance_metrics(days: int = 60) -> dict:
     vals = np.array([r[1] for r in pv_rows if r[1] is not None], dtype=float)
     if len(vals) == 0:
         return _empty
-    rets   = np.diff(vals) / (vals[:-1] + 1e-8)
     distinct_days = len({ts[:10] for ts, _ in pv_rows if ts})
     # Daily-return Sharpe (decided 2026-11-09): independent of how often the bot runs.
     _daily_n = len(daily_returns(pv_rows))
