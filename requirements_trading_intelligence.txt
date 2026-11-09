@@ -1,15 +1,15 @@
 # HuggingFace Spaces runtime dependencies for AARA Trading Intelligence
 # (applications/trading_intelligence/) — kept minimal, no ML/trading packages.
 #
-# gradio==4.44.1, not dashboard/'s 5.9.0 (requirements_space.txt):
-# PyPI metadata confirms gradio 5.9.0 requires Python >=3.10, while 4.44.1
-# supports Python >=3.8. applications/trading_intelligence/'s test suite
-# (272 tests) and its Decision Center UI's documented Gradio-4.44.1-specific
-# keyboard-selection behavior (see gradio_view.py's own module docstring,
-# "Gradio 4.44.1's Dataframe keyboard gap") have only ever been run against
-# this exact version — 5.9.0 compatibility is unverified. Do not upgrade
-# this pin without re-verifying that behavior against the new version.
-gradio==4.44.1
+# gradio==5.50.0 (upgraded from 4.44.1 on Python 3.14; see python-314-upgrade PR).
+# Verified: full pin set resolves for Linux cp314 with binary wheels; the
+# applications/trading_intelligence test suite passes on 3.14 + gradio 5.50.0
+# (987 passed, 6 skipped); the app builds and renders the branded shell.
+# Still to verify before the Space is switched: the Decision Center's Decisions
+# table row selection and keyboard behaviour, which were documented only for
+# 4.44.1 (gradio_view.py "Gradio 4.44.1's Dataframe keyboard gap"). The
+# Dataframe height kwarg is resolved per Gradio major (_DATAFRAME_HEIGHT_KWARG).
+gradio==5.50.0
 pillow>=10.4.0
 
 # gradio==4.44.1 declares only huggingface-hub>=0.19.3 (no upper bound), so
