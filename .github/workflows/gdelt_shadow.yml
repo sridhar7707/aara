@@ -5,6 +5,9 @@ name: GDELT Shadow Collection
 # other workflows use (workflow_dispatch), after the previous day's GKG files are published.
 
 on:
+  schedule:
+    # Daily at 06:30 UTC, after the previous day's GKG files are published (ADR-089, decided 2026-11-09).
+    - cron: '30 6 * * *'
   workflow_dispatch:
     inputs:
       files:
