@@ -1,5 +1,8 @@
 # HuggingFace Spaces runtime dependencies (kept minimal — no ML/trading packages)
-gradio==5.9.0
+# gradio==5.50.0 (upgraded from 5.9.0 with Python 3.14). Verified: the full pin set
+# resolves for Linux cp314 with binary wheels; the dashboard's tests pass on 3.14 + 5.50.0.
+# The visual check (tests/check_ui.py) is recorded in the upgrade PR.
+gradio==5.50.0
 pandas>=2.0.0
 numpy>=1.24.0
 matplotlib>=3.7.0

@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SPACES = {
     "trading_intelligence": ("requirements_trading_intelligence.txt", "deploy_trading_intelligence.yml"),
     "wealth_intelligence": ("requirements_wealth_intelligence.txt", "deploy_wealth_intelligence.yml"),
+    "dashboard": ("requirements_space.txt", "deploy_ui.yml"),
 }
 
 

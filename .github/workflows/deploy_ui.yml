@@ -49,7 +49,7 @@ jobs:
         if: steps.changed.outputs.deploy == 'true'
         uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.14'
 
       - name: Install huggingface-hub
         if: steps.changed.outputs.deploy == 'true'
@@ -130,7 +130,8 @@ jobs:
               "colorFrom: blue\n"
               "colorTo: indigo\n"
               "sdk: gradio\n"
-              "sdk_version: 5.9.0\n"
+              "sdk_version: 5.50.0\n"
+              "python_version: \"3.14\"\n"
               "app_file: app.py\n"
               "pinned: false\n"
               "---\n"
