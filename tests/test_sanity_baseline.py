@@ -60,3 +60,22 @@ def test_small_decline_is_not_blocked():
     sanity_check(con, 10_000.0)
     blocked, _ = sanity_check(con, 9_500.0)
     assert blocked is False
+
+
+def test_anchors_recorded_once_from_trusted_readings():
+    from bot._main_prep import read_anchor, current_week_key
+    con = _con()
+    sanity_check(con, 10_000.0)
+    sanity_check(con, 10_500.0)           # later trusted reading must not overwrite the anchors
+    assert read_anchor(con, "first_trusted_value") == 10_000.0
+    assert read_anchor(con, f"week_trusted_start:{current_week_key()}") == 10_000.0
+
+
+def test_blocked_reading_never_sets_an_anchor():
+    from bot._main_prep import read_anchor
+    con = _con()
+    sanity_check(con, 4_000.0)            # no trusted baseline yet: accepted as the first trusted value
+    con2 = _con()
+    sanity_check(con2, 10_000.0)
+    sanity_check(con2, 3_000.0)           # blocked
+    assert read_anchor(con2, "first_trusted_value") == 10_000.0

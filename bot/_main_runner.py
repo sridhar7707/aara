@@ -468,11 +468,16 @@ def _do_reset_daily_start() -> None:
     monday = today - timedelta(days=today.weekday())   # Monday of this ISO week
     mon_iso = monday.isoformat()
     wk = _week_key()
-    row = con.execute(
-        "SELECT portfolio_value FROM portfolio_snapshots "
-        "WHERE timestamp >= ? ORDER BY timestamp ASC LIMIT 1",
-        (mon_iso,),
+    trusted_week = con.execute(
+        "SELECT value FROM risk_state WHERE key = ?", (f"week_trusted_start:{wk}",)
     ).fetchone()
+    row = (float(trusted_week[0]),) if trusted_week and trusted_week[0] is not None else None
+    if row is None:
+        row = con.execute(
+            "SELECT portfolio_value FROM portfolio_snapshots "
+            "WHERE timestamp >= ? ORDER BY timestamp ASC LIMIT 1",
+            (mon_iso,),
+        ).fetchone()
     if row is None or row[0] is None:
         row = con.execute(
             "SELECT portfolio_value FROM trades "

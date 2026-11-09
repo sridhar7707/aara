@@ -195,4 +195,23 @@ def sanity_check(con: sqlite3.Connection, real_value: float) -> tuple[bool, floa
     blocked = bool(baseline) and real_value < baseline * SANITY_DROP_LIMIT
     if not blocked:
         save_trusted_value(con, real_value)
+        record_trusted_anchors(con, real_value)
     return bool(blocked), baseline
+
+
+def current_week_key() -> str:
+    return date.today().strftime("%G-W%V")
+
+
+def record_trusted_anchors(con: sqlite3.Connection, value: float) -> None:
+    """Record once-only anchors from trusted readings (decided 2026-11-09): the first trusted
+    value ever (capital pool fallback) and the first trusted value of each ISO week (weekly
+    P&L baseline). Blocked readings never reach here."""
+    now = datetime.now(timezone.utc).isoformat()
+    for key in ["first_trusted_value", f"week_trusted_start:{current_week_key()}"]:
+        if con.execute("SELECT 1 FROM risk_state WHERE key = ?", (key,)).fetchone() is None:
+            con.execute(
+                "INSERT INTO risk_state (key, value, updated_at) VALUES (?, ?, ?)",
+                (key, repr(float(value)), now),
+            )
+    con.commit()

@@ -58,3 +58,10 @@ The revised writer recorded the account value on every cycle, including sanity-b
 - **Finding 3:** early returns in `bot/main.py` (account value zero, or a failed account read) write no snapshot, so outage cycles are missing from the drawdown series. Needs a gap count stated next to any drawdown figure. **Open.**
 - **Finding 4:** the dashboard Sharpe (`bot/monitor/_dashboard_performance.py`) annualises with a fixed cadence, but snapshots are now written per cycle. The Sharpe needs daily resampling. This is a change to reported metrics, so it needs the owner's decision. **Open.**
 - **Finding 5:** the weekly baseline (`bot/_main_runner.py`) and the first-snapshot fallback for `reinvest_profits_only` (`bot/capital/pool.py`) read raw snapshots, so they should read the trusted value. **Open.**
+
+## 8. Decisions and implementation, 2026-11-09 (financial expert, on the owner's delegation)
+
+- **Weekly P&L baseline and capital first-snapshot fallback read trusted anchors.** `record_trusted_anchors()` (in `bot/_main_prep.py`) records `first_trusted_value` and `week_trusted_start:<ISO week>` once, from trusted readings only. `bot/_main_runner.py` and `bot/capital/pool.py` read these first and fall back to the old snapshot query only if an anchor is missing.
+- **Dashboard Sharpe and Sortino are daily-return figures.** `analytics/perf_metrics.py` resamples to one value per day and annualises with sqrt(252). The old per-cycle figure is superseded and is not shown as current. Tests: `tests/test_perf_metrics.py`.
+- **Journal gap accepted and disclosed; no backfill.** See the decisions record in the private folder.
+- **Findings 2 and 3 remain open** (the unflagged database-count fallback and the outage gap in the snapshot series). They are recorded for the next change.

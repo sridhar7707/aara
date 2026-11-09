@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
+from analytics.perf_metrics import annualised_sharpe, annualised_sortino
 
 _EMPTY_HINT = ("The bot trades at market open (9:30 AM ET, Mon–Fri). "
                "Data appears here after the first cycle of the day.")
@@ -64,16 +65,11 @@ def get_performance_metrics(days: int = 60) -> dict:
     rets   = np.diff(vals) / (vals[:-1] + 1e-8)
     distinct_days = len({ts[:10] for ts, _ in pv_rows if ts})
     qualified = len(rets) >= _MIN_SHARPE_OBS and distinct_days >= _MIN_SHARPE_DAYS
-    if qualified and np.std(rets) > 0:
-        sharpe = float(np.mean(rets) / np.std(rets) * np.sqrt(252 * 78))
-    else:
-        sharpe = None
+    # Daily-return Sharpe (decided 2026-11-09): independent of how often the bot runs.
+    sharpe = annualised_sharpe(pv_rows) if qualified else None
     downside = rets[rets < 0]
     down_std = float(np.std(downside)) if len(downside) > 1 else 0.0
-    if qualified and down_std > 0:
-        sortino = float(np.mean(rets) / down_std * np.sqrt(252 * 78))
-    else:
-        sortino = None
+    sortino = annualised_sortino(pv_rows) if qualified else None
     peak = vals[0]; max_dd = 0.0
     for v in vals:
         peak   = max(peak, v)
