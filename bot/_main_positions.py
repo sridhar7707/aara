@@ -14,6 +14,7 @@ from bot.execution.alpaca_client import AlpacaClient
 from bot.risk.risk_manager import RiskManager, _business_days_between
 import bot.monitor.telegram_bot as tg
 from config import (
+    ETF_OVERLAY_SYMBOLS,
     ATR_TP_MULTIPLIER, GAP_DOWN_FLOOR_PCT, TRAILING_STOP_ARM_PCT,
     CORRELATION_THRESHOLD,
     MAX_HOLD_DAYS, PDT_MAX_DAY_TRADES, PDT_WINDOW_DAYS,
@@ -230,6 +231,8 @@ def _reconcile_positions(con: sqlite3.Connection, alpaca_positions: dict,
             )
         _delete_position_state(con, sym)
     for sym, pos in alpaca_positions.items():
+        if sym in ETF_OVERLAY_SYMBOLS:
+            continue  # ADR-085: never adopt the ETF overlay's holdings into stock position state
         if sym not in db_syms:
             entry = float(getattr(pos, "avg_entry_price", 0) or 0)
             qty   = float(getattr(pos, "qty", 0) or 0)
@@ -436,6 +439,10 @@ def _handle_exits(
 
     if pos_state:
         new_hwm = max(pos_state.high_water_mark, current_price)
+        if pos_state.shares is not None and pos_qty < pos_state.shares - 1e-9:
+            logger.warning(
+                f"{symbol}: position_state.shares rewritten {pos_state.shares} -> {pos_qty} (lower); "
+                f"inputs: {getattr(positions[symbol], 'clamp_inputs', 'broker qty only; no trades clamp')}")
         if new_hwm > pos_state.high_water_mark or pos_state.shares != pos_qty:
             _upsert_position_state(con, symbol, entry_price, new_hwm, current_atr, pos_qty)
         hwm = new_hwm

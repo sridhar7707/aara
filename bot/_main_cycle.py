@@ -19,7 +19,7 @@ from bot.risk.risk_manager import RiskManager, kelly_fraction as _kelly_fraction
 from bot.strategy.ensemble import BUY_FRACTION, ensemble_confidence
 from config import (
     ATR_MAX_STOP_PCT, ATR_MIN_STOP_PCT, ATR_STOP_MULTIPLIER,
-    CASH_USE_FRACTION,
+    CASH_USE_FRACTION, ETF_OVERLAY_SYMBOLS,
     ENTRY_REGIMES, KELLY_FRACTION_MAX, MODEL_ENTRIES_ENABLED,
     MAX_POSITION_DRIFT_PCT, MAX_POSITION_PCT,
     MAX_RISK_PER_TRADE_PCT, MAX_SECTOR_EXPOSURE_PCT,
@@ -171,6 +171,9 @@ def _handle_entry(
     symbol: str, ctx: EntryContext,
 ) -> float:
     """Process entry gates and buy execution. Returns updated available_cash."""
+    if symbol in ETF_OVERLAY_SYMBOLS:   # ADR-085 A1: overlay names never get stock entries
+        logger.info(f"{symbol}: ETF overlay name -- stock entry skipped")
+        return ctx.available_cash
     available_cash = ctx.available_cash  # mutable local; all other fields accessed via ctx
     _is_paper_execution = os.getenv("EXECUTION_BACKEND", "alpaca_paper") != "live"  # ADR-065
 

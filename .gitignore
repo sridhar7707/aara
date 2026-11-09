@@ -10062,5 +10062,10 @@ docs/architecture/
 .venv_playwright/Lib/site-packages/plotly-6.9.0.dist-info/WHEEL
 .venv_playwright/Lib/site-packages/plotly-6.9.0.dist-info/licenses/LICENSE.txt
 
+# ADR-083 paper-run log (append-only data, not code)
+data/etf_paper/
 # ADR-082 forward-test log (append-only data, not code)
 data/forward_log/
+
+# ADR-089 fundamentals reject test cache (raw SEC and price data, not code)
+data/fundamental_test/

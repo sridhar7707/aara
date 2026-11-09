@@ -54,7 +54,11 @@ def env_files(names: list[str]) -> list[str]:
 
 
 def _git(args: list[str]) -> str:
-    done = subprocess.run(["git", *args], capture_output=True, text=True, timeout=60, check=True)
+    # git emits UTF-8 regardless of the console code page. Decoding with the locale encoding (cp1252 on
+    # Windows) crashed on bytes it cannot map, so decode as UTF-8 and replace undecodable bytes. Replacement
+    # never hides an ASCII secret, since every pattern is ASCII. check=True keeps a git failure fail-closed.
+    done = subprocess.run(["git", *args], capture_output=True, encoding="utf-8", errors="replace",
+                          timeout=60, check=True)
     return done.stdout
 
 
