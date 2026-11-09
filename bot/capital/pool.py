@@ -363,18 +363,12 @@ def compute_tradeable_capital(con: sqlite3.Connection, portfolio_value: float) -
 
     if initial is None:
         try:
-            trusted_first = con.execute(
-                "SELECT value FROM risk_state WHERE key = 'first_trusted_value'"
+            row = con.execute(
+                "SELECT portfolio_value FROM portfolio_snapshots "
+                "WHERE portfolio_value > 0 ORDER BY timestamp ASC LIMIT 1"
             ).fetchone()
-            if trusted_first and trusted_first[0] is not None:
-                initial = float(trusted_first[0])
-            else:
-                row = con.execute(
-                    "SELECT portfolio_value FROM portfolio_snapshots "
-                    "WHERE portfolio_value > 0 ORDER BY timestamp ASC LIMIT 1"
-                ).fetchone()
-                if row:
-                    initial = float(row[0])
+            if row:
+                initial = float(row[0])
         except Exception as exc:
             _logger.debug(f"compute_tradeable_capital: portfolio_snapshots read: {exc}")
 

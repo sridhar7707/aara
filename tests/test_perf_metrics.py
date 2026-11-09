@@ -43,3 +43,23 @@ def test_too_few_days_returns_none():
 def test_flat_series_returns_none_not_a_division_by_zero():
     rows = [(f"2026-09-{d:02d}T16:00", 100.0) for d in range(1, 31)]
     assert annualised_sharpe(rows, min_days=5) is None
+
+
+def test_sortino_uses_target_downside_over_all_observations():
+    rets = [0.02, -0.01, 0.03, -0.02, 0.01, -0.03, 0.02, 0.01, -0.01, 0.04]
+    rows = []
+    value = 100.0
+    for i, r in enumerate(rets):
+        value *= 1 + r
+        rows.append((f"2026-09-{i + 1:02d}T16:00", value))
+    # Build the expected figure directly from the same daily returns.
+    from analytics.perf_metrics import daily_returns
+    got = daily_returns(rows)
+    mean = sum(got) / len(got)
+    dvar = sum(r * r for r in got if r < 0) / len(got)
+    assert annualised_sortino(rows, min_days=5) == pytest.approx(mean / math.sqrt(dvar) * math.sqrt(252))
+
+
+def test_none_timestamp_does_not_crash_the_sort():
+    rows = [(None, 100.0), ("2026-09-01T16:00", 100.0), ("2026-09-02T16:00", 101.0)]
+    assert last_value_per_day(rows) == [100.0, 101.0]

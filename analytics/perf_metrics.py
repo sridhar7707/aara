@@ -16,9 +16,8 @@ TRADING_DAYS = 252
 def last_value_per_day(rows: list[tuple[str, float]]) -> list[float]:
     """Take the last value of each calendar day (rows are (timestamp, value))."""
     by_day: OrderedDict[str, float] = OrderedDict()
-    for ts, value in sorted(rows, key=lambda r: r[0]):
-        if ts is None or value is None:
-            continue
+    kept = [(ts, v) for ts, v in rows if ts is not None and v is not None]
+    for ts, value in sorted(kept, key=lambda r: r[0]):
         by_day[str(ts)[:10]] = float(value)
     return list(by_day.values())
 
@@ -53,7 +52,7 @@ def annualised_sortino(rows: list[tuple[str, float]], min_days: int = 20) -> flo
     downside = [r for r in rets if r < 0]
     if len(downside) < 2:
         return None
-    dvar = sum(r * r for r in downside) / len(downside)
+    dvar = sum(r * r for r in downside) / len(rets)  # target-downside form: all observations
     dsd = math.sqrt(dvar)
     if dsd == 0:
         return None

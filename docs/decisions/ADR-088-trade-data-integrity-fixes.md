@@ -65,3 +65,20 @@ The revised writer recorded the account value on every cycle, including sanity-b
 - **Dashboard Sharpe and Sortino are daily-return figures.** `analytics/perf_metrics.py` resamples to one value per day and annualises with sqrt(252). The old per-cycle figure is superseded and is not shown as current. Tests: `tests/test_perf_metrics.py`.
 - **Journal gap accepted and disclosed; no backfill.** See the decisions record in the private folder.
 - **Findings 2 and 3 remain open** (the unflagged database-count fallback and the outage gap in the snapshot series). They are recorded for the next change.
+
+## 9. Correction and fixes after the second quant review, 2026-11-09
+
+**Corrections to section 8:**
+- The claim that "a blocked reading never becomes the baseline" holds for the sanity check and the trusted anchors. It does **not** hold for the automatic daily and weekly starts: `prepare_cycle_context` calls `reset_daily(real_portfolio_value)` on every cycle, including sanity-blocked ones. This predates the revision and is **open**.
+- The capital pool no longer reads `first_trusted_value`. Reading it would have moved the reinvest base from the earliest snapshot to the deploy-day equity, which can shrink tradeable capital toward zero when reinvest is on. The pool now uses the earliest snapshot again, as before.
+
+**Fixed in this round:**
+- Sortino divides by all observations (target-downside form), not only the negative ones.
+- The Sharpe and Sortino gate counts daily returns (at least 20), not per-cycle rows.
+- Timestamps that are None are filtered before sorting.
+
+**Still open:**
+- Automatic daily and weekly starts accept blocked readings (see the correction above). Fix: skip the start-value writes in `reset_daily` when the sanity check blocks, and restore the trusted value to the week start.
+- The first trusted reading is not cross-checked. Fix: require two agreeing passing readings (within about 1%) before the first anchor is written.
+- The weekly anchor is the first trusted reading of the week, so a late first reading hides Monday's move. Fix: use the last trusted value of the prior ISO week as the week start.
+- The models scorecard computes its own daily Sharpe on trades only. Fix: route it through `analytics/perf_metrics.py`.
