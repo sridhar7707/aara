@@ -1,5 +1,6 @@
 import os
 import threading
+
 from loguru import logger
 
 # Catch PRAW's rate-limit exception without requiring praw to be installed at import time
@@ -25,7 +26,7 @@ _reddit_lock = threading.Lock()
 
 def _get_reddit():
     with _reddit_lock:
-        global _reddit, _reddit_auth_failed
+        global _reddit
         if _reddit_auth_failed:
             return None
         if _reddit is None and REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET:
@@ -36,7 +37,7 @@ def _get_reddit():
                     client_secret=REDDIT_CLIENT_SECRET,
                     user_agent=REDDIT_USER_AGENT,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — PRAW init must never crash a trading cycle
                 logger.warning(f"PRAW initialization failed: {e}")
         return _reddit
 
@@ -61,7 +62,7 @@ def get_wsb_sentiment(ticker: str) -> dict:
         logger.info(f"Reddit {ticker}: mentions={len(titles)}, sentiment={sentiment:.2f}")
         return {"mentions": len(titles), "sentiment": sentiment}
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — sentiment is best-effort; neutral fallback, never a crash
         _emsg = str(e).lower()
         if _RedditRateLimit and isinstance(e, _RedditRateLimit):
             logger.warning(
