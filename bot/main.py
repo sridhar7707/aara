@@ -187,7 +187,7 @@ def run(
     # Single get_account() call — serves both portfolio-value check and compliance block below.
     try:
         acct = client.get_account()
-    except Exception as _ae:
+    except Exception as _ae:  # noqa: BLE001 -- fail-soft: Alpaca account read; alert and abort this cycle
         logger.error(f"Alpaca get_account() failed — aborting cycle: {_ae}")
         tg._send("🚨 Alpaca get_account() failed — check API credentials. Bot cycle aborted.")
         con.close()
@@ -263,7 +263,7 @@ def run(
         if pdt_exempt:
             logger.info(f"Account equity ${pdt_equity:,.2f} ≥ $25,000 — PDT day-trade limits waived.")
         logger.info(f"Account standing verified — status=ACTIVE, equity=${pdt_equity:,.2f}")
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 -- fail-soft: compliance check is advisory; record DEGRADED and continue
         logger.warning(f"Account compliance check failed: {e}")
         record_data_quality_safe(trust_conn, "alpaca_account", "DEGRADED", f"compliance check raised: {e}")
         pdt_exempt = False
@@ -384,7 +384,7 @@ def run(
                                             price=current_price)
                     _log_recommendation(con, symbol, action_str, float(_ens_conf),
                                         price=current_price)
-                except Exception as _re:
+                except Exception as _re:  # noqa: BLE001 -- fail-soft: recommendation logging must not block the signal path
                     logger.debug(f"save_recommendation({symbol}): {_re}")
 
             # ── High-confidence signal gate (user-facing signals) ─────────────
@@ -453,7 +453,7 @@ def run(
 
             _sym_errors.pop(symbol, None)   # reset failure streak on success
 
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 -- fail-soft: one symbol's failure must not stop the other symbols
             logger.error(f"Error processing {symbol}: {e}")
             _sym_errors[symbol] = _sym_errors.get(symbol, 0) + 1
             if _sym_errors[symbol] >= 3:
@@ -478,7 +478,7 @@ def run(
                         for sym in active_symbols
                         if sym in bars_map and not bars_map[sym].bars_5m.empty}
         update_signal_outcomes(con, _live_prices)
-    except Exception as _se:
+    except Exception as _se:  # noqa: BLE001 -- fail-soft: outcome update is advisory; never blocks sizing or the cycle
         logger.debug(f"update_signal_outcomes: {_se}")
 
     _sizing_base = _capital_pool.tradeable_cash if _capital_pool else portfolio_value
