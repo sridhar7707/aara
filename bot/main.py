@@ -492,31 +492,6 @@ def run(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--mode",    default="paper", choices=["paper", "live"])
-    parser.add_argument("--summary", action="store_true",
-                        help="Send end-of-day Telegram summary and exit")
-    parser.add_argument("--loop",    action="store_true",
-                        help="Long-running mode: load models once, loop until market close")
-    parser.add_argument("--reset-daily-start", action="store_true",
-                        help="Clear stale daily_start anchor so Day P&L resets on next cycle")
-    parser.add_argument("--clean-db", action="store_true",
-                        help="Wipe all bot data for a clean start (reset Alpaca paper account first)")
-    args = parser.parse_args()
-    try:
-        if args.clean_db:
-            _do_clean_db()
-        elif args.reset_daily_start:
-            _do_reset_daily_start()
-        elif args.summary:
-            end_of_day_summary()
-        elif args.loop:
-            run_loop(mode=args.mode)
-        else:
-            run(mode=args.mode)
-    except Exception:
-        tb = traceback.format_exc()
-        logger.error("Bot crashed:\n" + tb)
-        sys.stdout.write(f"::error title=Trading Bot Crash::{tb.splitlines()[-1]} — see step log\n")
-        sys.stdout.flush()
-        sys.exit(1)
+    # The CLI lives in bot/_main_cli.py (moved to keep this file under 500 lines).
+    from bot._main_cli import main
+    main()
