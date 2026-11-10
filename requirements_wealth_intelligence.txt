@@ -50,5 +50,5 @@ starlette==0.52.1
 # unrelated to this addition, not introduced or fixed by it.
 supabase-auth==2.31.0
 
-# spaces: the ZeroGPU startup probe in main.py imports it (same pin as requirements.txt).
-spaces==0.46.0
+# spaces: the ZeroGPU startup probe in main.py imports it. Unpinned, as in the trading file: the Space base image installs its own spaces build, and a pin here conflicts with it.
+spaces
