@@ -1,5 +1,5 @@
 """Regression guard: the wealth Space runs on ZeroGPU, which will not start a Space that has no
-@spaces.GPU function at startup. The probe and the `spaces` pin must stay together.
+@spaces.GPU function at startup. The probe and the `spaces` requirement must stay together.
 """
 from pathlib import Path
 
@@ -13,6 +13,9 @@ def test_wealth_entry_point_declares_a_zero_gpu_startup_probe():
     assert "def _zero_gpu_startup_probe" in source
 
 
-def test_wealth_requirements_pin_the_spaces_package():
-    requirements = (ROOT / "requirements_wealth_intelligence.txt").read_text(encoding="utf-8")
-    assert "spaces==" in requirements
+def test_wealth_requirements_list_spaces_unpinned():
+    # Unpinned on purpose: the Space base image installs its own spaces build, and a version
+    # pin here made the Docker build fail with a resolver conflict.
+    lines = [line.strip() for line in
+             (ROOT / "requirements_wealth_intelligence.txt").read_text(encoding="utf-8").splitlines()]
+    assert "spaces" in lines
