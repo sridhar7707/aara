@@ -1,6 +1,15 @@
+import re
 from dataclasses import replace
 
 import gradio as gr
+
+# Embedded images (the shell logo) are base64 text whose random letter runs can contain
+# "AAPL"; the absence check reads only the words a person would see.
+_EMBEDDED_IMAGE = re.compile(r"data:[a-z/+.-]+;base64,[A-Za-z0-9+/=]+")
+
+
+def _without_embedded_images(text: str) -> str:
+    return _EMBEDDED_IMAGE.sub("", text)
 
 from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.projections.calibration_band import CalibrationBand
@@ -1385,10 +1394,10 @@ def test_ledger_content_reflects_only_the_original_build_time_screen():
 
     demo = ui.build()
 
-    combined = "\n".join(
+    combined = _without_embedded_images("\n".join(
         b.value for b in demo.blocks.values()
         if isinstance(b, gr.HTML) and isinstance(getattr(b, "value", None), str)
-    )
+    ))
     # Only the __init__-time (unavailable) screen's ledger state is
     # present -- the second screen's real candidate ("AAPL") never
     # appears, even though the provider is capable of returning it.
@@ -1399,10 +1408,10 @@ def test_ledger_content_reflects_only_the_original_build_time_screen():
     # does not touch the ledger's own already-rendered content.
     ui._render()
     assert len(calls) == 2  # the explicit _render() call above
-    combined_after_render = "\n".join(
+    combined_after_render = _without_embedded_images("\n".join(
         b.value for b in demo.blocks.values()
         if isinstance(b, gr.HTML) and isinstance(getattr(b, "value", None), str)
-    )
+    ))
     assert combined_after_render == combined  # unchanged: build()'s own tree
 
 

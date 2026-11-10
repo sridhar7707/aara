@@ -1,6 +1,15 @@
 import pathlib
+import re
 
 import gradio as gr
+
+# Embedded images (the shell logo) are base64 text; random letter runs inside them contain
+# words like "alert" and "AAPL". Absence checks look at the words a person would read.
+_EMBEDDED_IMAGE = re.compile(r"data:[a-z/+.-]+;base64,[A-Za-z0-9+/=]+")
+
+
+def _without_embedded_images(text: str) -> str:
+    return _EMBEDDED_IMAGE.sub("", text)
 
 from applications.platform.integrations import IntegrationHealth
 from applications.trading_intelligence.ui.risk_intelligence.gradio_view import (
@@ -1086,7 +1095,7 @@ def test_concentration_never_implies_a_risk_violation_or_trading_signal():
     screen = RiskScreen(concentration_holdings=holdings)
     demo = RiskIntelligenceUI(screen=screen).build()
 
-    lowered = "\n".join(_html_values(demo)).lower()
+    lowered = _without_embedded_images("\n".join(_html_values(demo))).lower()
     assert "not a risk violation" in lowered  # the honest disclaimer is present
     for forbidden in (
         "alert", "warning:", "exceeds limit", "is a violation", "in breach",
@@ -1174,7 +1183,7 @@ def test_concentration_limit_note_never_uses_alarmist_wording():
     screen = RiskScreen(concentration_holdings=holdings)
     demo = RiskIntelligenceUI(screen=screen).build()
 
-    lowered = "\n".join(_html_values(demo)).lower()
+    lowered = _without_embedded_images("\n".join(_html_values(demo))).lower()
     assert "ri-concentration-limit-note" in lowered
     for forbidden in (
         "alert", "warning:", "exceeds limit", "is a violation", "in breach",
@@ -1214,7 +1223,7 @@ def test_risk_parameters_section_identical_across_different_screens():
 def test_risk_parameters_never_implies_the_ui_enforces_them():
     demo = RiskIntelligenceUI().build()
 
-    lowered = "\n".join(_html_values(demo)).lower()
+    lowered = _without_embedded_images("\n".join(_html_values(demo))).lower()
     assert "current configuration" in lowered
     for forbidden in ("enforced by this", "this system blocks", "guaranteed", "will prevent"):
         assert forbidden not in lowered

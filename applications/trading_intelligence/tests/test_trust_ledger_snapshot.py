@@ -282,7 +282,8 @@ def test_abandoned_slow_worker_cannot_leave_a_partial_snapshot(
     source = tmp_path / "hf_cache" / "trust_ledger.db"
 
     def _slow(**kwargs):
-        release.wait(timeout=5)
+        # Stay blocked until the test releases us; a short cap raced the "nothing published" check.
+        release.wait(timeout=60)
         source.parent.mkdir(parents=True, exist_ok=True)
         source.write_bytes(_SQLITE_BYTES)
         return str(source)
