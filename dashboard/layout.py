@@ -150,6 +150,12 @@ footer {{ display: none !important; }}
   caret-color: {PRIMARY} !important;
   padding: 10px 12px !important;
 }}
+/* Number boxes beside sliders (Settings) render their value in the default text colour on
+   Gradio's light input background, so the digits were white on white. Use the dark surface. */
+input[type="number"] {{
+  background: {SURFACE2} !important;
+  color: {TEXT1} !important;
+}}
 /* The currently-selected token chip shown when value is set */
 .sym-selector .token,
 .sym-selector .token span,
