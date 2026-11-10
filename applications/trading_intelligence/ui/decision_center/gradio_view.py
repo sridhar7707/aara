@@ -361,12 +361,11 @@ def _load_shell_logo_data_uri() -> str:
 # Gradio version bump):
 #   1. `.aara-decisions-table` -- our own elem_classes anchor, stable by
 #      definition (we control it).
-#   2. A real data cell is a `<td>` whose parent `<tr>` carries
-#      `slot="tbody"` -- this is how Table.svelte's named-slot forwarding
-#      marks genuine data rows, distinguishing them from its own hidden
-#      column-width-measurement row (which carries no such attribute). This
-#      is the one Gradio-internal implementation detail the bridge leans
-#      on; no `svelte-*` hashed class is used anywhere in it.
+#   2. A real data cell is a `<td>` whose parent `<tr>` sits directly in a
+#      `<tbody>` and is rendered (non-zero height). The earlier `slot="tbody"`
+#      marker is not emitted by Gradio 4.44.1 or 5.50 (checked in both
+#      builds), so the bridge does not use it. No `svelte-*` hashed class is
+#      used anywhere in it.
 #   3. Clicking that `<td>` (`cell.click()`) drives the same
 #      `handle_cell_click` -> `selected = [i, j]` -> `dispatch("select",
 #      ...)` path a real pointer click does.
@@ -376,20 +375,89 @@ def _load_shell_logo_data_uri() -> str:
 _KEYBOARD_SELECTION_BRIDGE_JS = """
 <script>
 (function () {
+  // A data row is a <tr> directly inside the table body that is rendered (non-zero height).
+  // The `slot="tbody"` marker this bridge used to test is not present on Gradio 4.44.1 or 5.50,
+  // so it never matched and the Enter/Space path did nothing on either build.
+  // Gradio's hidden column-measurement row is aria-hidden and is excluded, so row indexes
+  // stay stable across re-renders.
+  function isDataRow(row) {
+    return !!row && row.tagName === "TR" && !!row.parentElement &&
+      row.parentElement.tagName === "TBODY" && row.getBoundingClientRect().height > 0 &&
+      !row.closest('[aria-hidden="true"]');
+  }
   function findDecisionCell(target) {
     var cell = target && target.closest ? target.closest("td") : null;
     if (!cell || !cell.closest(".aara-decisions-table")) return null;
-    var row = cell.parentElement;
-    return row && row.getAttribute("slot") === "tbody" ? cell : null;
+    return isDataRow(cell.parentElement) ? cell : null;
   }
+  // Arrow Up/Down move to the same column in the adjacent data row and select it, so the
+  // keyboard path matches a mouse click (Gradio's own handle_cell_click runs for both).
+  // A bare element.click() does not drive Gradio's cell selection; the pointer and mouse
+  // sequence a real click produces does. Send that sequence to the cell's own element.
+  function pressCell(el) {
+    ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(function (type) {
+      el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, button: 0 }));
+    });
+  }
+  // Selecting re-renders the table, which drops focus from the cell. Put focus back on the
+  // same data row and column once the re-render has settled, so arrow keys keep working.
+  // The selection round-trips to the server, and the table is rebuilt when it returns, so
+  // retry at a few delays until the same row and column hold focus again.
+  // A generation counter stops a late retry from an earlier key press taking focus back.
+  var navGeneration = 0;
+  function refocusDecisionCell(grid, rowIndex, colIndex) {
+    navGeneration += 1;
+    var generation = navGeneration;
+    [80, 300, 700, 1200, 2000].forEach(function (delay) {
+      setTimeout(function () {
+        if (generation !== navGeneration) return;
+        var rows = Array.prototype.filter.call(grid.querySelectorAll("tbody tr"), isDataRow);
+        var row = rows[rowIndex];
+        var target = row ? row.children[colIndex] : null;
+        var focusable = target ? (target.querySelector("span[role=button], button") || target) : null;
+        if (focusable && document.activeElement !== focusable) focusable.focus();
+      }, delay);
+    });
+  }
+  // Gradio 5's virtual table renders each visible row in its own <tbody>, so the data rows
+  // are collected across the whole table, not from one tbody's children.
+  function moveDecisionCell(cell, delta) {
+    var row = cell.parentElement;
+    var grid = cell.closest(".aara-decisions-table");
+    var rows = Array.prototype.filter.call(grid.querySelectorAll("tbody tr"), isDataRow);
+    var next = rows[rows.indexOf(row) + delta];
+    var target = next ? next.children[cell.cellIndex] : null;
+    if (!target) return false;
+    // Gradio's cell click handler sits on the inner span[role=button], not the <td>.
+    var focusable = target.querySelector("span[role=button], button") || target;
+    pressCell(focusable);
+    focusable.focus();
+    refocusDecisionCell(grid, rows.indexOf(next), cell.cellIndex);
+    return true;
+  }
+  // Capture phase: once a cell is selected, Gradio's own table handler takes the arrow keys and
+  // calls preventDefault(), so a bubble-phase listener would never see them.
   document.addEventListener("keydown", function (event) {
     if (event.defaultPrevented || event.repeat) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      var moveCell = findDecisionCell(event.target);
+      if (!moveCell) return;
+      if (moveDecisionCell(moveCell, event.key === "ArrowDown" ? 1 : -1)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      return;
+    }
     if (event.key !== "Enter" && event.key !== " ") return;
     var cell = findDecisionCell(event.target);
     if (!cell) return;
     event.preventDefault();
-    cell.click();
-  });
+    var activated = event.target.closest("[role=button]") || cell.querySelector("span[role=button], button") || cell;
+    pressCell(activated);
+    var gridRows = Array.prototype.filter.call(
+      cell.closest(".aara-decisions-table").querySelectorAll("tbody tr"), isDataRow);
+    refocusDecisionCell(cell.closest(".aara-decisions-table"), gridRows.indexOf(cell.parentElement), cell.cellIndex);
+  }, true);
 })();
 </script>
 """
