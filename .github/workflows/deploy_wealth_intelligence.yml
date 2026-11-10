@@ -12,9 +12,9 @@ name: Deploy Wealth Intelligence to HuggingFace Spaces
 # imply a coverage guarantee that doesn't exist yet. This workflow instead
 # only triggers on changes to the exact paths it deploys.
 #
-# Gradio 5.50.0 and Python 3.14, matching Trading Intelligence's Space. The Space
-# metadata below was on Python 3.9, which Gradio 5 does not support, so both move
-# together. The wealth suite passes on this combination (see requirements_wealth_intelligence.txt).
+# Gradio 5.50.0 on Python 3.10, which is the runtime Hugging Face actually uses for
+# every Space (the README python_version field is not honoured). The metadata below
+# was 3.9, which Gradio 5 does not support. The wealth suite passes on 3.10 with this pin.
 on:
   push:
     branches: [main]
@@ -34,7 +34,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.14'
+          python-version: '3.10'
 
       - name: Install huggingface-hub
         run: pip install "huggingface-hub>=0.20.0"
@@ -131,7 +131,7 @@ jobs:
               "colorTo: blue\n"
               "sdk: gradio\n"
               "sdk_version: 5.50.0\n"
-              "python_version: \"3.14\"\n"
+              "python_version: \"3.10\"\n"
               "app_file: app.py\n"
               "pinned: false\n"
               "---\n"
