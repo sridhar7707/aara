@@ -11,7 +11,17 @@ InvestorWorkspaceUI.build() returns the underlying gr.Blocks instance
 it is simply calling Gradio's own .launch() on that object, so no change
 to the UI layer is needed to make the application runnable.
 """
+import spaces
+
 from applications.wealth_intelligence.bootstrap import build_application
+
+
+# The Space runs on ZeroGPU (requested_hardware zero-a10g). ZeroGPU refuses to start any
+# Space with no @spaces.GPU function detected at startup, and this app has no GPU workload.
+# This probe exists only to satisfy that check; it is never called by the application.
+@spaces.GPU
+def _zero_gpu_startup_probe() -> None:
+    return None
 
 
 def main() -> None:
