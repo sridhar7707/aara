@@ -2,12 +2,10 @@
 # ruff: noqa: F401 -- facade: tests monkeypatch and import these names through bot.main
 from __future__ import annotations
 
-import argparse
 import os
 import sqlite3
 import sys
 import time
-import traceback
 from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import date, datetime, timedelta, timezone
@@ -187,7 +185,7 @@ def run(
     # Single get_account() call — serves both portfolio-value check and compliance block below.
     try:
         acct = client.get_account()
-    except Exception as _ae:  # noqa: BLE001 -- fail-soft: Alpaca account read; alert and abort this cycle
+    except Exception as _ae:  # noqa: BLE001 -- fail-closed: Alpaca account read failed; alert and abort this cycle
         logger.error(f"Alpaca get_account() failed — aborting cycle: {_ae}")
         tg._send("🚨 Alpaca get_account() failed — check API credentials. Bot cycle aborted.")
         con.close()
@@ -479,7 +477,7 @@ def run(
                         if sym in bars_map and not bars_map[sym].bars_5m.empty}
         update_signal_outcomes(con, _live_prices)
     except Exception as _se:  # noqa: BLE001 -- fail-soft: outcome update is advisory; never blocks sizing or the cycle
-        logger.debug(f"update_signal_outcomes: {_se}")
+        logger.warning(f"update_signal_outcomes failed; outcomes stay pending: {_se}")
 
     _sizing_base = _capital_pool.tradeable_cash if _capital_pool else portfolio_value
     record_risk_evaluation_safe(con, trust_conn, risk, portfolio_value, _sizing_base, _cycle_deployed_notional)
