@@ -1,4 +1,5 @@
 """Main trading loop — runs every 5 minutes via GitHub Actions."""
+# ruff: noqa: F401 -- facade: tests monkeypatch and import these names through bot.main
 from __future__ import annotations
 
 import argparse
