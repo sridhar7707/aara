@@ -1,5 +1,6 @@
 import os
 import threading
+
 from loguru import logger
 
 # Catch PRAW's rate-limit exception without requiring praw to be installed at import time
@@ -11,6 +12,9 @@ except ImportError:
 REDDIT_CLIENT_ID     = os.getenv("REDDIT_CLIENT_ID", "")
 REDDIT_CLIENT_SECRET = os.getenv("REDDIT_CLIENT_SECRET", "")
 REDDIT_USER_AGENT    = os.getenv("REDDIT_USER_AGENT", "ai-trading-bot/1.0")
+# ADR-094 (decided 2026-11-09): Reddit sentiment is paused by default until counsel confirms
+# the use. Set REDDIT_SENTIMENT_ENABLED=1 only after that.
+REDDIT_SENTIMENT_ENABLED = os.getenv("REDDIT_SENTIMENT_ENABLED", "0") == "1"
 
 # Module-level singleton — one OAuth session per process lifetime, not per call.
 _reddit = None
@@ -22,7 +26,7 @@ _reddit_lock = threading.Lock()
 
 def _get_reddit():
     with _reddit_lock:
-        global _reddit, _reddit_auth_failed
+        global _reddit
         if _reddit_auth_failed:
             return None
         if _reddit is None and REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET:
@@ -33,7 +37,7 @@ def _get_reddit():
                     client_secret=REDDIT_CLIENT_SECRET,
                     user_agent=REDDIT_USER_AGENT,
                 )
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 — PRAW init must never crash a trading cycle
                 logger.warning(f"PRAW initialization failed: {e}")
         return _reddit
 
@@ -44,6 +48,8 @@ def get_wsb_sentiment(ticker: str) -> dict:
     Returns {"mentions": 0, "sentiment": 0.0} if Reddit credentials are not configured
     or if credentials are invalid (401 circuit breaker is open).
     """
+    if not REDDIT_SENTIMENT_ENABLED:
+        return {"mentions": 0, "sentiment": 0.0}
     reddit = _get_reddit()
     if reddit is None:
         return {"mentions": 0, "sentiment": 0.0}
@@ -56,7 +62,7 @@ def get_wsb_sentiment(ticker: str) -> dict:
         logger.info(f"Reddit {ticker}: mentions={len(titles)}, sentiment={sentiment:.2f}")
         return {"mentions": len(titles), "sentiment": sentiment}
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — sentiment is best-effort; neutral fallback, never a crash
         _emsg = str(e).lower()
         if _RedditRateLimit and isinstance(e, _RedditRateLimit):
             logger.warning(

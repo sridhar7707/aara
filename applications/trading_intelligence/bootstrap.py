@@ -671,6 +671,15 @@ _INNER_NAV_LINK_JS = """
     var tabButton = findRealTab(label);
     if (tabButton) {
       tabButton.click();
+      return;
+    }
+    // Gradio 5: the tab bar is hidden by _TABBED_LAYOUT_CSS, so every tab overflows into the
+    // "..." dropdown and only the selected tab keeps role="tab". Select the item in that dropdown.
+    var overflowItem = Array.from(document.querySelectorAll('.overflow-dropdown button')).find(
+      function (btn) { return btn.textContent.trim() === label; }
+    );
+    if (overflowItem) {
+      overflowItem.click();
     }
   }
 

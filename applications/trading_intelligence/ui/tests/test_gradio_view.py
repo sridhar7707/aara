@@ -4277,7 +4277,8 @@ def test_theme_decisions_table_uses_fixed_layout_with_all_six_columns_sized():
     depends on (nth-child(1) is Decision ID, hidden -- excluded from this
     count on purpose)."""
     assert "table-layout: fixed !important;" in CSS
-    cell_width_percentages = [0, 12, 12, 19, 17, 22, 18]
+    # Rebalanced so Gradio 5's header buttons (padding + sort icon) fit without mid-word breaks.
+    cell_width_percentages = [0, 14, 13, 17, 18, 19, 19]
     for index, percentage in enumerate(cell_width_percentages):
         assert f"--cell-width-{index}: {percentage}% !important;" in CSS
     assert sum(cell_width_percentages) == 100

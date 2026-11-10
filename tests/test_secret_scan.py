@@ -77,3 +77,11 @@ def test_scan_error_fails_closed(tmp_path):
     done = _scan(not_a_repo)
     assert done.returncode == 1
     assert "Commit blocked" in done.stderr
+
+
+def test_words_containing_sk_dash_are_not_flagged(repo):
+    # Regression: an unanchored "sk-" pattern blocked ordinary words such as "risk-management-...".
+    _stage(repo, "policy.txt", "the risk-management-policy-approval-threshold value\n"
+                               "from desk-quantitative-signals-engine import x\n")
+    done = _scan(repo)
+    assert done.returncode == 0, done.stderr

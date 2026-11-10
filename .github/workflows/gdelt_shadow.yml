@@ -1,0 +1,50 @@
+name: GDELT Shadow Collection
+
+# ADR-090: shadow-only daily collection of GDELT GKG tone for the seven covered names.
+# Nothing here feeds a trading decision. Triggered by the same external cron service the
+# other workflows use (workflow_dispatch), after the previous day's GKG files are published.
+
+on:
+  schedule:
+    # Daily at 06:30 UTC, after the previous day's GKG files are published (ADR-089, decided 2026-11-09).
+    - cron: '30 6 * * *'
+  workflow_dispatch:
+    inputs:
+      files:
+        description: "Number of most recent 15-minute GKG files (96 = one day)"
+        required: false
+        default: "96"
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - name: Collect GKG tone (shadow)
+        env:
+          FILES: ${{ inputs.files || '96' }}
+        run: |
+          case "$FILES" in
+            ''|*[!0-9]*) echo "files must be a whole number"; exit 1 ;;
+          esac
+          python scripts/gdelt_shadow_run.py --files "$FILES"
+
+      - name: Keep the shadow record (90 days)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gdelt-shadow-${{ github.run_id }}
+          path: logs/gdelt_shadow.jsonl
+          retention-days: 90
+          if-no-files-found: warn

@@ -18,7 +18,7 @@ PATTERNS = [
     ("AWS access key", re.compile(r"AKIA[0-9A-Z]{16}")),
     ("GitHub token", re.compile(r"gh[pousr]_[A-Za-z0-9]{36,}")),
     ("Hugging Face token", re.compile(r"hf_[A-Za-z0-9]{30,}")),
-    ("API secret key", re.compile(r"sk-[A-Za-z0-9_-]{20,}")),
+    ("API secret key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}")),  # \b: "risk-management..." is not a key
     ("private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("hard-coded secret", re.compile(r"""(?i)(api[_-]?key|secret|token|password)\s*[:=]\s*["'][^"'\s]{16,}["']""")),
 ]

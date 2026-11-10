@@ -961,6 +961,14 @@ _RISK_REFERENCE_NAV_LINK_JS = f"""
     var tabButton = findRealTab();
     if (tabButton) {{
       tabButton.click();
+      return;
+    }}
+    // Gradio 5 overflows every hidden tab into the "..." dropdown (see bootstrap._TABBED_LAYOUT_CSS).
+    var overflowItem = Array.from(document.querySelectorAll('.overflow-dropdown button')).find(
+      function (btn) {{ return btn.textContent.trim() === TARGET_TAB_LABEL; }}
+    );
+    if (overflowItem) {{
+      overflowItem.click();
     }}
   }}
 

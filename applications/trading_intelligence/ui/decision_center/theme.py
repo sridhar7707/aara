@@ -463,14 +463,30 @@ footer { display: none !important; }
    two lines instead, below, rather than trying to fit either on one line. */
 .aara-decisions-table .table-wrap {
   --cell-width-0: 0% !important;
-  --cell-width-1: 12% !important;
-  --cell-width-2: 12% !important;
-  --cell-width-3: 19% !important;
-  --cell-width-4: 17% !important;
-  --cell-width-5: 22% !important;
-  --cell-width-6: 18% !important;
+  --cell-width-1: 14% !important;
+  --cell-width-2: 13% !important;
+  --cell-width-3: 17% !important;
+  --cell-width-4: 18% !important;
+  --cell-width-5: 19% !important;
+  --cell-width-6: 19% !important;
+}
+/* Gradio 5 ellipsizes header text ("Symbol" -> "Sym...") inside these fixed-width
+   columns; 4.44.1 wraps it. Wrap the headers and drop the ellipsis, so both builds
+   show full header labels. Header cells only -- body cells are unchanged. */
+.aara-decisions-table table thead th .header-button,
+.aara-decisions-table table thead th .header-button {
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+.aara-decisions-table table thead th .header-button span {
+  white-space: normal !important;
+  text-overflow: clip !important;
+  overflow: visible !important;
+  width: 100% !important;
 }
 .aara-decisions-table table thead th {
+  white-space: normal !important;
+  text-overflow: clip !important;
   padding: 6px 4px !important;
   border: none !important;
   border-bottom: 1px solid var(--color-border-subtle) !important;

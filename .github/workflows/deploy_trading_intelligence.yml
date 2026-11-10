@@ -12,12 +12,10 @@ name: Deploy Trading Intelligence to HuggingFace Spaces
 # imply a coverage guarantee that doesn't exist yet. This workflow instead
 # only triggers on changes to the exact paths it deploys.
 #
-# Gradio pin: 4.44.1, not the 5.9.0 used by dashboard/'s Space -- kept
-# intentionally for applications/trading_intelligence/'s Decision Center UI,
-# whose documented Gradio-4.44.1-specific keyboard-selection behavior has only
-# been verified against that version. Gradio 4.44.1 supports Python >=3.8, so
-# it runs unchanged on newer interpreters. Space python_version is 3.11, which
-# matches the interpreter ci.yml uses to run the Trading Intelligence tests.
+# Gradio pin: 5.50.0 (upgraded from 4.44.1, the same major as dashboard/'s Space
+# is 5.9.0). Runs on Gradio 5.50.0 and Python 3.14, upgraded together; see
+# requirements_trading_intelligence.txt for what is verified and what still gates
+# the switch. Space python_version is 3.14, matching the interpreter CI uses.
 on:
   push:
     branches: [main]
@@ -38,7 +36,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.14'
 
       - name: Install huggingface-hub
         run: pip install "huggingface-hub>=0.20.0"
@@ -194,8 +192,8 @@ jobs:
               "colorFrom: indigo\n"
               "colorTo: blue\n"
               "sdk: gradio\n"
-              "sdk_version: 4.44.1\n"
-              "python_version: \"3.11\"\n"
+              "sdk_version: 5.50.0\n"
+              "python_version: \"3.14\"\n"
               "app_file: app.py\n"
               "pinned: false\n"
               "---\n"
