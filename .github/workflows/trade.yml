@@ -231,11 +231,11 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_REPO_ID: ${{ secrets.HF_DB_REPO_ID }}
-        run: python bot/main.py --clean-db
+        run: python -m bot._main_cli --clean-db
 
       - name: Reset Day P&L baseline (if requested)
         if: github.event_name == 'workflow_dispatch' && github.event.inputs.reset_daily_start == 'true' && github.event.inputs.clean_start != 'true'
-        run: python bot/main.py --reset-daily-start
+        run: python -m bot._main_cli --reset-daily-start
 
       - name: Run trading loop (market open to close)
         env:
@@ -252,7 +252,7 @@ jobs:
           TRADING_MODE: paper
           PAPER_SIM_CAPITAL: "0"
           PYTHONUNBUFFERED: "1"
-        run: python bot/main.py --mode paper --loop
+        run: python -m bot._main_cli --mode paper --loop
 
       - name: Alert on workflow failure
         if: failure()
@@ -287,5 +287,5 @@ jobs:
           FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
           TRADING_MODE: paper
           PYTHONUNBUFFERED: "1"
-        run: python bot/main.py --summary
+        run: python -m bot._main_cli --summary
 
